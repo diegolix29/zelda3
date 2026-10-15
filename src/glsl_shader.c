@@ -1,11 +1,41 @@
 // This file is heavily influenced by Snes9x
 #include "third_party/gl_core/gl_core_3_1.h"
 #include "glsl_shader.h"
+#include "hd_fx.h"
 #include "util.h"
 #include "config.h"
 #include <stdio.h>
 #include <assert.h>
 #include <string.h>
+// Lo scroll dei BG serve per ancorare al mondo gli effetti degli shader.
+// Non si puo' includere "variables.h" qui: definisce le macro R12 e R14, che
+// collidono con i campi omonimi di _JUMP_BUFFER in <setjmp.h> e fanno fallire
+// la compilazione con MSVC. Bastano le poche voci qui sotto.
+extern uint8 g_ram[131072];
+#define ZELDA_BG2HOFS (*(uint16 *)(g_ram + 0xE2))
+#define ZELDA_BG2VOFS (*(uint16 *)(g_ram + 0xE8))
+// Modulo di gioco corrente: 14 = inventario, 0-5 = intro e selezione file.
+// Serve allo shader per spegnersi nei menu.
+#define ZELDA_MAIN_MODULE (*(uint8 *)(g_ram + 0x10))
+#define ZELDA_SUBMODULE (*(uint8 *)(g_ram + 0x11))
+#define ZELDA_SAVED_MODULE_FOR_MENU (*(uint8 *)(g_ram + 0x10C))
+// Spostamento del fondale nel frame disegnato (zelda_rtl.c)
+extern int g_render_bias_x, g_render_bias_y;
+
+// Modulo da comunicare allo shader. Inventario (sottomodulo 1), dialoghi (2)
+// e menu salva/esci (11) si aprono sopra il gioco: per lo shader valgono come
+// il modulo di gioco sottostante, cosi' l'effetto resta sul mondo e l'HUD/menu
+// (BG3) resta nitido grazie alla maschera dei layer.
+static int ZeldaModuleForShader() {
+  int m = ZELDA_MAIN_MODULE;
+  if (m == 14) {
+    int sub = ZELDA_SUBMODULE;
+    if (sub == 1 || sub == 2 || sub == 11)
+      m = ZELDA_SAVED_MODULE_FOR_MENU;
+  }
+  return m;
+}
+
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_NO_THREAD_LOCALS
 #define STBI_ONLY_PNG
@@ -327,6 +357,9 @@ static void GlslShader_GetUniforms(GlslShader *gs) {
     p->unif.OutputSize = glGetUniformLocation(program, "OutputSize");
     p->unif.FrameCount = glGetUniformLocation(program, "FrameCount");
     p->unif.FrameDirection = glGetUniformLocation(program, "FrameDirection");
+    p->unif.ScrollOffset = glGetUniformLocation(program, "ScrollOffset");
+    p->unif.GameModule = glGetUniformLocation(program, "GameModule");
+    p->unif.Sunny = glGetUniformLocation(program, "Sunny");
     p->unif.LUTTexCoord = glGetAttribLocation(program, "LUTTexCoord");
     p->unif.VertexCoord = glGetAttribLocation(program, "VertexCoord");
     GlslTextureUniform_Read(program, "Orig", -1, &p->unif.Orig);
@@ -537,6 +570,17 @@ static void GlslShader_SetShaderVars(GlslShader *gs, RenderCtx *ctx, int pass) {
                 gs->frame_count % p->frame_count_mod : gs->frame_count);
   if (p->unif.FrameDirection >= 0)
     glUniform1i(p->unif.FrameDirection, 1);
+  if (p->unif.ScrollOffset >= 0) {
+    // Telecamera fluida e interpolazione spostano il fondale disegnato
+    float scroll_offset[2] = { (float)(ZELDA_BG2HOFS + g_render_bias_x), (float)(ZELDA_BG2VOFS + g_render_bias_y) };
+    glUniform2fv(p->unif.ScrollOffset, 1, scroll_offset);
+  }
+  if (p->unif.GameModule >= 0)
+    // +1 cosi che 0 significhi "uniform non valorizzato" (exe vecchio):
+    // altrimenti lo shader confonderebbe quel caso col modulo 0 (intro).
+    glUniform1f(p->unif.GameModule, (float)(ZeldaModuleForShader() + 1));
+  if (p->unif.Sunny >= 0)
+    glUniform1f(p->unif.Sunny, HdFx_SunnyOutdoors() ? 1.0f : 0.0f);
   RenderCtx_SetTexCoords(ctx, p->unif.LUTTexCoord, ctx->offset);
   RenderCtx_SetTexCoords(ctx, p->unif.VertexCoord, 0);
   RenderCtx_SetGlslTextureUniform(ctx, &p->unif.Orig, gs->pass[0].width, gs->pass[0].height, gs->pass[0].gl_texture);

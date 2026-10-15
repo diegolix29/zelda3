@@ -1,0 +1,61 @@
+# Four Swords Adventures look per zelda3
+# -------------------------------------
+# 1 maschere      -> zone scure che fanno ombra, zone chiare che fanno alone
+# 2 sfocatura     -> ombre e alone morbidi (a meta' risoluzione)
+# 3 composizione  -> pixel nitidi, ombre in basso a destra, pennellate
+#                    (fsa_brush.png, piastrella continua) ancorate al mondo, ombre di nuvole all'aperto,
+#                    alone, colori saturi
+# Sprite e HUD si riconoscono dal layer che il gioco scrive nell'alpha:
+# serve lo zelda3.exe con le migliorie HD.
+
+shaders = 3
+
+shader0 = 01-masks.glsl
+filter_linear0 = false
+scale_type0 = source
+scale0 = 1.0
+
+shader1 = 02-blur.glsl
+filter_linear1 = true
+scale_type1 = source
+scale1 = 0.5
+
+shader2 = 03-final.glsl
+filter_linear2 = true
+
+# Pennellate di Four Swords: piastrella continua, ripetuta in diagonale
+textures = "FSABrush"
+FSABrush = fsa_brush.png
+FSABrush_linear = true
+FSABrush_wrap_mode = repeat
+
+# --- Regolazioni ---------------------------------------------------------
+# Per cambiare un valore togli il # dalla riga corrispondente e modificalo.
+# La riga "parameters" deve restare PRIMA dei valori: e' quella che registra
+# i nomi, altrimenti zelda3 li ignora con un "Unknown key".
+parameters = "FSA_SHADOW_DARK;FSA_BLOOM_THRESHOLD;FSA_SHADOW_SOFT;FSA_PIXEL_SHARP;FSA_HATCH;FSA_BRUSH_SCALE;FSA_BRUSH_SKIP;FSA_SHADOW;FSA_CLOUDS;FSA_CLOUD_AMOUNT;FSA_CLOUD_WIND;FSA_BLOOM;FSA_SATURATION;FSA_CONTRAST;FSA_KEEP_SPRITES;FSA_KEEP_HUD;FSA_SKIP_MENUS"
+
+# Superficie
+#FSA_PIXEL_SHARP  = 2.50   # nitidezza dei pixel (1 = morbidi, 8 = netti)
+#FSA_HATCH        = 1.00   # forza della trama di pennellate
+#FSA_BRUSH_SCALE  = 0.25   # dimensione delle pennellate
+#FSA_BRUSH_SKIP   = 0.70   # piu' basso = piu' macchie saltate (1 = nessuna)
+
+# Luce e ombra
+#FSA_SHADOW       = 0.45   # forza delle ombre morbide
+#FSA_SHADOW_DARK  = 0.30   # quanto deve essere scura una zona per fare ombra
+#FSA_SHADOW_SOFT  = 1.60   # morbidezza delle ombre
+#FSA_CLOUDS       = 0.30   # scurezza delle ombre di nuvole all'aperto (0 = spente)
+#FSA_CLOUD_AMOUNT = 1.00   # quante nuvole
+#FSA_CLOUD_WIND   = 6.00   # velocita' delle nuvole in pixel al secondo
+#FSA_BLOOM        = 0.30   # alone sulle zone chiare
+#FSA_BLOOM_THRESHOLD = 0.80
+
+# Colore
+#FSA_SATURATION   = 0.96
+#FSA_CONTRAST     = 0.12
+
+# Cosa lasciare intatto
+#FSA_KEEP_SPRITES = 1.00   # 1 = Link e nemici senza tratteggio
+#FSA_KEEP_HUD     = 1.00   # 1 = cuori, rupie e testi intatti
+#FSA_SKIP_MENUS   = 1.00   # 1 = inventario e selezione file senza effetto

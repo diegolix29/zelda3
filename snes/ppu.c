@@ -20,6 +20,11 @@ static void ppu_calculateMode7Starts(Ppu* ppu, int y);
 static int ppu_getPixelForMode7(Ppu* ppu, int x, int layer, bool priority);
 static bool ppu_getWindowState(Ppu* ppu, int layer, int x);
 static bool ppu_evaluateSprites(Ppu* ppu, int line);
+
+// Spostamento visivo della telecamera fluida: vale solo per BG1 e BG2,
+// BG3 e' l'HUD e resta fermo.
+#define BG_BIAS_X(ppu, layer) ((layer) < 2 ? (ppu)->bgBiasX : 0)
+#define BG_BIAS_Y(ppu, layer) ((layer) < 2 ? (ppu)->bgBiasY : 0)
 static void PpuDrawWholeLine(Ppu *ppu, uint y);
 
 #define IS_SCREEN_ENABLED(ppu, sub, layer) (ppu->screenEnabled[sub] & (1 << layer))
@@ -284,7 +289,7 @@ static void PpuDrawBackground_4bpp(Ppu *ppu, uint y, bool sub, uint layer, PpuZb
   PpuWindows win;
   IS_SCREEN_WINDOWED(ppu, sub, layer) ? PpuWindows_Calc(&win, ppu, layer) : PpuWindows_Clear(&win, ppu, layer);
   BgLayer *bglayer = &ppu->bgLayer[layer];
-  y += bglayer->vScroll;
+  y += bglayer->vScroll + BG_BIAS_Y(ppu, layer);
   int sc_offs = bglayer->tilemapAdr + (((y >> 3) & 0x1f) << 5);
   if ((y & 0x100) && bglayer->tilemapHigher)
     sc_offs += bglayer->tilemapWider ? 0x800 : 0x400;
@@ -298,7 +303,7 @@ static void PpuDrawBackground_4bpp(Ppu *ppu, uint y, bool sub, uint layer, PpuZb
   for (size_t windex = 0; windex < win.nr; windex++) {
     if (win.bits & (1 << windex))
       continue;  // layer is disabled for this window part
-    uint x = win.edges[windex] + bglayer->hScroll;
+    uint x = win.edges[windex] + bglayer->hScroll + BG_BIAS_X(ppu, layer);
     uint w = win.edges[windex + 1] - win.edges[windex];
     PpuZbufType *dstz = ppu->bgBuffers[sub].data + win.edges[windex] + kPpuExtraLeftRight;
     const uint16 *tp = tps[x >> 8 & 1] + ((x >> 3) & 0x1f);
@@ -382,7 +387,7 @@ static void PpuDrawBackground_2bpp(Ppu *ppu, uint y, bool sub, uint layer, PpuZb
   PpuWindows win;
   IS_SCREEN_WINDOWED(ppu, sub, layer) ? PpuWindows_Calc(&win, ppu, layer) : PpuWindows_Clear(&win, ppu, layer);
   BgLayer *bglayer = &ppu->bgLayer[layer];
-  y += bglayer->vScroll;
+  y += bglayer->vScroll + BG_BIAS_Y(ppu, layer);
   int sc_offs = bglayer->tilemapAdr + (((y >> 3) & 0x1f) << 5);
   if ((y & 0x100) && bglayer->tilemapHigher)
     sc_offs += bglayer->tilemapWider ? 0x800 : 0x400;
@@ -397,7 +402,7 @@ static void PpuDrawBackground_2bpp(Ppu *ppu, uint y, bool sub, uint layer, PpuZb
   for (size_t windex = 0; windex < win.nr; windex++) {
     if (win.bits & (1 << windex))
       continue;  // layer is disabled for this window part
-    uint x = win.edges[windex] + bglayer->hScroll;
+    uint x = win.edges[windex] + bglayer->hScroll + BG_BIAS_X(ppu, layer);
     uint w = win.edges[windex + 1] - win.edges[windex];
     PpuZbufType *dstz = ppu->bgBuffers[sub].data + win.edges[windex] + kPpuExtraLeftRight;
     const uint16 *tp = tps[x >> 8 & 1] + ((x >> 3) & 0x1f);
@@ -479,7 +484,7 @@ static void PpuDrawBackground_4bpp_mosaic(Ppu *ppu, uint y, bool sub, uint layer
   PpuWindows win;
   IS_SCREEN_WINDOWED(ppu, sub, layer) ? PpuWindows_Calc(&win, ppu, layer) : PpuWindows_Clear(&win, ppu, layer);
   BgLayer *bglayer = &ppu->bgLayer[layer];
-  y = ppu->mosaicModulo[y] + bglayer->vScroll;
+  y = ppu->mosaicModulo[y] + bglayer->vScroll + BG_BIAS_Y(ppu, layer);
   int sc_offs = bglayer->tilemapAdr + (((y >> 3) & 0x1f) << 5);
   if ((y & 0x100) && bglayer->tilemapHigher)
     sc_offs += bglayer->tilemapWider ? 0x800 : 0x400;
@@ -496,7 +501,7 @@ static void PpuDrawBackground_4bpp_mosaic(Ppu *ppu, uint y, bool sub, uint layer
     int sx = win.edges[windex];
     PpuZbufType *dstz = ppu->bgBuffers[sub].data + sx + kPpuExtraLeftRight;
     PpuZbufType *dstz_end = ppu->bgBuffers[sub].data + win.edges[windex + 1] + kPpuExtraLeftRight;
-    uint x = sx + bglayer->hScroll;
+    uint x = sx + bglayer->hScroll + BG_BIAS_X(ppu, layer);
     const uint16 *tp = tps[x >> 8 & 1] + ((x >> 3) & 0x1f);
     const uint16 *tp_last = tps[x >> 8 & 1] + 31, *tp_next = tps[(x >> 8 & 1) ^ 1];
     x &= 7;
@@ -538,7 +543,7 @@ static void PpuDrawBackground_2bpp_mosaic(Ppu *ppu, int y, bool sub, uint layer,
   PpuWindows win;
   IS_SCREEN_WINDOWED(ppu, sub, layer) ? PpuWindows_Calc(&win, ppu, layer) : PpuWindows_Clear(&win, ppu, layer);
   BgLayer *bglayer = &ppu->bgLayer[layer];
-  y = ppu->mosaicModulo[y] + bglayer->vScroll;
+  y = ppu->mosaicModulo[y] + bglayer->vScroll + BG_BIAS_Y(ppu, layer);
   int sc_offs = bglayer->tilemapAdr + (((y >> 3) & 0x1f) << 5);
   if ((y & 0x100) && bglayer->tilemapHigher)
     sc_offs += bglayer->tilemapWider ? 0x800 : 0x400;
@@ -555,7 +560,7 @@ static void PpuDrawBackground_2bpp_mosaic(Ppu *ppu, int y, bool sub, uint layer,
     int sx = win.edges[windex];
     PpuZbufType *dstz = ppu->bgBuffers[sub].data + sx + kPpuExtraLeftRight;
     PpuZbufType *dstz_end = ppu->bgBuffers[sub].data + win.edges[windex + 1] + kPpuExtraLeftRight;
-    uint x = sx + bglayer->hScroll;
+    uint x = sx + bglayer->hScroll + BG_BIAS_X(ppu, layer);
     const uint16 *tp = tps[x >> 8 & 1] + ((x >> 3) & 0x1f);
     const uint16 *tp_last = tps[x >> 8 & 1] + 31, *tp_next = tps[(x >> 8 & 1) ^ 1];
     x &= 7;
@@ -896,8 +901,14 @@ static NOINLINE void PpuDrawWholeLine(Ppu *ppu, uint y) {
       // Math is disabled (or has no effect), so can avoid the per-pixel maths check
       uint32 i = left;
       do {
-        uint32 color = ppu->cgram[ppu->bgBuffers[0].data[i] & 0xff];
-        dst[0] = ppu->brightnessMult[color & clip_color_mask] << 16 |
+        uint32 z = ppu->bgBuffers[0].data[i];
+        uint32 color = ppu->cgram[z & 0xff];
+        // Nei bit 24-27 finisce l'indice del layer da cui viene il pixel
+        // (0=BG1, 1=BG2, 2=BG3, 3=BG4, 4=OBJ/sprite, 5=backdrop). Il byte
+        // alto era inutilizzato; la texture viene caricata come BGRA, quindi
+        // lo shader lo legge come canale alpha e sa cosa non deve dipingere.
+        dst[0] = (z & 0xf00) << 16 |
+                 ppu->brightnessMult[color & clip_color_mask] << 16 |
                  ppu->brightnessMult[(color >> 5) & clip_color_mask] << 8 |
                  ppu->brightnessMult[(color >> 10) & clip_color_mask];
       } while (dst++, ++i < right);
@@ -934,7 +945,9 @@ static NOINLINE void PpuDrawWholeLine(Ppu *ppu, uint y) {
             b += b2;
           }
         }
-        dst[0] = color_map[b] | color_map[g] << 8 | color_map[r] << 16;
+        // Vedi sopra: bit 24-27 = layer di provenienza, per lo shader.
+        dst[0] = (uint32)main_layer << 24 |
+                 color_map[b] | color_map[g] << 8 | color_map[r] << 16;
       } while (dst++, ++i < right);
     }
   } while (cw_clip_math >>= 1, ++windex < cwin.nr);
@@ -1087,8 +1100,8 @@ static int ppu_getPixel(Ppu *ppu, int x, int y, bool sub, int *r, int *g, int *b
         if (ppu->mode == 7) {
           pixel = ppu_getPixelForMode7(ppu, lx, curLayer, curPriority);
         } else {
-          lx += ppu->bgLayer[curLayer].hScroll;
-          ly += ppu->bgLayer[curLayer].vScroll;
+          lx += ppu->bgLayer[curLayer].hScroll + BG_BIAS_X(ppu, curLayer);
+          ly += ppu->bgLayer[curLayer].vScroll + BG_BIAS_Y(ppu, curLayer);
           pixel = ppu_getPixelForBgLayer(
             ppu, lx & 0x3ff, ly & 0x3ff,
             curLayer, curPriority
@@ -1253,7 +1266,7 @@ static bool ppu_evaluateSprites(Ppu* ppu, int line) {
     if (yy == 0xf0)
       continue;  // this works for zelda because sprites are always 8 or 16.
     // check if the sprite is on this line and get the sprite size
-    int row = (line - yy) & 0xff;
+    int row = (line - yy + ppu->objBiasY) & 0xff;
     int highOam = ppu->oam[0x100 + (index >> 4)] >> (index & 15);
     int spriteSize = spriteSizes[(highOam >> 1) & 1];
     if (row >= spriteSize)
@@ -1261,6 +1274,7 @@ static bool ppu_evaluateSprites(Ppu* ppu, int line) {
     // in y-range, get the x location, using the high bit as well
     int x = (ppu->oam[index] & 0xff) + (highOam & 1) * 256;
     x -= (x >= 256 + extra_left_right) * 512;
+    x -= ppu->objBiasX;
     // if in x-range
     if (x <= -(spriteSize + extra_left_right))
       continue;

@@ -28,6 +28,10 @@ typedef struct ZeldaEnv {
 } ZeldaEnv;
 extern ZeldaEnv g_zenv;
 extern int frame_ctr_dbg;
+extern int g_smooth_camera;
+extern float g_interp_alpha;
+void ZeldaUpdateCamera();
+extern int g_text_speed;
 
 typedef void PlayerHandlerFunc();
 typedef void HandlerFuncK(int k);
@@ -66,6 +70,7 @@ enum {
 };
 
 void SaveLoadSlot(int cmd, int which);
+bool SaveLoadNamed(int cmd, const char *name);
 void ZeldaWriteSram();
 void ZeldaReadSram();
 

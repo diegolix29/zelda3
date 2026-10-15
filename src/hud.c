@@ -1355,10 +1355,31 @@ void Hud_RebuildIndoor() {  // 8dfa60
   Hud_Rebuild();
 }
 
+// Disegna sotto i contatori gli oggetti assegnati a X, L e R
+static void Hud_DrawXLRItems() {
+  // Lettere dei nomi degli oggetti del menu (0x2550 + lettera)
+  static const uint16 kLetterTiles[3] = { 0x2550 + 'X' - 'A', 0x2550 + 'L' - 'A', 0x2550 + 'R' - 'A' };
+  bool show = (enhanced_features0 & kFeatures0_ShowXLRItemsInHud) && (enhanced_features0 & kFeatures0_SwitchLR);
+  const uint8 items[3] = { hud_cur_item_x, hud_cur_item_l, hud_cur_item_r };
+  for (int i = 0; i < 3; i++) {
+    uint16 *dst = &hud_tile_indices_buffer[HUDXY(8 + i * 4, 2)];
+    bool on = show && items[i] != 0 && Hud_DoWeHaveThisItem(items[i]);
+    dst[0] = 0x207f;
+    dst[32] = on ? kLetterTiles[i] : 0x207f;
+    if (on) {
+      Hud_DrawItem(dst + 1, Hud_GetIconForItem(items[i]));
+    } else {
+      dst[1] = dst[2] = dst[33] = dst[34] = 0x207f;
+    }
+  }
+}
+
 static void Hud_UpdateItemBox() {  // 8dfafd
   // Update r
   if (hud_cur_item)
     Hud_DrawItem(&hud_tile_indices_buffer[HUDXY(5, 1)], Hud_GetIconForItem(hud_cur_item));
+  if (enhanced_features0 & kFeatures0_SwitchLR)
+    Hud_DrawXLRItems();
 }
 
 static void Hud_UpdateHearts_Inner(uint16 *dst, const uint16 *src, int n) {  // 8dfdab

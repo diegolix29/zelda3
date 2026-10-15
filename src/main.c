@@ -26,6 +26,7 @@
 #include "load_gfx.h"
 #include "util.h"
 #include "audio.h"
+#include "hd_menu.h"
 
 static bool g_run_without_emu = 0;
 
@@ -67,6 +68,21 @@ static int g_sdl_audio_mixer_volume = SDL_MIX_MAXVOLUME;
 static struct RendererFuncs g_renderer_funcs;
 static uint32 g_gamepad_modifiers;
 static uint16 g_gamepad_last_cmd[kGamepadBtn_Count];
+static bool g_running = true;
+static bool g_pause_dimmed, g_pause_redraw;
+static int g_display_refresh = 60;
+
+// Frequenza dello schermo su cui si trova la finestra
+static void UpdateDisplayRefresh() {
+  SDL_DisplayMode mode;
+  int display = SDL_GetWindowDisplayIndex(g_window);
+  if (SDL_GetCurrentDisplayMode(display < 0 ? 0 : display, &mode) == 0 && mode.refresh_rate > 0)
+    g_display_refresh = mode.refresh_rate;
+}
+
+static bool HighRefreshActive() {
+  return g_config.high_refresh && g_display_refresh > 62;
+}
 
 void NORETURN Die(const char *error) {
 #if defined(NDEBUG) && defined(_WIN32)
@@ -168,6 +184,15 @@ static void DrawPpuFrameWithPerf() {
   }
   if (g_display_perf)
     RenderNumber(pixel_buffer + pitch * render_scale, pitch, g_curr_fps, render_scale == 4);
+  HdMenu_Draw(pixel_buffer, pitch, g_snes_width * render_scale, g_snes_height * render_scale, render_scale);
+  // Pausa scurita: funziona con qualunque metodo di output
+  if (g_paused && g_pause_dimmed) {
+    for (int y = 0; y < g_snes_height * render_scale; y++) {
+      uint32 *row = (uint32 *)(pixel_buffer + y * pitch);
+      for (int x = 0; x < g_snes_width * render_scale; x++)
+        row[x] = ((row[x] >> 1 & 0x7f7f7f) - (row[x] >> 3 & 0x1f1f1f)) | (row[x] & 0xff000000);
+    }
+  }
   g_renderer_funcs.EndDraw();
 }
 
@@ -204,6 +229,12 @@ static void SDLCALL AudioCallback(void *userdata, Uint8 *stream, int len) {
 static SDL_Renderer *g_renderer;
 static SDL_Texture *g_texture;
 static SDL_Rect g_sdl_renderer_rect;
+static uint8 *g_sdl_pixels;
+static int g_sdl_pitch;
+static SDL_Texture *g_sdl_overlay;
+static int g_sdl_overlay_w, g_sdl_overlay_h;
+static uint32 *g_sdl_overlay_pixels;
+static int g_sdl_overlay_cap;
 
 static bool SdlRenderer_Init(SDL_Window *window) {
 
@@ -253,9 +284,22 @@ static void SdlRenderer_BeginDraw(int width, int height, uint8 **pixels, int *pi
     printf("Failed to lock texture: %s\n", SDL_GetError());
     return;
   }
+  g_sdl_pixels = *pixels;
+  g_sdl_pitch = *pitch;
 }
 
 static void SdlRenderer_EndDraw() {
+  // Testo nitido: si prepara il riquadro dei dialoghi ingrandito 4x
+  int rx, ry, rw, rh;
+  bool hd_text = HdText_GetRect(g_sdl_renderer_rect.w, g_sdl_renderer_rect.h, &rx, &ry, &rw, &rh);
+  if (hd_text) {
+    if (rw * rh * 16 > g_sdl_overlay_cap) {
+      g_sdl_overlay_cap = rw * rh * 16;
+      free(g_sdl_overlay_pixels);
+      g_sdl_overlay_pixels = malloc(g_sdl_overlay_cap * 4);
+    }
+    HdText_Scale4x(g_sdl_pixels, g_sdl_pitch, rx, ry, rw, rh, g_sdl_overlay_pixels);
+  }
 
 //  uint64 before = SDL_GetPerformanceCounter();
   SDL_UnlockTexture(g_texture);
@@ -264,6 +308,26 @@ static void SdlRenderer_EndDraw() {
 //  printf("%f ms\n", v * 1000);
   SDL_RenderClear(g_renderer);
   SDL_RenderCopy(g_renderer, g_texture, &g_sdl_renderer_rect, NULL);
+  if (hd_text) {
+    if (!g_sdl_overlay || g_sdl_overlay_w != rw * 4 || g_sdl_overlay_h != rh * 4) {
+      if (g_sdl_overlay)
+        SDL_DestroyTexture(g_sdl_overlay);
+      g_sdl_overlay_w = rw * 4, g_sdl_overlay_h = rh * 4;
+      g_sdl_overlay = SDL_CreateTexture(g_renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
+                                        g_sdl_overlay_w, g_sdl_overlay_h);
+    }
+    if (g_sdl_overlay) {
+      SDL_UpdateTexture(g_sdl_overlay, NULL, g_sdl_overlay_pixels, g_sdl_overlay_w * 4);
+      SDL_Rect dst = { rx, ry, rw, rh };
+      if (g_config.ignore_aspect_ratio) {
+        int ow, oh;
+        SDL_GetRendererOutputSize(g_renderer, &ow, &oh);
+        dst.x = rx * ow / g_sdl_renderer_rect.w, dst.w = rw * ow / g_sdl_renderer_rect.w;
+        dst.y = ry * oh / g_sdl_renderer_rect.h, dst.h = rh * oh / g_sdl_renderer_rect.h;
+      }
+      SDL_RenderCopy(g_renderer, g_sdl_overlay, NULL, &dst);
+    }
+  }
   SDL_RenderPresent(g_renderer); // vsyncs to 60 FPS?
 }
 
@@ -298,6 +362,7 @@ int main(int argc, char** argv) {
 
   // Delay actually setting those features in ram until any snapshots finish playing.
   g_wanted_zelda_features = g_config.features0;
+  HdMenu_ApplyConfig();
 
   g_ppu_render_flags = g_config.new_renderer * kPpuRenderFlags_NewRenderer |
                        g_config.enhanced_mode7 * kPpuRenderFlags_4x4Mode7 |
@@ -351,6 +416,7 @@ int main(int argc, char** argv) {
   }
   g_window = window;
   SDL_SetWindowHitTest(window, HitTestCallback, NULL);
+  UpdateDisplayRefresh();
 
   if (!g_renderer_funcs.Initialize(window))
     return 1;
@@ -390,7 +456,6 @@ int main(int argc, char** argv) {
   for (int i = 0; i < SDL_NumJoysticks(); i++)
     OpenOneGamepad(i);
 
-  bool running = true;
   SDL_Event event;
   uint32 lastTick = SDL_GetTicks();
   uint32 curTick = 0;
@@ -400,7 +465,7 @@ int main(int argc, char** argv) {
   if (g_config.autosave)
     HandleCommand(kKeys_Load + 0, true);
 
-  while(running) {
+  while(g_running) {
     while(SDL_PollEvent(&event)) {
       switch(event.type) {
       case SDL_CONTROLLERDEVICEADDED:
@@ -408,6 +473,7 @@ int main(int argc, char** argv) {
         break;
       case SDL_CONTROLLERAXISMOTION:
         HandleGamepadAxisInput(event.caxis.which, event.caxis.axis, event.caxis.value);
+        HdMenu_HandleStick(g_gamepad_buttons);
         break;
       case SDL_CONTROLLERBUTTONDOWN:
       case SDL_CONTROLLERBUTTONUP: {
@@ -429,25 +495,83 @@ int main(int argc, char** argv) {
         }
         break;
       case SDL_KEYDOWN:
-        HandleInput(event.key.keysym.sym, event.key.keysym.mod, true);
+        if (!HdMenu_HandleKey(event.key.keysym.sym, event.key.keysym.mod, true))
+          HandleInput(event.key.keysym.sym, event.key.keysym.mod, true);
         break;
       case SDL_KEYUP:
-        HandleInput(event.key.keysym.sym, event.key.keysym.mod, false);
+        if (!HdMenu_HandleKey(event.key.keysym.sym, event.key.keysym.mod, false))
+          HandleInput(event.key.keysym.sym, event.key.keysym.mod, false);
         break;
       case SDL_QUIT:
-        running = false;
+        g_running = false;
         break;
       }
     }
 
-    if (g_paused != audiopaused) {
-      audiopaused = g_paused;
+    bool menu_open = HdMenu_IsOpen();
+    if ((g_paused || menu_open) != audiopaused) {
+      audiopaused = g_paused || menu_open;
       if (device)
         SDL_PauseAudioDevice(device, audiopaused);
     }
 
     if (g_paused) {
+      if (g_pause_redraw) {
+        g_pause_redraw = false;
+        DrawPpuFrameWithPerf();
+      }
       SDL_Delay(16);
+      continue;
+    }
+
+    // Con il menu opzioni aperto il gioco e' fermo: si ridisegna solo
+    // l'ultimo frame con il menu sopra.
+    if (menu_open) {
+      DrawPpuFrameWithPerf();
+      SDL_Delay(16);
+      continue;
+    }
+
+    // Schermi oltre i 60 Hz: il gioco avanza a 60 frame al secondo in base al
+    // tempo reale e ogni aggiornamento dello schermo (sincronizzato col
+    // vsync) disegna lo scorrimento interpolato fra gli ultimi due frame.
+    if ((frameCtr & 127) == 0)
+      UpdateDisplayRefresh();
+    if (HighRefreshActive() && !g_turbo) {
+      static uint64 last_counter;
+      static double acc;
+      uint64 now = SDL_GetPerformanceCounter();
+      double freq = (double)SDL_GetPerformanceFrequency();
+      if (last_counter == 0)
+        last_counter = now;
+      acc += (now - last_counter) / freq;
+      last_counter = now;
+      const double kFramePeriod = 1.0 / 60.0;
+      if (acc > kFramePeriod * 4)
+        acc = kFramePeriod * 4;  // dopo uno scatto non si recupera all'infinito
+      int frames = 0;
+      while (acc >= kFramePeriod && frames < 3) {
+        int hr_inputs = g_input1_state;
+        if (g_input1_state & 0xf0)
+          g_gamepad_buttons = 0;
+        hr_inputs |= g_gamepad_buttons;
+        SDL_LockMutex(g_audio_mutex);
+        bool hr_replay = ZeldaRunFrame(hr_inputs);
+        HdMenu_AfterFrame(hr_replay);
+        SDL_UnlockMutex(g_audio_mutex);
+        frameCtr++;
+        acc -= kFramePeriod;
+        frames++;
+      }
+      g_interp_alpha = (float)(acc / kFramePeriod);
+      if (g_interp_alpha > 1.0f) g_interp_alpha = 1.0f;
+      DrawPpuFrameWithPerf();
+      g_interp_alpha = 1.0f;
+      // Se il vsync non e' attivo si evita di occupare la CPU al 100%
+      double spent = (SDL_GetPerformanceCounter() - now) / freq;
+      double interval = 1.0 / g_display_refresh;
+      if (spent < interval * 0.5)
+        SDL_Delay((uint32)((interval * 0.5 - spent) * 1000.0));
       continue;
     }
 
@@ -459,6 +583,7 @@ int main(int argc, char** argv) {
 
     SDL_LockMutex(g_audio_mutex);
     bool is_replay = ZeldaRunFrame(inputs);
+    HdMenu_AfterFrame(is_replay);
     SDL_UnlockMutex(g_audio_mutex);
 
     frameCtr++;
@@ -623,19 +748,13 @@ static void HandleCommand_Locked(uint32 j, bool pressed) {
     case kKeys_Reset:
       ZeldaReset(true);
       break;
-    case kKeys_Pause: g_paused = !g_paused; break;
+    case kKeys_Pause: g_paused = !g_paused; g_pause_dimmed = false; break;
     case kKeys_PauseDimmed:
+      // Il frame scurito viene ridisegnato dal ciclo principale, cosi'
+      // funziona anche con OpenGL (prima si usava solo il renderer SDL).
       g_paused = !g_paused;
-      // SDL_RenderPresent may not be called more than once per frame.
-      // Seems to work on Windows still. Temporary measure until it's fixed.
-#ifdef _WIN32
-      if (g_paused) {
-        SDL_SetRenderDrawBlendMode(g_renderer, SDL_BLENDMODE_BLEND);
-        SDL_SetRenderDrawColor(g_renderer, 0, 0, 0, 159);
-        SDL_RenderFillRect(g_renderer, NULL);
-        SDL_RenderPresent(g_renderer);
-      }
-#endif
+      g_pause_dimmed = g_paused;
+      g_pause_redraw = g_paused;
       break;
     case kKeys_ReplayTurbo: g_replay_turbo = !g_replay_turbo; break;
     case kKeys_WindowBigger: ChangeWindowScale(1); break;
@@ -644,6 +763,7 @@ static void HandleCommand_Locked(uint32 j, bool pressed) {
     case kKeys_ToggleRenderer: g_ppu_render_flags ^= kPpuRenderFlags_NewRenderer; break;
     case kKeys_VolumeUp:
     case kKeys_VolumeDown: HandleVolumeAdjustment(j == kKeys_VolumeUp ? 1 : -1); break;
+    case kKeys_HdMenu: HdMenu_Open(); break;
     default: assert(0);
     }
   }
@@ -688,6 +808,10 @@ static void HandleGamepadInput(int button, bool pressed) {
   if (!!(g_gamepad_modifiers & (1 << button)) == pressed)
     return;
   g_gamepad_modifiers ^= 1 << button;
+  if (HdMenu_HandlePadButton(button, pressed)) {
+    g_gamepad_last_cmd[button] = 0;
+    return;
+  }
   if (pressed)
     g_gamepad_last_cmd[button] = FindCmdForGamepadButton(button, g_gamepad_modifiers);
   if (g_gamepad_last_cmd[button] != 0)
@@ -879,4 +1003,56 @@ static void SwitchDirectory() {
 
 MemBlk FindInAssetArray(int asset, int idx) {
   return FindIndexInMemblk((MemBlk) { g_asset_ptrs[asset], g_asset_sizes[asset] }, idx);
+}
+
+// ---------------------------------------------------------------------------
+// Funzioni usate dal menu opzioni (hd_menu.c)
+
+bool Host_IsFullscreen() {
+  return (g_win_flags & SDL_WINDOW_FULLSCREEN_DESKTOP) != 0;
+}
+
+void Host_ToggleFullscreen() {
+  HandleCommand_Locked(kKeys_Fullscreen, true);
+}
+
+bool Host_GetDisplayPerf() {
+  return g_display_perf;
+}
+
+void Host_SetDisplayPerf(bool on) {
+  g_display_perf = on;
+}
+
+int Host_GetVolume() {
+#if SYSTEM_VOLUME_MIXER_AVAILABLE
+  return GetApplicationVolume();
+#else
+  return g_sdl_audio_mixer_volume * 100 / SDL_MIX_MAXVOLUME;
+#endif
+}
+
+void Host_AdjustVolume(int step) {
+  HandleVolumeAdjustment(step);
+}
+
+bool Host_IsOpenGL() {
+  return g_config.output_method == kOutputMethod_OpenGL || g_config.output_method == kOutputMethod_OpenGL_ES;
+}
+
+uint32 Host_GetPpuRenderFlags() {
+  return g_ppu_render_flags;
+}
+
+void Host_SetPpuRenderFlags(uint32 flags) {
+  g_ppu_render_flags = flags;
+}
+
+void Host_ClearInputs() {
+  g_input1_state = 0;
+  g_gamepad_buttons = 0;
+}
+
+void Host_Quit() {
+  g_running = false;
 }

@@ -39,6 +39,8 @@ static const uint16 kDefaultKbdControls[kKeys_Total] = {
   _(SDLK_w), _(SDLK_o), S(SDLK_w), C(SDLK_e),
   // ClearKeyLog, StopReplay, Fullscreen, Reset, Pause, PauseDimmed, Turbo, ReplayTurbo, WindowBigger, WindowSmaller, DisplayPerf, ToggleRenderer
   _(SDLK_k), _(SDLK_l), A(SDLK_RETURN), C(SDLK_r), S(SDLK_p), _(SDLK_p), _(SDLK_TAB), _(SDLK_t), N, N, _(SDLK_f), _(SDLK_r),
+  // VolumeUp, VolumeDown, HdMenu
+  N, N, _(SDLK_ESCAPE),
 };
 #undef _
 #undef A
@@ -59,6 +61,7 @@ static const KeyNameId kKeyNameId[] = {
   S(CheatLife), S(CheatKeys), S(CheatEquipment), S(CheatWalkThroughWalls),
   S(ClearKeyLog), S(StopReplay), S(Fullscreen), S(Reset),
   S(Pause), S(PauseDimmed), S(Turbo), S(ReplayTurbo), S(WindowBigger), S(WindowSmaller), S(VolumeUp), S(VolumeDown), S(DisplayPerf), S(ToggleRenderer),
+  S(HdMenu),
 };
 #undef S
 #undef M
@@ -157,6 +160,8 @@ static uint16 joymap_first[kGamepadBtn_Count];
 static GamepadMapEnt *joymap_ents;
 static int joymap_size;
 static bool has_joypad_controls;
+static bool has_joypad_hdmenu;
+static const char *g_config_filename = "zelda3.ini";
 
 static int CountBits32(uint32 n) {
   int count = 0;
@@ -262,6 +267,9 @@ static void RegisterDefaultKeys() {
     for (int i = 0; i < countof(kDefaultGamepadCmds); i++)
       GamepadMap_Add(kDefaultGamepadCmds[i], 0, kKeys_Controls + i);
   }
+  // Il menu opzioni si apre col clic della levetta destra
+  if (!has_joypad_hdmenu)
+    GamepadMap_Add(kGamepadBtn_R3, 0, kKeys_HdMenu);
 }
 
 static int GetIniSection(const char *s) {
@@ -324,6 +332,8 @@ static bool HandleIniConfig(int section, const char *key, char *value) {
       if (StringEqualsNoCase(key, kKeyNameId[i].name)) {
         if (i == 1)
           has_joypad_controls = true;
+        if (kKeyNameId[i].id == kKeys_HdMenu)
+          has_joypad_hdmenu = true;
         ParseGamepadArray(value, kKeyNameId[i].id, kKeyNameId[i].size);
         return true;
       }
@@ -374,6 +384,25 @@ static bool HandleIniConfig(int section, const char *key, char *value) {
       return true;
     } else if (StringEqualsNoCase(key, "DimFlashes")) {
       return ParseBoolBit(value, &g_config.features0, kFeatures0_DimFlashes);
+    } else if (StringEqualsNoCase(key, "FxEmbers")) {
+      return ParseBool(value, &g_config.fx_embers);
+    } else if (StringEqualsNoCase(key, "FxWindowRays")) {
+      return ParseBool(value, &g_config.fx_window_rays);
+    } else if (StringEqualsNoCase(key, "FxItemGlow")) {
+      return ParseBool(value, &g_config.fx_item_glow);
+    } else if (StringEqualsNoCase(key, "FxHeatHaze")) {
+      return ParseBool(value, &g_config.fx_heat_haze);
+    } else if (StringEqualsNoCase(key, "FxRain")) {
+      return ParseBool(value, &g_config.fx_rain);
+    } else if (StringEqualsNoCase(key, "DynamicLighting")) {
+      return ParseBool(value, &g_config.dynamic_light);
+    } else if (StringEqualsNoCase(key, "HighRefreshInterpolation")) {
+      return ParseBool(value, &g_config.high_refresh);
+    } else if (StringEqualsNoCase(key, "HdText")) {
+      return ParseBool(value, &g_config.hd_text);
+    } else if (StringEqualsNoCase(key, "SmoothCamera")) {
+      g_config.smooth_camera = (uint8)strtol(value, (char**)NULL, 10);
+      return true;
     }
   } else if (section == 2) {
     if (StringEqualsNoCase(key, "EnableAudio")) {
@@ -445,6 +474,11 @@ static bool HandleIniConfig(int section, const char *key, char *value) {
     } else if (StringEqualsNoCase(key, "Language")) {
       g_config.language = value;
       return true;
+    } else if (StringEqualsNoCase(key, "AutosaveOnAreaChange")) {
+      return ParseBool(value, &g_config.autosave_areas);
+    } else if (StringEqualsNoCase(key, "AutosaveSlots")) {
+      g_config.autosave_slots = (uint8)strtol(value, (char**)NULL, 10);
+      return true;
     }
   } else if (section == 4) {
     if (StringEqualsNoCase(key, "ItemSwitchLR")) {
@@ -475,6 +509,15 @@ static bool HandleIniConfig(int section, const char *key, char *value) {
       return ParseBoolBit(value, &g_config.features0, kFeatures0_GameChangingBugFixes);
     } else if (StringEqualsNoCase(key, "CancelBirdTravel")) {
       return ParseBoolBit(value, &g_config.features0, kFeatures0_CancelBirdTravel);
+    } else if (StringEqualsNoCase(key, "FastTransitions")) {
+      return ParseBoolBit(value, &g_config.features0, kFeatures0_FastTransitions);
+    } else if (StringEqualsNoCase(key, "ContinuousTransitions")) {
+      return ParseBoolBit(value, &g_config.features0, kFeatures0_ContinuousTransitions);
+    } else if (StringEqualsNoCase(key, "ShowXLRItemsInHud")) {
+      return ParseBoolBit(value, &g_config.features0, kFeatures0_ShowXLRItemsInHud);
+    } else if (StringEqualsNoCase(key, "TextSpeed")) {
+      g_config.text_speed = (uint8)strtol(value, (char**)NULL, 10);
+      return true;
     }
   }
   return false;
@@ -524,6 +567,246 @@ void ParseConfigFile(const char *filename) {
       filename = "zelda3.ini";
     if (!ParseOneConfigFile(filename, 0))
       fprintf(stderr, "Warning: Unable to read config file %s\n", filename);
+    g_config_filename = filename;
+  } else {
+    g_config_filename = "zelda3.user.ini";
   }
   RegisterDefaultKeys();
+}
+
+// ---------------------------------------------------------------------------
+// Supporto al menu opzioni: lettura/modifica dei tasti e scrittura dell'ini.
+
+const char *Config_GetFilename() {
+  return g_config_filename;
+}
+
+#define UNREMAP_SDL_KEYCODE(k) (((k) & (kKeyMod_ScanCode - 1)) | ((k) & kKeyMod_ScanCode ? SDLK_SCANCODE_MASK : 0))
+
+int Config_GetKeyForCmd(int cmd) {
+  // La prima voce attiva per quel comando
+  for (int i = 0; i < keymap_hash_size; i++)
+    if (keymap_hash[i].cmd == cmd && KeyMapHash_Find(keymap_hash[i].key) == cmd)
+      return keymap_hash[i].key;
+  return 0;
+}
+
+void Config_KeyName(int key, char *buf, size_t size) {
+  if (key == 0) {
+    snprintf(buf, size, "-");
+    return;
+  }
+  snprintf(buf, size, "%s%s%s%s",
+           key & kKeyMod_Ctrl ? "Ctrl+" : "",
+           key & kKeyMod_Alt ? "Alt+" : "",
+           key & kKeyMod_Shift ? "Shift+" : "",
+           SDL_GetKeyName(UNREMAP_SDL_KEYCODE(key)));
+}
+
+// Ricostruisce la tabella dei tasti togliendo le voci del comando drop_cmd
+// e quelle che usano il tasto drop_key.
+static void KeyMapHash_Rebuild(int drop_cmd, int drop_key) {
+  int n = keymap_hash_size;
+  KeyMapHashEnt *old = malloc(sizeof(KeyMapHashEnt) * (n + 1));
+  memcpy(old, keymap_hash, sizeof(KeyMapHashEnt) * n);
+  memset(keymap_hash_first, 0, sizeof(keymap_hash_first));
+  keymap_hash_size = 0;
+  for (int i = 0; i < n; i++) {
+    if (old[i].cmd == drop_cmd || old[i].key == drop_key)
+      continue;
+    KeyMapHash_Add(old[i].key, old[i].cmd);
+  }
+  free(old);
+}
+
+void Config_SetKeyForCmd(int cmd, SDL_Keycode code, SDL_Keymod mod) {
+  int key = 0;
+  if (code != SDLK_LALT && code != SDLK_RALT)
+    key |= mod & KMOD_ALT ? kKeyMod_Alt : 0;
+  if (code != SDLK_LCTRL && code != SDLK_RCTRL)
+    key |= mod & KMOD_CTRL ? kKeyMod_Ctrl : 0;
+  if (code != SDLK_LSHIFT && code != SDLK_RSHIFT)
+    key |= mod & KMOD_SHIFT ? kKeyMod_Shift : 0;
+  key |= REMAP_SDL_KEYCODE(code);
+  // Il tasto viene tolto da qualunque altro comando lo usasse
+  KeyMapHash_Rebuild(cmd, key);
+  KeyMapHash_Add(key, cmd);
+}
+
+int Config_GetPadButtonForCmd(int cmd) {
+  for (int b = 0; b < kGamepadBtn_Count; b++) {
+    for (int e = joymap_first[b]; e != 0; e = joymap_ents[e - 1].next) {
+      if (joymap_ents[e - 1].cmd == cmd && joymap_ents[e - 1].modifiers == 0)
+        return b;
+    }
+  }
+  return -1;
+}
+
+const char *Config_PadButtonName(int button) {
+  static const char *const kNames[kGamepadBtn_Count] = {
+    "A", "B", "X", "Y", "Back", "Guide", "Start", "L3", "R3",
+    "L1", "R1", "DpadUp", "DpadDown", "DpadLeft", "DpadRight", "L2", "R2",
+  };
+  return (button >= 0 && button < kGamepadBtn_Count) ? kNames[button] : "-";
+}
+
+static void GamepadMap_Rebuild(int drop_cmd, int drop_button) {
+  typedef struct { int button; uint32 modifiers; uint16 cmd; } Ent;
+  Ent *list = malloc(sizeof(Ent) * (joymap_size + 1));
+  int n = 0;
+  for (int b = 0; b < kGamepadBtn_Count; b++) {
+    for (int e = joymap_first[b]; e != 0; e = joymap_ents[e - 1].next) {
+      GamepadMapEnt *ent = &joymap_ents[e - 1];
+      if (ent->cmd == drop_cmd || (b == drop_button && ent->modifiers == 0))
+        continue;
+      list[n].button = b, list[n].modifiers = ent->modifiers, list[n].cmd = ent->cmd, n++;
+    }
+  }
+  memset(joymap_first, 0, sizeof(joymap_first));
+  joymap_size = 0;
+  for (int i = 0; i < n; i++)
+    GamepadMap_Add(list[i].button, list[i].modifiers, list[i].cmd);
+  free(list);
+}
+
+void Config_SetPadButtonForCmd(int cmd, int button) {
+  GamepadMap_Rebuild(cmd, button);
+  GamepadMap_Add(button, 0, cmd);
+}
+
+void Config_ResetControlsToDefault() {
+  for (int i = 0; i < 12; i++) {
+    int key = kDefaultKbdControls[kKeys_Controls + i];
+    KeyMapHash_Rebuild(kKeys_Controls + i, key);
+    KeyMapHash_Add(key, kKeys_Controls + i);
+    Config_SetPadButtonForCmd(kKeys_Controls + i, kDefaultGamepadCmds[i]);
+  }
+}
+
+static bool LineIsKey(const char *line, const char *key) {
+  while (*line == ' ' || *line == '\t') line++;
+  const char *r = StringStartsWithNoCase(line, key);
+  if (!r)
+    return false;
+  while (*r == ' ' || *r == '\t') r++;
+  return *r == '=';
+}
+
+static bool LineIsSection(const char *line, char *out, size_t size) {
+  while (*line == ' ' || *line == '\t') line++;
+  if (*line != '[')
+    return false;
+  size_t i = 0;
+  while (line[i] && line[i] != ']' && i + 2 < size)
+    out[i] = line[i], i++;
+  out[i] = ']', out[i + 1] = 0;
+  return true;
+}
+
+typedef struct OutBuf {
+  char *data;
+  size_t len, cap;
+} OutBuf;
+
+static void OutBuf_Add(OutBuf *b, const char *s, size_t n) {
+  if (b->len + n + 1 > b->cap) {
+    b->cap = (b->cap + n) * 2;
+    b->data = realloc(b->data, b->cap);
+  }
+  memcpy(b->data + b->len, s, n);
+  b->len += n;
+}
+
+static void OutBuf_AddStr(OutBuf *b, const char *s) {
+  OutBuf_Add(b, s, strlen(s));
+}
+
+static void OutBuf_AddValue(OutBuf *b, const IniValue *v, const char *nl) {
+  OutBuf_AddStr(b, v->key);
+  OutBuf_AddStr(b, " = ");
+  OutBuf_AddStr(b, v->value);
+  OutBuf_AddStr(b, nl);
+}
+
+// Scrive le chiavi della sezione non ancora presenti nel file
+static void FlushSection(OutBuf *b, const IniValue *values, bool *done, int count, const char *section, const char *nl) {
+  for (int k = 0; k < count; k++) {
+    if (!done[k] && StringEqualsNoCase(values[k].section, section)) {
+      OutBuf_AddValue(b, &values[k], nl);
+      done[k] = true;
+    }
+  }
+}
+
+// Aggiorna i valori indicati nel file ini caricato, lasciando intatti
+// commenti e righe non toccate. Le chiavi mancanti vengono aggiunte in fondo
+// alla loro sezione, le sezioni mancanti in fondo al file.
+bool Config_WriteIniValues(const IniValue *values, int count) {
+  size_t len = 0;
+  char *data = (char *)ReadWholeFile(g_config_filename, &len);
+  if (!data)
+    return false;
+  bool *done = calloc(count, sizeof(bool));
+  OutBuf b = { malloc(len + 4096), 0, len + 4096 };
+  char section[64] = "";
+  const char *nl = strstr(data, "\r\n") ? "\r\n" : "\n";
+
+  char *p = data, *end = data + len;
+  while (p < end) {
+    char *eol = memchr(p, '\n', end - p);
+    char *next = eol ? eol + 1 : end;
+    size_t linelen = next - p;
+    char line[1024];
+    size_t cl = linelen < sizeof(line) - 1 ? linelen : sizeof(line) - 1;
+    memcpy(line, p, cl);
+    line[cl] = 0;
+    char newsec[64];
+    if (LineIsSection(line, newsec, sizeof(newsec))) {
+      if (section[0])
+        FlushSection(&b, values, done, count, section, nl);
+      strcpy(section, newsec);
+      OutBuf_Add(&b, p, linelen);
+    } else {
+      int found = -1;
+      if (line[0] != '#' && line[0] != ';') {
+        for (int k = 0; k < count; k++) {
+          if (StringEqualsNoCase(values[k].section, section) && LineIsKey(line, values[k].key)) {
+            found = k;
+            break;
+          }
+        }
+      }
+      if (found >= 0) {
+        OutBuf_AddValue(&b, &values[found], nl);
+        done[found] = true;
+      } else {
+        OutBuf_Add(&b, p, linelen);
+      }
+    }
+    p = next;
+  }
+  if (b.len && b.data[b.len - 1] != '\n')
+    OutBuf_AddStr(&b, nl);
+  if (section[0])
+    FlushSection(&b, values, done, count, section, nl);
+  // Sezioni non presenti nel file
+  for (int k = 0; k < count; k++) {
+    if (done[k])
+      continue;
+    OutBuf_AddStr(&b, nl);
+    OutBuf_AddStr(&b, values[k].section);
+    OutBuf_AddStr(&b, nl);
+    FlushSection(&b, values, done, count, values[k].section, nl);
+  }
+  bool ok = false;
+  FILE *f = fopen(g_config_filename, "wb");
+  if (f) {
+    ok = fwrite(b.data, 1, b.len, f) == b.len;
+    fclose(f);
+  }
+  free(b.data);
+  free(done);
+  free(data);
+  return ok;
 }

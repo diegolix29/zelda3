@@ -388,6 +388,25 @@ class LangFR_C(LangEU):
   dictionary = kTextDictionary_FR
   rom_addrs = [0x9c8000, 0x8CF150]
 
+# Italiano: alfabeto inglese + vocali accentate disegnate da make_font_it.py
+class LangIT(LangUS):
+  alphabet = kTextAlphabet_US + ["[U95]", "[U96]", "[U97]", "[U98]", "à", "è", "é", "ì", "ò", "ù"]
+  dictionary = [
+    '    ', '   ', '  ', 'che ', 'non ', 'per ', 'del', 'della ', 'delle ', 'dei ',
+    'una ', 'un ', 'il ', 'la ', 'le ', 'lo ', 'gli ', 'di ', 'da ', 'in ',
+    'con ', 'sono ', 'sei ', 'ai ', 'al', 'ar', 'an', 'at', 'av', 'ch',
+    'co', 'con', 'ci', 'de', 'di', 'do', 'en', 'er', 'es', 'et',
+    'gl', 'gn', 'ia', 'ie', 'io', 'il', 'in', 'is', 'it', 'la',
+    'le', 'li', 'lo', 'ma', 'me', 'mi', 'mo', 'ne', 'ni', 'no',
+    'nt', 'nd', 'on', 'or', 'os', 'pa', 'pe', 'po', 'pr', 'ra',
+    're', 'ri', 'ro', 'sa', 'se', 'si', 'so', 'st', 'ta', 'te',
+    'ti', 'to', 'tr', 'tu', 'un', 'va', 've', 'vi', 'vo', 'za',
+    'zi', 'Link', 'Hyrule', 'Zelda', 'Spada', 'Rupie', 'Ciondol', 'Cristall', 'questo', 'questa',
+    'quel', 'anche', 'ancora', 'potere', 'Mondo', 'Oscuro', 'Ganon', 'Agahnim', 'ragazz', 'perch',
+  ]
+  encoder = 'new'
+  rom_addrs = [0x9c8000, 0x8edf40]
+
 kLanguages = {
   'us' : LangUS(),
   'de' : LangDE(),
@@ -400,6 +419,7 @@ kLanguages = {
   'redux' : LangUS(),
   'nl' : LangNL(),
   'sv' : LangSV(),
+  'it' : LangIT(),
 }
 
 def dialogue_filename(s):

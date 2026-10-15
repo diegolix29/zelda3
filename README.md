@@ -1,3 +1,50 @@
+# Zelda3 HD
+
+A fork of [snesrev/zelda3](https://github.com/snesrev/zelda3) with a set of "HD" improvements inspired by *Link's Awakening* (Switch) and *Four Swords Adventures*, plus Italian support.
+Everything is optional and can be turned on or off from the new in-game options menu (**Esc** or right stick click) or from the [launcher](https://github.com/ghost19880/Zelda-3-Launcher).
+
+> 🇮🇹 *Versione italiana più sotto.*
+
+## What's new
+
+**Gameplay and comfort**
+- Fast and continuous transitions between areas: Link keeps walking while the camera scrolls, no stop-and-go.
+- Smooth camera that follows Link with a slight delay (4 levels), with interpolation on displays above 60 Hz.
+- In-game options menu with key and gamepad remapping; settings are written back to `zelda3.ini` keeping its comments.
+- Silent automatic saves on every area change and dungeon/house entrance (rotating slots), plus quick save slots.
+- Interactive world map: free scrolling, crosshair, personal markers saved per save file, recenter on Link.
+- Dungeon map shows the dungeon name; faster floor switching.
+- Items assigned to X, L and R shown in the HUD; faster dialogue text while holding A or B.
+
+**Graphics**
+- Sharp dialogue text drawn on top of any shader.
+- Dynamic lighting: warm glow around torches, braziers, lava and fire; dark rooms lit by the Lantern and by the torches you light.
+- Embers rising from flames, light rays and dust from windows, glow behind items Link holds up, heat haze over lava, denser rain with soft lightning.
+- **Four Swords Adventures look** (`shaders/foursword`): crisp pixels, a diagonal brush texture anchored to the world (not on water), soft drop shadows, glow on bright areas and cartoon cloud shadows drifting over sunny outdoor areas. HUD and characters stay untouched.
+
+**Language**
+- Italian: the dialogue font gains accented letters; the translation itself lives in a separate repository, [zelda3-italiano](https://github.com/ghost19880/zelda3-italiano), and is downloaded by the launcher.
+
+## Getting started
+
+The easiest way is the [Zelda 3 Launcher (HD fork)](https://github.com/ghost19880/Zelda-3-Launcher/releases): download it, point it to your US ROM and it downloads, builds and configures everything (including the shader and, if you choose Italian, the translation).
+
+To build by hand follow the steps of the original project below; `build_msvc.bat` is also included for Visual Studio Build Tools. The HD options are documented in `zelda3.ini`.
+
+## Versione italiana
+
+Fork di [snesrev/zelda3](https://github.com/snesrev/zelda3) con una serie di migliorie "HD" ispirate a *Link's Awakening* per Switch e a *Four Swords Adventures*, più il supporto all'italiano. Ogni miglioria si attiva o disattiva dal nuovo menu opzioni nel gioco (**Esc** o clic della levetta destra) oppure dal [launcher](https://github.com/ghost19880/Zelda-3-Launcher).
+
+- **Gioco:** transizioni veloci e continue tra le aree, telecamera fluida, menu opzioni con rimappatura di tastiera e pad, salvataggi automatici e rapidi, mappa del mondo interattiva con segnalini, nome del labirinto sulla mappa, oggetti X/L/R nell'HUD, testo più veloce.
+- **Grafica:** testo nitido nei dialoghi, illuminazione dinamica, braci, raggi dalle finestre, bagliore degli oggetti ricevuti, calore sopra la lava, pioggia e lampi migliorati, e lo shader in stile **Four Swords Adventures** (pennellate, ombre morbide, nuvole).
+- **Italiano:** font con le lettere accentate; la traduzione è nel repository [zelda3-italiano](https://github.com/ghost19880/zelda3-italiano) e la scarica il launcher.
+
+Per cominciare scarica il [launcher](https://github.com/ghost19880/Zelda-3-Launcher/releases), indica la ROM americana e premi *Scarica*: al resto pensa lui.
+
+---
+
+*The original README of snesrev/zelda3 follows.*
+
 # Zelda3
 
 A reimplementation of Zelda 3.

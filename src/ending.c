@@ -539,6 +539,11 @@ void Intro_Init() {  // 8cc15d
 void Intro_Init_Continue() {  // 8cc170
   Intro_DisplayLogo();
   int t = subsubmodule_index++;
+  // Il logo "Nintendo" resta a schermo circa 2 secondi prima di sparire:
+  // in origine durava meno di mezzo secondo e non si riusciva a leggere.
+  enum { kLogoHoldFrames = 110 };
+  if (t >= 11 && t < 11 + kLogoHoldFrames)
+    return;
   if (t >= 11) {
     if (--INIDISP_copy)
       return;

@@ -1,0 +1,467 @@
+// Illuminazione dinamica: aloni caldi attorno alle fonti di luce e stanze buie
+// illuminate solo dalle fiamme accese. Lavora sull'immagine gia' disegnata dalla
+// PPU (prima dello shader), senza toccare la logica di gioco.
+#include <math.h>
+#include <string.h>
+#include "hd_light.h"
+#include "zelda_rtl.h"
+#include "variables.h"
+#include "snes/ppu.h"
+#include "hd_fx.h"
+
+bool g_dynamic_light;
+
+enum { kMaxLights = 220, kMaxDecor = 24 };
+
+// Torce a muro e bracieri decorativi trovati nella mappa della stanza
+typedef struct DecorLight {
+  uint16 x, y;   // centro della fiamma, in pixel dentro la stanza (0-511)
+  uint8 phase;   // sfasamento della pulsazione
+} DecorLight;
+
+static DecorLight g_decor[kMaxDecor];
+static int g_num_decor;
+static int g_decor_room = -1;
+static int g_decor_scan_timer;
+
+const uint16 *Dungeon_GetObjectTiles(int subtype, int idx);
+
+typedef struct Light {
+  float x, y;        // centro sullo schermo (pixel del frame)
+  float radius;
+  float r, g, b;     // intensita' per canale
+} Light;
+
+static Light g_lights[kMaxLights];
+static int g_num_lights;
+ // Luce ambiente delle stanze buie: come nel gioco originale la stanza resta
+// leggibile anche senza Lanterna, le fiamme e la Lanterna fanno il resto
+static const float kDarkAmbient = 0.36f;
+static float g_ambient = 1.0f;        // luce ambiente attuale (si avvicina gradualmente all'obiettivo)
+static bool g_dark_override;          // buio originale sospeso durante il disegno
+static uint8 g_saved_fixed[3], g_saved_sub_enabled;
+static float *g_factor;               // fattori di luce per pixel (3 canali)
+static int g_factor_cap;
+
+static bool InGameplay(int *mod_out) {
+  int mod = main_module_index;
+  if (mod == 14) {
+    int sub = submodule_index;
+    if (sub != 1 && sub != 2 && sub != 11)
+      return false;  // mappe e altri menu: niente luci
+    mod = saved_module_for_menu;
+  }
+  *mod_out = mod;
+  return mod == 7 || mod == 9;
+}
+
+// Stanza buia del gioco (serve la Lanterna o le torce)
+static bool IsDarkRoom(int mod) {
+  return mod == 7 && dung_want_lights_out;
+}
+
+// Torce accendibili della stanza. Il gioco azzera la fine dell'elenco subito
+// dopo aver caricato la stanza, ma le torce restano marcate nella tabella degli
+// attributi dei tile con i valori 0xC0-0xCF (0xC0 + numero della torcia): e' da
+// li' che il gioco stesso capisce quale torcia si sta accendendo.
+static uint16 GetTorchMask() {
+  uint16 mask = 0;
+  const uint8 *attr = dung_bg2_attr_table;
+  for (int i = 0; i < 0x2000; i++)
+    if ((attr[i] & 0xf0) == 0xc0)
+      mask |= 1 << (attr[i] & 0xf);
+  return mask;
+}
+
+// Quante torce ci sono e quante sono accese
+static void CountTorches(int *total, int *lit) {
+  uint16 mask = GetTorchMask();
+  int start = dung_index_of_torches_start >> 1;
+  *total = *lit = 0;
+  for (int k = 0; k < 16; k++) {
+    if (!(mask >> k & 1))
+      continue;
+    (*total)++;
+    if (dung_object_tilemap_pos[start + k] & 0x8000)
+      (*lit)++;
+  }
+}
+
+// Forme da cercare: sottotipo e numero dell'oggetto, posizione di due tile della
+// sua grafica (per evitare falsi riconoscimenti) e centro della fiamma.
+typedef struct DecorShape {
+  uint8 subtype, idx;    // subtype 0: si usano direttamente i tile t0/t1
+  uint8 src0, src1;      // indici dei due tile nella grafica dell'oggetto
+  uint8 dx1, dy1;        // posizione del secondo tile rispetto al primo
+  uint8 cx, cy;          // centro della fiamma in pixel rispetto al primo tile
+  uint16 t0, t1;
+} DecorShape;
+
+static const DecorShape kDecorShapes[] = {
+  { 1, 0x55, 0, 1, 1, 0, 16, 8 },   // torce a muro sulle pareti nord/sud (4x2 tile)
+  { 1, 0x56, 0, 1, 1, 0, 16, 8 },
+  { 1, 0x7f, 0, 4, 1, 0, 8, 16 },   // torce a muro sulle pareti ovest/est (2x4 tile)
+  { 1, 0x80, 0, 4, 1, 0, 8, 16 },
+  { 3, 0x20, 0, 2, 1, 0, 8, 8 },    // torcia sempre accesa (2x2 tile)
+  // Braciere (come quelli del Santuario): 2x4 tile, fiamma nei due tile in alto
+  { 0, 0, 0, 0, 1, 0, 8, 8, 0x2dc2, 0x6dc2 },
+};
+
+// Confronto dei tile ignorando la palette (bit 10-12)
+#define TILE_KEY(t) ((t) & ~0x1c00)
+
+static void AddDecor(int x, int y) {
+  for (int i = 0; i < g_num_decor; i++)
+    if (abs(g_decor[i].x - x) < 12 && abs(g_decor[i].y - y) < 12)
+      return;  // stessa fiamma trovata in entrambi i livelli
+  if (g_num_decor >= kMaxDecor)
+    return;
+  DecorLight *d = &g_decor[g_num_decor++];
+  d->x = x, d->y = y, d->phase = (uint8)(x * 7 + y * 13);
+}
+
+// Cerca torce e bracieri decorativi nella mappa della stanza (in memoria, quindi
+// funziona anche dopo aver caricato un salvataggio)
+static void ScanDecorLights() {
+  g_num_decor = 0;
+  g_decor_room = dungeon_room_index;
+  for (int si = 0; si < (int)countof(kDecorShapes); si++) {
+    const DecorShape *sh = &kDecorShapes[si];
+    uint16 t0 = sh->t0, t1 = sh->t1;
+    if (sh->subtype) {
+      const uint16 *src = Dungeon_GetObjectTiles(sh->subtype, sh->idx);
+      t0 = src[sh->src0], t1 = src[sh->src1];
+    }
+    t0 = TILE_KEY(t0), t1 = TILE_KEY(t1);
+    if (t0 == t1)
+      continue;
+    for (int layer = 0; layer < 2; layer++) {
+      const uint16 *tm = layer ? dung_bg1 : dung_bg2;
+      for (int row = 0; row < 64 - sh->dy1; row++) {
+        for (int col = 0; col < 64 - sh->dx1; col++) {
+          if (TILE_KEY(tm[row * 64 + col]) == t0 && TILE_KEY(tm[(row + sh->dy1) * 64 + col + sh->dx1]) == t1)
+            AddDecor(col * 8 + sh->cx, row * 8 + sh->cy);
+        }
+      }
+    }
+  }
+}
+
+static void AddLight(float x, float y, float radius, float r, float g, float b) {
+  if (g_num_lights >= kMaxLights)
+    return;
+  Light *l = &g_lights[g_num_lights++];
+  l->x = x, l->y = y, l->radius = radius, l->r = r, l->g = g, l->b = b;
+}
+
+// Fiamme del frame (sorgenti delle braci in hd_fx.c), in coordinate dello schermo
+HdFire g_hd_fire[kHdMaxFire];
+int g_hd_num_fire;
+
+static void AddFireLight(float x, float y, float radius, float r, float g, float b, float strength) {
+  AddLight(x, y, radius, r, g, b);
+  if (g_hd_num_fire < kHdMaxFire) {
+    HdFire *f = &g_hd_fire[g_hd_num_fire++];
+    f->x = x, f->y = y, f->strength = strength;
+  }
+}
+
+static bool IsFireAncilla(int type, float *radius) {
+  switch (type) {
+  case 0x02: *radius = 36; return true;   // colpo della Bacchetta del Fuoco
+  case 0x2f: *radius = 44; return true;   // fiamma della Lanterna
+  case 0x19: *radius = 90; return true;   // Medaglione della Fiamma
+  case 0x32: *radius = 34; return true;   // palla di fuoco del muro esplosivo
+  case 0x33: case 0x0e: case 0x0f: case 0x10: case 0x12:
+    *radius = 60; return true;            // esplosioni
+  case 0x34: *radius = 50; return true;   // fuoco del Bosco d'Ossa
+  case 0x3a: *radius = 80; return true;   // esplosione della super bomba
+  }
+  return false;
+}
+
+// Raccoglie le luci del frame in coordinate dello schermo
+static void CollectLights(int mod, bool dark, int frame_w, int bias_x, int bias_y) {
+  g_num_lights = 0;
+  g_hd_num_fire = 0;
+  int ext = (frame_w - 256) / 2;
+  int cam_x = BG2HOFS_copy2 + bias_x, cam_y = BG2VOFS_copy2 + bias_y;
+  float t = frame_counter * 0.21f;
+
+  if (mod == 7) {
+    // Torce accese della stanza
+    int room = dungeon_room_index;
+    int ox = BG2HOFS_copy2 & ~0x1ff, oy = BG2VOFS_copy2 & ~0x1ff;  // la telecamera sta sempre dentro la stanza
+    int start = dung_index_of_torches_start >> 1;
+    uint16 torch_mask = GetTorchMask();
+    for (int i = start; i < start + 16; i++) {
+      if (!(torch_mask >> (i - start) & 1))
+        continue;
+      uint16 pos = dung_object_tilemap_pos[i];
+      if (!(pos & 0x8000))
+        continue;
+      int w = (pos >> 1) & 0xfff;
+      float x = ox + (w & 63) * 8 + 8 - cam_x + ext;
+      float y = oy + ((w >> 6) & 63) * 8 + 8 - cam_y;
+      float flicker = 1.0f + 0.05f * sinf(t + i * 1.7f) + 0.03f * sinf(t * 2.3f + i);
+      if (dark)
+        AddFireLight(x, y - 4, 96 * flicker, 1.25f, 1.05f, 0.80f, 1.0f);
+      else
+        AddFireLight(x, y - 4, 60 * flicker, 0.45f, 0.30f, 0.12f, 1.0f);
+    }
+    // Torce a muro e bracieri decorativi: un piccolo alone che pulsa come la
+    // fiamma, per far capire che fanno luce. Nelle stanze buie illuminano di piu'.
+    if (g_decor_room != room || --g_decor_scan_timer <= 0) {
+      ScanDecorLights();
+      g_decor_scan_timer = 30;
+    }
+    for (int i = 0; i < g_num_decor; i++) {
+      DecorLight *d = &g_decor[i];
+      float x = ox + d->x - cam_x + ext, y = oy + d->y - cam_y;
+      float ph = d->phase * 0.1f;
+      float pulse = 0.82f + 0.12f * sinf(t * 1.6f + ph) + 0.06f * sinf(t * 4.1f + ph * 2.0f);
+      if (dark)
+        AddFireLight(x, y, 80 * pulse, 1.10f * pulse, 0.90f * pulse, 0.62f * pulse, 0.8f);
+      else
+        AddFireLight(x, y, 40 * (0.92f + 0.08f * pulse), 0.68f * pulse, 0.44f * pulse, 0.16f * pulse, 0.8f);
+    }
+    // Link con la Lanterna (nelle stanze buie); senza Lanterna una luce minima
+    if (dark) {
+      float lx = link_x_coord + 8 - cam_x + ext, ly = link_y_coord + 12 - cam_y;
+      if (link_item_torch)
+        AddLight(lx, ly, 72 * (1.0f + 0.03f * sinf(t * 1.3f)), 1.15f, 1.0f, 0.82f);
+      else
+        AddLight(lx, ly, 26, 0.40f, 0.38f, 0.36f);
+    }
+  }
+  // Fuoco: fiamme, colpi di fuoco ed esplosioni
+  for (int k = 0; k < 10; k++) {
+    float radius;
+    // Bomba: fa luce solo mentre esplode (fase 1-10), con un lampo che si spegne
+    if (ancilla_type[k] == 0x07) {
+      int phase = ancilla_item_to_link[k];
+      if (phase < 1 || phase > 10)
+        continue;
+      float fade = 1.0f - (phase - 1) / 11.0f;
+      float x = (ancilla_x_hi[k] << 8 | ancilla_x_lo[k]) + 8 - cam_x + ext;
+      float y = (ancilla_y_hi[k] << 8 | ancilla_y_lo[k]) + 8 - cam_y;
+      float m = dark ? 1.3f : 1.0f;
+      AddFireLight(x, y, 74 * m * (0.6f + 0.4f * fade), 1.0f * fade * m, 0.75f * fade * m, 0.40f * fade * m, 2.0f * fade);
+      continue;
+    }
+    if (!IsFireAncilla(ancilla_type[k], &radius))
+      continue;
+    float x = (ancilla_x_hi[k] << 8 | ancilla_x_lo[k]) + 8 - cam_x + ext;
+    float y = (ancilla_y_hi[k] << 8 | ancilla_y_lo[k]) + 8 - cam_y;
+    radius *= 1.0f + 0.08f * sinf(t * 1.9f + k);
+    if (dark)
+      AddFireLight(x, y, radius * 1.3f, 1.2f, 0.95f, 0.65f, 0.6f);
+    else
+      AddFireLight(x, y, radius, 0.55f, 0.32f, 0.10f, 0.6f);
+  }
+}
+
+// Nemici e proiettili infuocati (sprite)
+static bool IsFireSprite(int type, float *radius, bool *cold) {
+  *cold = false;
+  switch (type) {
+  case 0x70: *radius = 34; return true;  // palla di fuoco del Re Helmasaur
+  case 0x7e: *radius = 64; return true;  // catena di fuoco rotante
+  case 0x80: *radius = 30; return true;  // serpente di fuoco
+  case 0x87: *radius = 30; return true;  // fiamma dei Kodongo
+  case 0xcc: *radius = 48; return true;  // testa di fuoco di Trinexx
+  case 0x7b: *radius = 36; *cold = true; return true;  // sfere di energia di Agahnim
+  }
+  return false;
+}
+
+static void CollectSpriteLights(bool dark, int ext, int cam_x, int cam_y, float t) {
+  for (int k = 0; k < 16; k++) {
+    float radius;
+    bool cold;
+    if (!sprite_state[k] || !IsFireSprite(sprite_type[k], &radius, &cold))
+      continue;
+    float x = (sprite_x_hi[k] << 8 | sprite_x_lo[k]) + 8 - cam_x + ext;
+    float y = (sprite_y_hi[k] << 8 | sprite_y_lo[k]) + 8 - (int8)sprite_z[k] - cam_y;
+    radius *= 1.0f + 0.08f * sinf(t * 2.1f + k);
+    float m = dark ? 1.3f : 1.0f;
+    if (cold)
+      AddLight(x, y, radius * m, 0.30f * m, 0.40f * m, 0.75f * m);
+    else
+      AddFireLight(x, y, radius * m, 0.60f * m, 0.36f * m, 0.12f * m, 0.6f);
+  }
+}
+
+// Lava (per esempio nella Rocca Tartaruga): sono tile animati del fondale (i
+// caratteri 0x1B0-0x1CF contengono acqua o lava a seconda del labirinto, piu' le
+// fiamme delle torce). Si considerano lava quelli che sullo schermo sono rosso-
+// arancio e si aggiunge un alone ogni due tile.
+static void CollectLavaLights(const uint8 *pixels, int pitch, int width, int height,
+                              bool dark, int ext, int cam_x, int cam_y, float t) {
+  int room = dungeon_room_index;
+  int ox = BG2HOFS_copy2 & ~0x1ff, oy = BG2VOFS_copy2 & ~0x1ff;  // la telecamera sta sempre dentro la stanza
+  for (int layer = 0; layer < 2; layer++) {
+    const uint16 *tm = layer ? dung_bg1 : dung_bg2;
+    for (int row = 0; row < 64; row += 2) {
+      for (int col = 0; col < 64; col += 2) {
+        int ch = tm[row * 64 + col] & 0x3ff;
+        if (ch < 0x1b0 || ch > 0x1cf)
+          continue;
+        int sx = ox + col * 8 + 4 - cam_x + ext, sy = oy + row * 8 + 4 - cam_y;
+        if (sx < 0 || sy < 0 || sx >= width || sy >= height)
+          continue;
+        uint32 c = ((const uint32 *)(pixels + sy * pitch))[sx];
+        int r = (c >> 16) & 0xff, g = (c >> 8) & 0xff, b = c & 0xff;
+        if (!(r > 120 && r > g + 30 && b < r / 2))
+          continue;  // non e' lava (acqua o altro)
+        // Le fiamme di torce e bracieri hanno gia' il loro alone
+        bool near_decor = false;
+        for (int i = 0; i < g_num_decor && !near_decor; i++)
+          near_decor = abs(g_decor[i].x - (col * 8 + 4)) < 16 && abs(g_decor[i].y - (row * 8 + 4)) < 16;
+        if (near_decor)
+          continue;
+        float pulse = 0.85f + 0.15f * sinf(t * 0.9f + (col + row) * 0.6f);
+        float m = dark ? 1.4f : 1.0f;
+        AddFireLight((float)sx + 4, (float)sy + 4, 26 * m, 0.55f * pulse * m, 0.28f * pulse * m, 0.08f * pulse * m, 0.25f);
+      }
+    }
+  }
+}
+
+void HdLight_BeforeRender(Ppu *ppu) {
+  g_dark_override = false;
+  int mod;
+  if (!g_dynamic_light || !InGameplay(&mod) || !IsDarkRoom(mod))
+    return;
+  // Si sospende il buio originale: sottrazione del colore fisso e cono della
+  // Lanterna (BG1 sullo schermo secondario). Lo sostituisce HdLight_Apply.
+  g_dark_override = true;
+  g_saved_fixed[0] = ppu->fixedColorR, g_saved_fixed[1] = ppu->fixedColorG, g_saved_fixed[2] = ppu->fixedColorB;
+  g_saved_sub_enabled = ppu->screenEnabled[1];
+  ppu->fixedColorR = ppu->fixedColorG = ppu->fixedColorB = 0;
+  ppu->screenEnabled[1] &= ~1;
+}
+
+void HdLight_AfterRender(Ppu *ppu) {
+  if (!g_dark_override)
+    return;
+  ppu->fixedColorR = g_saved_fixed[0], ppu->fixedColorG = g_saved_fixed[1], ppu->fixedColorB = g_saved_fixed[2];
+  ppu->screenEnabled[1] = g_saved_sub_enabled;
+}
+
+void HdLight_Apply(uint8 *pixels, int pitch, int width, int height, int bias_x, int bias_y) {
+  int mod;
+  g_hd_num_fire = 0;
+  if (!InGameplay(&mod) || (!g_dynamic_light && !g_fx_embers)) {
+    g_ambient = 1.0f;
+    return;
+  }
+  bool dark = IsDarkRoom(mod);
+  // Luce ambiente desiderata
+  float target = 1.0f;
+  if (dark) {
+    int total, lit;
+    CountTorches(&total, &lit);
+    int needed = total < 3 ? total : 3;
+    target = (needed > 0 && lit >= needed) ? 1.0f : kDarkAmbient;
+  } else if (mod == 7) {
+    target = 0.86f;  // labirinti: un po' piu' scuri
+  }
+  // Transizione morbida (circa un secondo per accendere tutta la stanza)
+  g_ambient += (target - g_ambient) * 0.06f;
+  if (fabsf(target - g_ambient) < 0.003f)
+    g_ambient = target;
+
+  CollectLights(mod, dark, width, bias_x, bias_y);
+  {
+    int ext = (width - 256) / 2;
+    int cam_x = BG2HOFS_copy2 + bias_x, cam_y = BG2VOFS_copy2 + bias_y;
+    float t = frame_counter * 0.21f;
+    CollectSpriteLights(dark, ext, cam_x, cam_y, t);
+    if (mod == 7)
+      CollectLavaLights(pixels, pitch, width, height, dark, ext, cam_x, cam_y, t);
+  }
+  if (!g_dynamic_light) {
+    g_ambient = 1.0f;
+    return;  // servivano solo le sorgenti delle braci
+  }
+  if (g_ambient >= 0.999f && g_num_lights == 0)
+    return;
+
+  int n = width * height;
+  if (n * 3 > g_factor_cap) {
+    g_factor_cap = n * 3;
+    free(g_factor);
+    g_factor = malloc(sizeof(float) * g_factor_cap);
+  }
+  for (int i = 0; i < n * 3; i++)
+    g_factor[i] = g_ambient;
+  // A stanza illuminata le fiamme fanno solo un alone leggero
+  float light_scale = dark ? (1.0f - (g_ambient - kDarkAmbient) / (1.0f - kDarkAmbient) * 0.75f) : 1.0f;
+  for (int li = 0; li < g_num_lights; li++) {
+    Light *l = &g_lights[li];
+    int x0 = (int)(l->x - l->radius), x1 = (int)(l->x + l->radius);
+    int y0 = (int)(l->y - l->radius), y1 = (int)(l->y + l->radius);
+    if (x0 < 0) x0 = 0;
+    if (y0 < 0) y0 = 0;
+    if (x1 > width - 1) x1 = width - 1;
+    if (y1 > height - 1) y1 = height - 1;
+    float inv_r2 = 1.0f / (l->radius * l->radius);
+    for (int y = y0; y <= y1; y++) {
+      float dy = y - l->y;
+      float *f = g_factor + (y * width + x0) * 3;
+      for (int x = x0; x <= x1; x++, f += 3) {
+        float dx = x - l->x;
+        float d2 = (dx * dx + dy * dy) * inv_r2;
+        if (d2 >= 1.0f)
+          continue;
+        float a = (1.0f - d2);
+        a = a * a * light_scale;  // bordo morbido
+        f[0] += l->r * a, f[1] += l->g * a, f[2] += l->b * a;
+      }
+    }
+  }
+  // L'oggetto appena ottenuto, sollevato da Link, resta con i suoi colori:
+  // riquadri attorno all'oggetto ricevuto, all'Amuleto/Cristallo e alla Spada Suprema
+  int item_x[4], item_y[4], item_w[4], item_h[4], n_items = 0;
+  {
+    int ext = (width - 256) / 2;
+    int cam_x = BG2HOFS_copy2 + bias_x, cam_y = BG2VOFS_copy2 + bias_y;
+    for (int k = 0; k < 10 && n_items < 4; k++) {
+      int type = ancilla_type[k];
+      if (type != 0x22 && type != 0x29 && type != 0x35)
+        continue;
+      bool big = type != 0x22;
+      item_x[n_items] = (ancilla_x_hi[k] << 8 | ancilla_x_lo[k]) - cam_x + ext - (big ? 4 : 2);
+      item_y[n_items] = (ancilla_y_hi[k] << 8 | ancilla_y_lo[k]) - cam_y - (big ? 4 : 2);
+      item_w[n_items] = big ? 24 : 20;
+      item_h[n_items] = big ? 36 : 20;
+      n_items++;
+    }
+  }
+  // Applicazione: l'HUD e i testi (layer 2 nel byte alto) restano intatti
+  for (int y = 0; y < height; y++) {
+    uint32 *row = (uint32 *)(pixels + y * pitch);
+    const float *f = g_factor + y * width * 3;
+    for (int x = 0; x < width; x++, f += 3) {
+      uint32 c = row[x];
+      if ((c >> 24) == 2)
+        continue;
+      if (n_items && ((c >> 24) == 4 || (c >> 24) == 6)) {
+        bool held = false;
+        for (int i = 0; i < n_items; i++)
+          held |= x >= item_x[i] && x < item_x[i] + item_w[i] && y >= item_y[i] && y < item_y[i] + item_h[i];
+        if (held)
+          continue;
+      }
+      float fr = f[0] < 1.35f ? f[0] : 1.35f;
+      float fg = f[1] < 1.30f ? f[1] : 1.30f;
+      float fb = f[2] < 1.25f ? f[2] : 1.25f;
+      int r = (int)(((c >> 16) & 0xff) * fr), g = (int)(((c >> 8) & 0xff) * fg), b = (int)((c & 0xff) * fb);
+      if (r > 255) r = 255;
+      if (g > 255) g = 255;
+      if (b > 255) b = 255;
+      row[x] = (c & 0xff000000) | r << 16 | g << 8 | b;
+    }
+  }
+}

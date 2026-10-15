@@ -1,0 +1,43 @@
+// Menu opzioni in gioco, salvataggi automatici e altre migliorie "HD".
+#ifndef ZELDA3_HD_MENU_H_
+#define ZELDA3_HD_MENU_H_
+
+#include "types.h"
+
+
+// Funzioni fornite da main.c
+bool Host_IsFullscreen();
+void Host_ToggleFullscreen();
+bool Host_GetDisplayPerf();
+void Host_SetDisplayPerf(bool on);
+int Host_GetVolume();
+void Host_AdjustVolume(int step);
+bool Host_IsOpenGL();
+uint32 Host_GetPpuRenderFlags();
+void Host_SetPpuRenderFlags(uint32 flags);
+void Host_ClearInputs();
+void Host_Quit();
+
+void HdMenu_ApplyConfig();
+bool HdMenu_IsOpen();
+void HdMenu_Open();
+void HdMenu_Close();
+// Restituiscono true se l'evento e' stato usato dal menu
+bool HdMenu_HandleKey(int code, int mod, bool pressed);
+bool HdMenu_HandlePadButton(int button, bool pressed);
+void HdMenu_HandleStick(uint8 dir_bits);
+// Disegna il menu sopra l'immagine del gioco (pixel 0x00RRGGBB)
+void HdMenu_Draw(uint8 *pixels, int pitch, int width, int height, int scale);
+
+// Mostra un breve messaggio in basso sullo schermo
+void HdMenu_ShowMessage(const char *msg);
+
+// Da chiamare dopo ogni frame di gioco (con l'audio bloccato)
+void HdMenu_AfterFrame(bool is_replay);
+
+// Testo nitido: rettangolo (in pixel del frame) del riquadro dei dialoghi da
+// ridisegnare sopra lo shader, e ingrandimento 4x per pixel art.
+bool HdText_GetRect(int frame_w, int frame_h, int *x, int *y, int *w, int *h);
+void HdText_Scale4x(const uint8 *src, int src_pitch, int x, int y, int w, int h, uint32 *dst);
+
+#endif  // ZELDA3_HD_MENU_H_

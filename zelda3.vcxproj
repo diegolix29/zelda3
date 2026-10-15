@@ -231,6 +231,9 @@
     <ClCompile Include="src\dungeon.c" />
     <ClCompile Include="src\ending.c" />
     <ClCompile Include="src\glsl_shader.c" />
+    <ClCompile Include="src\hd_menu.c" />
+    <ClCompile Include="src\hd_light.c" />
+    <ClCompile Include="src\hd_fx.c" />
     <ClCompile Include="src\hud.c" />
     <ClCompile Include="src\load_gfx.c" />
     <ClCompile Include="src\main.c" />

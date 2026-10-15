@@ -6,6 +6,7 @@
 #include "util.h"
 #include "glsl_shader.h"
 #include "config.h"
+#include "hd_menu.h"
 
 #define CODE(...) #__VA_ARGS__
 
@@ -17,6 +18,9 @@ static unsigned int g_program, g_VAO;
 static GlTextureWithSize g_texture;
 static GlslShader *g_glsl_shader;
 static bool g_opengl_es;
+static unsigned int g_overlay_texture;
+static uint32 *g_overlay_pixels;
+static int g_overlay_cap;
 
 static void GL_APIENTRY MessageCallback(GLenum source,
                 GLenum type,
@@ -208,7 +212,7 @@ static void OpenGLRenderer_EndDraw() {
   }
 
   int viewport_x = (drawable_width - viewport_width) >> 1;
-  int viewport_y = (viewport_height - viewport_height) >> 1;
+  int viewport_y = (drawable_height - viewport_height) >> 1;
 
   glBindTexture(GL_TEXTURE_2D, g_texture.gl_texture);
   if (g_draw_width == g_texture.width && g_draw_height == g_texture.height) {
@@ -238,6 +242,38 @@ static void OpenGLRenderer_EndDraw() {
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
   } else {
     GlslShader_Render(g_glsl_shader, &g_texture, viewport_x, viewport_y, viewport_width, viewport_height);
+  }
+
+  // Testo nitido: il riquadro dei dialoghi viene ridisegnato sopra, ingrandito
+  // 4x con un algoritmo per pixel art e senza passare dallo shader.
+  int rx, ry, rw, rh;
+  if (HdText_GetRect(g_draw_width, g_draw_height, &rx, &ry, &rw, &rh)) {
+    if (rw * rh * 16 > g_overlay_cap) {
+      g_overlay_cap = rw * rh * 16;
+      free(g_overlay_pixels);
+      g_overlay_pixels = malloc(g_overlay_cap * 4);
+    }
+    HdText_Scale4x(g_screen_buffer, g_draw_width * 4, rx, ry, rw, rh, g_overlay_pixels);
+    if (!g_overlay_texture)
+      glGenTextures(1, &g_overlay_texture);
+    glBindTexture(GL_TEXTURE_2D, g_overlay_texture);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, rw * 4, rh * 4, 0, GL_BGRA,
+                 g_opengl_es ? GL_UNSIGNED_BYTE : GL_UNSIGNED_INT_8_8_8_8_REV, g_overlay_pixels);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    int x0 = viewport_x + rx * viewport_width / g_draw_width;
+    int x1 = viewport_x + (rx + rw) * viewport_width / g_draw_width;
+    int y0 = viewport_y + (g_draw_height - ry - rh) * viewport_height / g_draw_height;
+    int y1 = viewport_y + (g_draw_height - ry) * viewport_height / g_draw_height;
+    glViewport(x0, y0, x1 - x0, y1 - y0);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, g_overlay_texture);
+    glUseProgram(g_program);
+    glBindVertexArray(g_VAO);
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    glBindTexture(GL_TEXTURE_2D, g_texture.gl_texture);
   }
 
   SDL_GL_SwapWindow(g_window);

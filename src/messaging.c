@@ -16,6 +16,7 @@
 #include "attract.h"
 #include "nmi.h"
 #include "assets.h"
+#include "hd_menu.h"
 
 static void WorldMap_AddSprite(int spr, uint8 big, uint8 flags, uint8 ch, uint16 x, uint16 y);
 static bool WorldMap_CalculateOamCoordinates(Point16U *pt);
@@ -1152,6 +1153,145 @@ bool DidPressButtonForMap() {
     return filtered_joypad_L & 0x40;  // x
 }
 
+// ---------------------------------------------------------------------------
+// Mappa del mondo interattiva: segnalini personali, mirino, ricentra su Link
+// e scorrimento veloce. I segnalini sono salvati in saves/segnalini_fileN.txt.
+
+enum { kMaxMapMarkers = 24, kMapMarkerOamBase = 40, kMapCursorOam = 39 };
+
+typedef struct MapMarker {
+  uint8 dark;
+  uint16 x, y;
+} MapMarker;
+
+static MapMarker g_map_markers[kMaxMapMarkers];
+static int g_map_marker_count;
+static int g_map_markers_slot = -1;
+static bool g_map_hint_shown;
+
+static void MapMarkers_FileName(char *buf, size_t size) {
+  snprintf(buf, size, "saves/segnalini_file%d.txt", g_map_markers_slot);
+}
+
+static void MapMarkers_Load() {
+  int slot = srm_var1 >> 1;
+  if (slot == g_map_markers_slot)
+    return;
+  g_map_markers_slot = slot;
+  g_map_marker_count = 0;
+  char name[64];
+  MapMarkers_FileName(name, sizeof(name));
+  FILE *f = fopen(name, "r");
+  if (!f)
+    return;
+  int d, x, y;
+  while (g_map_marker_count < kMaxMapMarkers && fscanf(f, "%d %d %d", &d, &x, &y) == 3) {
+    MapMarker *m = &g_map_markers[g_map_marker_count++];
+    m->dark = d, m->x = x, m->y = y;
+  }
+  fclose(f);
+}
+
+static void MapMarkers_Save() {
+  char name[64];
+  MapMarkers_FileName(name, sizeof(name));
+  FILE *f = fopen(name, "w");
+  if (!f)
+    return;
+  for (int i = 0; i < g_map_marker_count; i++)
+    fprintf(f, "%d %d %d\n", g_map_markers[i].dark, g_map_markers[i].x, g_map_markers[i].y);
+  fclose(f);
+}
+
+static bool WorldMap_CalculateOamCoordinates(Point16U *pt);
+
+// Calcola la posizione sulla mappa (in pixel del mondo) di un punto dello
+// schermo, provando i punti del mondo e scegliendo il piu' vicino.
+static bool WorldMap_ScreenToWorld(int sx, int sy, uint16 *wx, uint16 *wy) {
+  uint16 xbak = link_x_coord_spexit, ybak = link_y_coord_spexit;
+  int best = 0x7fffffff;
+  uint16 bx = 0, by = 0;
+  for (int pass = 0; pass < 2; pass++) {
+    int step = pass ? 2 : 32;
+    int x0 = pass ? IntMax(bx - 48, 0) : 0, x1 = pass ? IntMin(bx + 48, 0xfff) : 0xfff;
+    int y0 = pass ? IntMax(by - 48, 0) : 0, y1 = pass ? IntMin(by + 48, 0xfff) : 0xfff;
+    for (int y = y0; y <= y1; y += step) {
+      for (int x = x0; x <= x1; x += step) {
+        Point16U pt;
+        link_x_coord_spexit = x, link_y_coord_spexit = y;
+        if (!WorldMap_CalculateOamCoordinates(&pt))
+          continue;
+        int dx = (int16)pt.x - sx, dy = (int16)pt.y - sy;
+        int d = dx * dx + dy * dy;
+        if (d < best)
+          best = d, bx = x, by = y;
+      }
+    }
+  }
+  link_x_coord_spexit = xbak, link_y_coord_spexit = ybak;
+  *wx = bx, *wy = by;
+  return best < 64;
+}
+
+static void WorldMap_CenterOnLink() {
+  BG1VOFS_copy2 = ((link_y_coord_spexit >> 4) - 0x48 & ~1);
+  M7Y_copy = BG1VOFS_copy2 + 0x100;
+  uint16 t0 = (link_x_coord_spexit >> 4) - 0x80;
+  uint16 t1 = (uint16)(5 * (sign16(t0) ? -t0 : t0)) >> 1;
+  uint16 t2 = sign16(t0) ? -t1 : t1;
+  BG1HOFS_copy2 = t2 + 0x80 & ~1;
+}
+
+static void WorldMap_ToggleMarkerAtCenter() {
+  uint16 wx, wy;
+  if (!WorldMap_ScreenToWorld(128, 112, &wx, &wy))
+    return;
+  uint8 dark = is_in_dark_world & 1;
+  // Se c'e' gia' un segnalino vicino lo toglie
+  for (int i = 0; i < g_map_marker_count; i++) {
+    MapMarker *m = &g_map_markers[i];
+    if (m->dark == dark && abs(m->x - wx) < 96 && abs(m->y - wy) < 96) {
+      g_map_markers[i] = g_map_markers[--g_map_marker_count];
+      sound_effect_2 = 0x20;
+      MapMarkers_Save();
+      HdMenu_ShowMessage("Segnalino tolto");
+      return;
+    }
+  }
+  if (g_map_marker_count >= kMaxMapMarkers) {
+    HdMenu_ShowMessage("Troppi segnalini, togline qualcuno");
+    return;
+  }
+  MapMarker *m = &g_map_markers[g_map_marker_count++];
+  m->dark = dark, m->x = wx, m->y = wy;
+  sound_effect_2 = 0x24;
+  MapMarkers_Save();
+  HdMenu_ShowMessage("Segnalino aggiunto");
+}
+
+static void WorldMap_DrawHdSprites() {
+  uint16 xbak = link_x_coord_spexit, ybak = link_y_coord_spexit;
+  uint8 dark = is_in_dark_world & 1;
+  int n = 0;
+  for (int i = 0; i < g_map_marker_count; i++) {
+    MapMarker *m = &g_map_markers[i];
+    if (m->dark != dark)
+      continue;
+    Point16U pt;
+    link_x_coord_spexit = m->x, link_y_coord_spexit = m->y;
+    if (WorldMap_CalculateOamCoordinates(&pt)) {
+      uint16 x = pt.x - 4, y = pt.y - 4;
+      SetOamPlain(&oam_buf[kMapMarkerOamBase + n], x, y, kOwMap_tab2[0], 0x34,
+                  (enhanced_features0 & kFeatures0_ExtendScreen64) ? (x >> 8 & 1) : 0);
+      n++;
+    }
+  }
+  link_x_coord_spexit = xbak, link_y_coord_spexit = ybak;
+  // Mirino al centro quando la mappa e' ingrandita
+  if (overworld_map_flags && (frame_counter & 8))
+    SetOamPlain(&oam_buf[kMapCursorOam], 124, 108, kOwMap_tab2[frame_counter >> 4 & 3], 0x36, 0);
+}
+
 void WorldMap_PlayerControl() {  // 8abae6
   if (overworld_map_flags & 0x80) {
     overworld_map_flags &= ~0x80;
@@ -1187,17 +1327,31 @@ void WorldMap_PlayerControl() {  // 8abae6
     }
   }
 
+  MapMarkers_Load();
+  if (!g_map_hint_shown) {
+    g_map_hint_shown = true;
+    HdMenu_ShowMessage("A segnalino   Y centra su Link   tieni B per scorrere veloce");
+  }
   if (overworld_map_flags) {
-    int k = (joypad1H_last & 12) >> 1;
-    if (BG1VOFS_copy2 != (uint16)kOverworldMap_Table2[k]) {
-      BG1VOFS_copy2 += kOverworldMap_Table3[k];
-      M7Y_copy = BG1VOFS_copy2 + 0x100;
+    if (filtered_joypad_H & 0x40)  // Y: ricentra su Link
+      WorldMap_CenterOnLink();
+    if (filtered_joypad_L & 0x80)  // A: metti o togli un segnalino
+      WorldMap_ToggleMarkerAtCenter();
+    // Tenendo B lo scorrimento e' tre volte piu' veloce
+    int steps = (joypad1H_last & 0x80) ? 3 : 1;
+    for (int i = 0; i < steps; i++) {
+      int k = (joypad1H_last & 12) >> 1;
+      if (BG1VOFS_copy2 != (uint16)kOverworldMap_Table2[k]) {
+        BG1VOFS_copy2 += kOverworldMap_Table3[k];
+        M7Y_copy = BG1VOFS_copy2 + 0x100;
+      }
+      k = (joypad1H_last & 3) * 2 + 1;
+      if (BG1HOFS_copy2 != (uint16)kOverworldMap_Table2[k])
+        BG1HOFS_copy2 += kOverworldMap_Table3[k];
     }
-    k = (joypad1H_last & 3) * 2 + 1;
-    if (BG1HOFS_copy2 != (uint16)kOverworldMap_Table2[k])
-      BG1HOFS_copy2 += kOverworldMap_Table3[k];
   }
   WorldMap_HandleSprites();
+  WorldMap_DrawHdSprites();
 }
 
 void WorldMap_RestoreGraphics() {  // 8abbd6
@@ -1847,7 +2001,8 @@ void DungeonMap_HandleInput() {  // 8ae95b
 
 void DungeonMap_HandleMovementInput() {  // 8ae979
   DungeonMap_HandleFloorSelect();
-  if (dungmap_var2)
+  // Cambio di piano piu' rapido: tre passi per frame
+  for (int i = 0; i < 3 && dungmap_var2; i++)
     DungeonMap_ScrollFloors();
 }
 
@@ -2380,20 +2535,31 @@ void RenderText_Draw_CharacterTilemap() {  // 8ec97d
   text_render_state++;
 }
 
+// Velocita' del testo: 0 = originale, 1 = tenendo A o B il testo corre,
+// 2 = sempre istantaneo.
+int g_text_speed;
+
+static bool Text_WantFast() {
+  if (g_text_speed >= 2)
+    return true;
+  return g_text_speed == 1 && ((joypad1H_last | joypad1L_last) & 0x80);
+}
+
 void RenderText_Draw_MessageCharacters() {  // 8ec984
+  bool fast = Text_WantFast();
 RESTART:;
   uint32 cmd = Text_DecodeCmd(messaging_text_buffer[dialogue_msg_read_pos],
       &messaging_text_buffer[dialogue_msg_read_pos + 1]);
 
   switch (TEXTCMD_CMD(cmd)) {
   case kTextCmd_IsLetter:
-    if (vwf_line_speed_cur >= 2) {
+    if (vwf_line_speed_cur >= 2 && !fast) {
       vwf_line_speed_cur--;
       break;
     }
     VWF_RenderSingle(TEXTCMD_PARAM(cmd));
     dialogue_msg_read_pos += 1 + TEXTCMD_MULTIBYTE(cmd);
-    if (vwf_line_speed_cur == 0)
+    if (vwf_line_speed_cur == 0 || fast)
       goto RESTART;
     break;
   case kTextCmd_NextPic:  // RenderText_Draw_NextImage
@@ -2713,7 +2879,7 @@ void RenderText_Draw_Choose1Or2() {  // 8ecf72
 }
 
 bool RenderText_Draw_Scroll() {  // 8ecfe2
-  uint8 r2 = dialogue_scroll_speed;
+  uint8 r2 = Text_WantFast() ? 15 : dialogue_scroll_speed;
   do {
     for (int i = 0; i < 0x7e0; i += 16) {
       uint16 *p = (uint16 *)((uint8 *)messaging_buf + i);

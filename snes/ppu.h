@@ -54,6 +54,8 @@ struct Ppu {
   uint8_t *renderBuffer;
   uint8_t extraLeftCur, extraRightCur, extraLeftRight, extraBottomCur;
   float mode7PerspectiveLow, mode7PerspectiveHigh;
+  // Spostamento visivo della telecamera fluida (non tocca la logica di gioco)
+  int16_t bgBiasX, bgBiasY, objBiasX, objBiasY;
 
   // TMW / TSW etc
   uint8 screenEnabled[2];

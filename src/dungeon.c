@@ -502,6 +502,12 @@ void Object_Hole(const uint16 *src, uint16 *dst) {
   }
 }
 
+// Grafica (tile) di un oggetto delle stanze: usata dall'illuminazione per
+// ritrovare torce e bracieri decorativi nella mappa della stanza.
+const uint16 *Dungeon_GetObjectTiles(int subtype, int idx) {
+  return SrcPtr(subtype == 3 ? kObjectSubtype3Params[idx] : kObjectSubtype1Params[idx]);
+}
+
 // dsto is half the value of Y
 void LoadType1ObjectSubtype1(uint8 idx, uint16 *dst, uint16 dsto) {
   uint16 param1 = kObjectSubtype1Params[idx];
@@ -8162,7 +8168,30 @@ void DungeonTransition_AdjustCamera_Y(uint8 arg) {  // 82bde2
   up_down_scroll_target_end = kUpDownScroll[arg + 1];
 }
 
+// Con le transizioni veloci si fanno due passi per frame, fermandosi
+// appena lo scorrimento arriva a destinazione.
+static void RunTransitionSteps(void Step()) {
+  int steps = (enhanced_features0 & kFeatures0_FastTransitions) ? 2 : 1;
+  for (int i = 0; i < steps; i++) {
+    uint8 old = subsubmodule_index;
+    Step();
+    if (subsubmodule_index != old)
+      break;
+  }
+}
+
+static void DungeonTransition_ScrollRoomStep();
+static void Module07_11_0A_ScrollCameraStep();
+
 void DungeonTransition_ScrollRoom() {  // 82be03
+  RunTransitionSteps(&DungeonTransition_ScrollRoomStep);
+}
+
+void Module07_11_0A_ScrollCamera() {  // 82be75
+  RunTransitionSteps(&Module07_11_0A_ScrollCameraStep);
+}
+
+static void DungeonTransition_ScrollRoomStep() {
   transition_counter++;
   int i = overworld_screen_transition;
   bg1_y_offset = bg1_x_offset = 0;
@@ -8188,7 +8217,7 @@ void DungeonTransition_ScrollRoom() {  // 82be03
 
 }
 
-void Module07_11_0A_ScrollCamera() {  // 82be75
+static void Module07_11_0A_ScrollCameraStep() {
   link_visibility_status = tagalong_var5 = 12;
   int i = overworld_screen_transition;
   BG1VOFS_copy2 = BG2VOFS_copy2 = (BG2VOFS_copy2 + kStaircaseTab3[i]) & ~3;

@@ -46,6 +46,15 @@ enum {
   kFeatures0_SwitchLRLimit = 32768,
 
   kFeatures0_DimFlashes = 65536,
+
+  // Migliorie "HD"
+  // Scorrimento tra aree e stanze a velocita' doppia
+  kFeatures0_FastTransitions = 1 << 17,
+  // Mostra nell'HUD gli oggetti assegnati a X/L/R
+  kFeatures0_ShowXLRItemsInHud = 1 << 18,
+  // Transizione continua tra aree esterne: niente blocco iniziale, Link
+  // cammina in modo uniforme durante lo scorrimento, assestamento immediato
+  kFeatures0_ContinuousTransitions = 1 << 19,
 };
 
 #define enhanced_features0 (*(uint32*)(g_ram+0x64c))

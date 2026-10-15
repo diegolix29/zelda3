@@ -764,6 +764,16 @@ void Graphics_IncrementalVRAMUpload() {  // 80deff
   incremental_counter_for_vram++;
 }
 
+// Come Graphics_IncrementalVRAMUpload ma copia subito in VRAM invece di
+// passare dall'NMI, che ne gestisce uno solo per frame. Usata dalle
+// transizioni veloci, che fanno due passi per frame.
+void Graphics_IncrementalVRAMUploadImmediate() {
+  if (incremental_counter_for_vram == 16)
+    return;
+  int n = incremental_counter_for_vram++;
+  memcpy(&g_zenv.vram[(0x50 + n) * 256], &g_ram[0x10000 + n * 0x200], 0x200);
+}
+
 void PrepTransAuxGfx() {  // 80df1a
   Do3To4High16Bit(&g_ram[0x10000], &g_ram[0x6000], 0x40);
   if (aux_tile_theme_index >= 32) {

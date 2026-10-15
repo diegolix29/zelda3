@@ -34,6 +34,7 @@ enum {
   kKeys_ToggleRenderer,
   kKeys_VolumeUp,
   kKeys_VolumeDown,
+  kKeys_HdMenu,
   kKeys_Total,
 };
 
@@ -68,6 +69,16 @@ typedef struct Config {
   bool disable_frame_delay;
   uint8 msuvolume;
   uint32 features0;
+  // Migliorie HD
+  uint8 smooth_camera;      // 0 = spenta, 1-3 = intensita'
+  bool autosave_areas;      // salvataggio automatico ai cambi di area
+  uint8 autosave_slots;     // quanti salvataggi automatici tenere a rotazione
+  bool hd_text;
+  bool high_refresh;
+  bool dynamic_light;
+  // Effetti visivi aggiuntivi
+  bool fx_embers, fx_window_rays, fx_item_glow, fx_heat_haze, fx_rain;
+  uint8 text_speed;         // 0 = originale, 1 = veloce, 2 = istantaneo
 
   const char *link_graphics;
   char *memory_buffer;
@@ -108,3 +119,20 @@ extern Config g_config;
 void ParseConfigFile(const char *filename);
 int FindCmdForSdlKey(SDL_Keycode code, SDL_Keymod mod);
 int FindCmdForGamepadButton(int button, uint32 modifiers);
+
+// Funzioni per il menu opzioni (hd_menu.c)
+const char *Config_GetFilename();
+int Config_GetKeyForCmd(int cmd);
+void Config_KeyName(int key, char *buf, size_t size);
+void Config_SetKeyForCmd(int cmd, SDL_Keycode code, SDL_Keymod mod);
+int Config_GetPadButtonForCmd(int cmd);
+const char *Config_PadButtonName(int button);
+void Config_SetPadButtonForCmd(int cmd, int button);
+void Config_ResetControlsToDefault();
+
+typedef struct IniValue {
+  const char *section;  // es. "[Graphics]"
+  const char *key;
+  char value[160];
+} IniValue;
+bool Config_WriteIniValues(const IniValue *values, int count);
