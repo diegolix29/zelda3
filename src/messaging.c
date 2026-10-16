@@ -17,6 +17,7 @@
 #include "nmi.h"
 #include "assets.h"
 #include "hd_menu.h"
+#include "config.h"
 
 static void WorldMap_AddSprite(int spr, uint8 big, uint8 flags, uint8 ch, uint16 x, uint16 y);
 static bool WorldMap_CalculateOamCoordinates(Point16U *pt);
@@ -1328,7 +1329,7 @@ void WorldMap_PlayerControl() {  // 8abae6
   }
 
   MapMarkers_Load();
-  if (!g_map_hint_shown) {
+  if (!g_map_hint_shown && !g_config.fx_button_hints) {
     g_map_hint_shown = true;
     HdMenu_ShowMessage("A segnalino   Y centra su Link   tieni B per scorrere veloce");
   }

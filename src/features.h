@@ -55,6 +55,12 @@ enum {
   // Transizione continua tra aree esterne: niente blocco iniziale, Link
   // cammina in modo uniforme durante lo scorrimento, assestamento immediato
   kFeatures0_ContinuousTransitions = 1 << 19,
+  // HUD moderno: cuori e magia a sinistra, tasti Y/A/B a destra, scritta
+  // dell'azione del tasto A
+  kFeatures0_ModernHud = 1 << 20,
+  // Mondo continuo all'esterno: oltre il bordo dell'area si vedono le aree
+  // vicine e la vista segue Link fino al bordo e durante il passaggio
+  kFeatures0_ContinuousWorld = 1 << 21,
 };
 
 #define enhanced_features0 (*(uint32*)(g_ram+0x64c))

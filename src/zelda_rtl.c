@@ -14,6 +14,7 @@
 #include "assets.h"
 #include "hd_light.h"
 #include "hd_fx.h"
+#include "hd_hud.h"
 ZeldaEnv g_zenv;
 uint8 g_ram[131072];
 
@@ -150,6 +151,8 @@ float g_interp_alpha = 1.0f;
 
 extern int g_render_bias_x, g_render_bias_y;
 
+#include "hd_world.h"
+
 static void ConfigurePpuSideSpace() {
   // Let PPU impl know about the maximum allowed extra space on the sides and bottom
   int extra_right = 0, extra_left = 0, extra_bottom = 0;
@@ -157,6 +160,9 @@ static void ConfigurePpuSideSpace() {
   int mod = main_module_index;
   if (mod == 14)
     mod = saved_module_for_menu;
+  // cerchio che si chiude (15) o si riapre (16): come dentro o fuori
+  if (mod == 15 || mod == 16)
+    mod = player_is_indoors ? 7 : 9;
   if (mod == 9) {
     if (main_module_index == 14 && submodule_index == 7 && overworld_map_state >= 4) {
       // World map
@@ -182,6 +188,11 @@ static void ConfigurePpuSideSpace() {
     extra_left = kPpuExtraLeftRight, extra_right = kPpuExtraLeftRight;
     extra_bottom = 16;
   }
+  if (HdWorld_Active()) {
+    // Mondo continuo: oltre il bordo il fondale arriva dalle immagini delle aree
+    PpuSetExtraSideSpace(g_zenv.ppu, kPpuExtraLeftRight, kPpuExtraLeftRight, 16);
+    return;
+  }
   if (g_render_bias_x | g_render_bias_y) {
     // Un valore negativo (durante le transizioni) vuol dire "nessun limite"
     if (extra_left >= 0) extra_left = IntMax(extra_left + g_render_bias_x, 0);
@@ -196,6 +207,8 @@ static void ConfigurePpuSideSpace() {
 // g_smooth_camera: 0 = spenta, 1 = leggera, 2 = media, 3 = forte.
 int g_smooth_camera;
 static float g_cam_vx, g_cam_vy;
+static int g_cam_last_x, g_cam_last_y;  // Link nel frame precedente
+static int g_cam_int_x, g_cam_int_y;    // posizione disegnata (pixel interi)
 static bool g_cam_valid;
 
 static bool SmoothCamera_IsGameplay() {
@@ -204,6 +217,11 @@ static bool SmoothCamera_IsGameplay() {
   // durante lo scorrimento fra aree esterne: la panoramica accelera e frena.
   if (mod == 9 && (enhanced_features0 & kFeatures0_ContinuousTransitions) &&
       submodule_index >= 5 && submodule_index <= 8)
+    return true;
+  // Con il mondo continuo il passaggio fra aree dura un frame (fase 1) e la
+  // vista segue Link: la telecamera fluida non deve riallinearsi di colpo
+  if (mod == 9 && (enhanced_features0 & kFeatures0_ContinuousWorld) &&
+      submodule_index >= 1 && submodule_index <= 8 && BYTE(overworld_screen_index) < 0x80)
     return true;
   if (mod == 7 || mod == 9)
     return submodule_index == 0;
@@ -220,7 +238,11 @@ static int g_vis_prev_x, g_vis_prev_y, g_vis_cur_x, g_vis_cur_y;
 void ZeldaUpdateCamera() {
   static const float kFollow[4] = { 1.0f, 0.30f, 0.20f, 0.13f };
   enum { kMaxDelta = 24 };
-  int lx = BG2HOFS_copy2, ly = BG2VOFS_copy2;
+  int gx = BG2HOFS_copy2, gy = BG2VOFS_copy2;
+  // Con il mondo continuo si insegue la telecamera "libera" invece di quella
+  // del gioco, che si ferma ai bordi dell'area
+  int lx = gx, ly = gy;
+  HdWorld_UpdateCamera(&lx, &ly);
   int level = g_smooth_camera < 0 ? 0 : g_smooth_camera > 3 ? 3 : g_smooth_camera;
   if (level == 0 || !SmoothCamera_IsGameplay() || !g_cam_valid ||
       abs(lx - (int)g_cam_vx) > 64 || abs(ly - (int)g_cam_vy) > 64) {
@@ -228,18 +250,50 @@ void ZeldaUpdateCamera() {
     g_cam_valid = (level != 0 && SmoothCamera_IsGameplay());
   } else {
     float k = kFollow[level];
-    g_cam_vx += (lx - g_cam_vx) * k;
-    g_cam_vy += (ly - g_cam_vy) * k;
+    // Inseguimento con ritardo; quando Link inverte la direzione la
+    // telecamera si ferma invece di continuare nel verso vecchio
+    float sx = (lx - g_cam_vx) * k, sy = (ly - g_cam_vy) * k;
+    int mx = link_x_coord - g_cam_last_x, my = link_y_coord - g_cam_last_y;
+    if ((mx > 0 && sx < 0) || (mx < 0 && sx > 0)) sx = 0;
+    if ((my > 0 && sy < 0) || (my < 0 && sy > 0)) sy = 0;
+    g_cam_vx += sx;
+    g_cam_vy += sy;
     // Restiamo entro il margine di tile gia' caricati in VRAM
     if (g_cam_vx < lx - kMaxDelta) g_cam_vx = (float)(lx - kMaxDelta);
     if (g_cam_vx > lx + kMaxDelta) g_cam_vx = (float)(lx + kMaxDelta);
     if (g_cam_vy < ly - kMaxDelta) g_cam_vy = (float)(ly - kMaxDelta);
     if (g_cam_vy > ly + kMaxDelta) g_cam_vy = (float)(ly + kMaxDelta);
   }
-  g_cam_dx = (int)floorf(g_cam_vx + 0.5f) - lx;
-  g_cam_dy = (int)floorf(g_cam_vy + 0.5f) - ly;
+  // Pixel interi: Link cammina a passi alterni (1 e 2 pixel), mentre la
+  // telecamera fluida va a velocita' costante; arrotondando, Link sullo
+  // schermo tremerebbe di un pixel avanti e indietro. Mentre Link si muove la
+  // telecamera avanza al massimo del suo passo e mai al contrario: a
+  // velocita' costante fa i suoi stessi passi. Da fermo recupera un pixel
+  // per frame.
+  {
+    int tx = (int)floorf(g_cam_vx + 0.5f), ty = (int)floorf(g_cam_vy + 0.5f);
+    int mx = link_x_coord - g_cam_last_x, my = link_y_coord - g_cam_last_y;
+    if (!g_cam_valid || abs(tx - g_cam_int_x) > 64 || abs(ty - g_cam_int_y) > 64) {
+      g_cam_int_x = tx, g_cam_int_y = ty;
+    } else {
+      int dx = tx - g_cam_int_x, dy = ty - g_cam_int_y;
+      if (mx) dx = (dx * mx < 0) ? 0 : (abs(dx) > abs(mx) ? mx : dx);
+      else dx = dx > 1 ? 1 : dx < -1 ? -1 : dx;
+      if (my) dy = (dy * my < 0) ? 0 : (abs(dy) > abs(my) ? my : dy);
+      else dy = dy > 1 ? 1 : dy < -1 ? -1 : dy;
+      g_cam_int_x += dx, g_cam_int_y += dy;
+      // sempre entro il margine di caselle caricate
+      if (g_cam_int_x < lx - kMaxDelta) g_cam_int_x = lx - kMaxDelta;
+      if (g_cam_int_x > lx + kMaxDelta) g_cam_int_x = lx + kMaxDelta;
+      if (g_cam_int_y < ly - kMaxDelta) g_cam_int_y = ly - kMaxDelta;
+      if (g_cam_int_y > ly + kMaxDelta) g_cam_int_y = ly + kMaxDelta;
+    }
+  }
+  g_cam_last_x = link_x_coord, g_cam_last_y = link_y_coord;
+  g_cam_dx = g_cam_int_x - gx;
+  g_cam_dy = g_cam_int_y - gy;
   g_vis_prev_x = g_vis_cur_x, g_vis_prev_y = g_vis_cur_y;
-  g_vis_cur_x = lx + g_cam_dx, g_vis_cur_y = ly + g_cam_dy;
+  g_vis_cur_x = gx + g_cam_dx, g_vis_cur_y = gy + g_cam_dy;
 }
 
 // Calcola lo spostamento da applicare al disegno. Con lo schermo oltre i
@@ -261,6 +315,70 @@ static void ApplyRenderBias() {
   Ppu *ppu = g_zenv.ppu;
   ppu->bgBiasX = g_render_bias_x, ppu->bgBiasY = g_render_bias_y;
   ppu->objBiasX = g_cam_dx, ppu->objBiasY = g_cam_dy;
+}
+
+// Con la vista spostata (telecamera fluida o libera) la posizione verticale
+// degli sprite, 8 bit relativi alla telecamera del gioco, e' ambigua: 229 puo'
+// essere "poco sotto lo schermo" o "27 pixel sopra". Per ogni sprite si
+// sceglie l'interpretazione piu' vicina a un oggetto vero del gioco (Link,
+// nemici, oggetti in volo), visto che ogni sprite si disegna vicino al suo.
+extern uint8 g_link_oam_mask[128], g_link_oam_real_f0[128];
+
+// Fra v + k*period sceglie il valore la cui posizione sullo schermo (v - bias)
+// cade nella finestra [lo, lo + period)
+static int WrapInto(int v, int period, int bias, int lo) {
+  int s = v - bias - lo;
+  s = ((s % period) + period) % period;
+  return s + lo + bias;
+}
+
+// Con la vista spostata (telecamera fluida o libera) la posizione degli
+// sprite, relativa alla telecamera del gioco, va reinterpretata:
+// - in verticale ha 8 bit: si sceglie il valore (a passi di 256) piu' vicino
+//   a un oggetto vero del gioco (Link, nemici, oggetti in volo), visto che
+//   ogni sprite si disegna vicino al suo;
+// - in orizzontale ha 9 bit: il gioco tiene in vita gli sprite da 128 pixel
+//   prima a 384 dopo la sua telecamera, quindi il valore si legge in quella
+//   finestra (rispetto alla telecamera del gioco, non alla vista). I pezzi di
+//   Link fanno eccezione: il gioco scrive
+//   il 9° bit dando per scontato che Link sia sullo schermo, quindi si prende
+//   il valore (a passi di 256) piu' vicino a Link.
+static void ResolveSpritePositions(Ppu *ppu) {
+  ppu->objYValid = ppu->objXValid = false;
+  if (ppu->objBiasY == 0 && ppu->objBiasX == 0)
+    return;
+  int link_x = (int16)(link_x_coord - BG2HOFS_copy2) + 8;
+  int oy[32], n = 0, cy = BG2VOFS_copy2;
+  oy[n++] = (int16)(link_y_coord - cy);
+  for (int k = 0; k < 16; k++)
+    if (sprite_state[k])
+      oy[n++] = (int16)((sprite_y_hi[k] << 8 | sprite_y_lo[k]) - sprite_z[k] - cy);
+  for (int k = 0; k < 10 && n < 32; k++)
+    if (ancilla_type[k])
+      oy[n++] = (int16)((ancilla_y_hi[k] << 8 | ancilla_y_lo[k]) - cy);
+  for (int i = 0; i < 128; i++) {
+    int lo = ppu->oam[i * 2] & 0xff, yy = ppu->oam[i * 2] >> 8;
+    int hi = ppu->oam[0x100 + (i >> 3)] >> ((i & 7) * 2) & 1;
+    int x;
+    if (g_link_oam_mask[i]) {
+      x = lo;
+      while (x + 4 < link_x - 128) x += 256;
+      while (x + 4 >= link_x + 128) x -= 256;
+    } else {
+      x = WrapInto(lo + hi * 256, 512, 0, -128);
+    }
+    ppu->objX[i] = (int16)x;
+    // i pezzi di Link si riferiscono solo a Link (oy[0]): un nemico 256 pixel
+    // piu' in la' li porterebbe fuori dallo schermo
+    int best = 1 << 30, y = yy, nk = g_link_oam_mask[i] ? 1 : n;
+    for (int c = -1; c <= 1; c++)
+      for (int k = 0; k < nk; k++)
+        if (abs(yy + c * 256 - oy[k]) < best)
+          best = abs(yy + c * 256 - oy[k]), y = yy + c * 256;
+    ppu->objY[i] = (int16)y;
+    ppu->objShowF0[i] = g_link_oam_real_f0[i];
+  }
+  ppu->objYValid = ppu->objXValid = true;
 }
 
 void ZeldaDrawPpuFrame(uint8 *pixel_buffer, size_t pitch, uint32 render_flags) {
@@ -292,7 +410,15 @@ void ZeldaDrawPpuFrame(uint8 *pixel_buffer, size_t pitch, uint32 render_flags) {
 
   int height = render_flags & kPpuRenderFlags_Height240 ? 240 : 224;
 
+  ResolveSpritePositions(g_zenv.ppu);
+  // Durante il passaggio fra aree, dove la telecamera del gioco e' lontana
+  // da Link, gli strati del gioco contengono caselle dell'area nuova messe a
+  // caso (anche chiome d'albero davanti a Link); il fondale arriva dalle
+  // immagini delle aree, quindi gli sprite vanno sempre davanti
+  g_zenv.ppu->objOnTop = HdWorld_BackgroundFromImages();
   HdLight_BeforeRender(g_zenv.ppu);
+  HdHud_BeforeRender(g_zenv.ppu);
+  HdFx_IrisBeforeRender(g_zenv.ppu);
 
   for (int i = 0; i <= height; i++) {
     if (i == 128 && irq_flag) {
@@ -310,14 +436,20 @@ void ZeldaDrawPpuFrame(uint8 *pixel_buffer, size_t pitch, uint32 render_flags) {
     SimpleHdma_DoLine(&hdma_chans[1]);
   }
   HdLight_AfterRender(g_zenv.ppu);
+  HdFx_IrisAfterRender(g_zenv.ppu);
+  HdWorld_Composite(pixel_buffer, (int)pitch, 256 + 2 * g_zenv.ppu->extraLeftRight, height);
 
   // Illuminazione dinamica (non sulla mappa del mondo in Mode 7)
   if (g_zenv.ppu->mode != 7) {
     int frame_w = 256 + 2 * g_zenv.ppu->extraLeftRight;
+    HdFx_SpriteShadows(pixel_buffer, (int)pitch, frame_w, height);
     HdFx_BeforeLight(pixel_buffer, (int)pitch, frame_w, height, g_render_bias_x, g_render_bias_y);
     HdLight_Apply(pixel_buffer, (int)pitch, frame_w, height, g_render_bias_x, g_render_bias_y);
     HdFx_AfterLight(pixel_buffer, (int)pitch, frame_w, height, g_render_bias_x, g_render_bias_y);
     HdFx_MarkWater(pixel_buffer, (int)pitch, frame_w, height, g_render_bias_x, g_render_bias_y);
+    HdFx_MarkBackdrop(pixel_buffer, (int)pitch, frame_w, height);
+    HdFx_SoftIris(pixel_buffer, (int)pitch, frame_w, height);
+    HdFx_MenuBlur(pixel_buffer, (int)pitch, frame_w, height);
   }
 }
 
@@ -504,6 +636,7 @@ static void LoadSnesState(SaveLoadFunc *func, void *ctx) {
   ZeldaRestoreMusicAfterLoad_Locked(false);
   ZeldaApuUnlock();
   EmuSynchronizeWholeState();
+  HdWorld_ResetStates();  // il mondo persistente riparte dal salvataggio
 }
 
 static void SaveSnesState(SaveLoadFunc *func, void *ctx) {

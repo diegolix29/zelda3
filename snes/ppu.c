@@ -224,6 +224,11 @@ static void PpuWindows_Calc(PpuWindows *win, Ppu *ppu, uint layer) {
   win->edges[1] = window_right;
   uint i, j;
   int t;
+  if (ppu->windowFullSides && (winflags & kWindow1Enabled)) {
+    win->nr = 1;
+    win->bits = (winflags & kWindow1Inversed) ? 0 : 1;
+    return;
+  }
   bool w1_ena = (winflags & kWindow1Enabled) && ppu->window1left <= ppu->window1right;
   if (w1_ena) {
     if (ppu->window1left > win->edges[0]) {
@@ -1263,17 +1268,32 @@ static bool ppu_evaluateSprites(Ppu* ppu, int line) {
 
   do {
     int yy = ppu->oam[index] >> 8;
-    if (yy == 0xf0)
+    if (yy == 0xf0 && !(ppu->objYValid && ppu->objShowF0[(index >> 1) & 127]))
       continue;  // this works for zelda because sprites are always 8 or 16.
     // check if the sprite is on this line and get the sprite size
-    int row = (line - yy + ppu->objBiasY) & 0xff;
+    int row;
+    if (ppu->objBiasY == 0) {
+      row = (line - yy) & 0xff;
+    } else {
+      // Con lo spostamento della telecamera (fluida o libera) la posizione non
+      // deve "fare il giro": uno sprite appena sopra lo schermo (y vicino a
+      // 255) resta sopra invece di ricomparire in basso.
+      int bottom = (ppu->renderFlags & kPpuRenderFlags_Height240) ? 240 : 224;
+      int sy = ppu->objYValid ? ppu->objY[(index >> 1) & 127] : yy >= bottom ? yy - 256 : yy;
+      row = line - (sy - ppu->objBiasY);
+      if ((unsigned)row >= 256)
+        continue;
+    }
     int highOam = ppu->oam[0x100 + (index >> 4)] >> (index & 15);
     int spriteSize = spriteSizes[(highOam >> 1) & 1];
     if (row >= spriteSize)
       continue;
     // in y-range, get the x location, using the high bit as well
     int x = (ppu->oam[index] & 0xff) + (highOam & 1) * 256;
-    x -= (x >= 256 + extra_left_right) * 512;
+    if (ppu->objXValid)
+      x = ppu->objX[(index >> 1) & 127];
+    else
+      x -= (x >= 256 + extra_left_right) * 512;
     x -= ppu->objBiasX;
     // if in x-range
     if (x <= -(spriteSize + extra_left_right))
@@ -1289,7 +1309,7 @@ static bool ppu_evaluateSprites(Ppu* ppu, int line) {
       row = spriteSize - 1 - row;
     // fetch all tiles in x-range
     int paletteBase = 0x80 + 16 * ((oam1 & 0xe00) >> 9);
-    int prio = SPRITE_PRIO_TO_PRIO((oam1 & 0x3000) >> 12, (oam1 & 0x800) == 0);
+    int prio = SPRITE_PRIO_TO_PRIO(ppu->objOnTop ? 3 : (oam1 & 0x3000) >> 12, (oam1 & 0x800) == 0);
     PpuZbufType z = paletteBase + (prio << 8);
     
     for (int col = 0; col < spriteSize; col += 8) {

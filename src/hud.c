@@ -5,7 +5,7 @@
 #include "messaging.h"
 
 enum {
-  kNewStyleInventory = 0,
+  kNewStyleInventory = 1,
   kHudItemCount = kNewStyleInventory ? 24 : 20,
 };
 
@@ -265,37 +265,45 @@ uint8 CheckPalaceItemPosession() {
   }
 }
 
+// Disposizione predefinita dell'inventario a 6 colonne: le 5 colonne
+// originali (con la pala al posto della vecchia bottiglia) e a destra una
+// colonna con le quattro bottiglie.
+static const uint8 kDefaultInventoryOrder[24] = {
+   1,  2,  3,  4,  5, 21,
+   6,  7,  8,  9, 10, 22,
+  11, 12, 13, 14, 15, 23,
+  16, 17, 18, 19, 20, 24,
+};
+
+// Oggetto nella casella (da 0, in ordine di lettura)
+static uint8 Hud_SlotItem(int slot) {
+  if (hud_inventory_order[0] != 0)
+    return hud_inventory_order[slot];
+  return kNewStyleInventory ? kDefaultInventoryOrder[slot] : slot + 1;
+}
+
 // Returns the zero based index of the currently selected hud item,
 // or -1 if the item is item 0.
 static int Hud_GetItemPosition(int item) {
   if (item <= 0)
     return -1;
-  if (hud_inventory_order[0] != 0) {
-    int i = 0;
-    for (; i < kHudItemCount - 1 && hud_inventory_order[i] != item; i++) {}
-    return i;
-  } else {
-    return item ? item - 1 : item;
-  }
+  int i = 0;
+  for (; i < kHudItemCount - 1 && Hud_SlotItem(i) != item; i++) {}
+  return i;
 }
 
 static void Hud_GotoPrevItem(uint8 *item, uint8 first_item_index) {
-  if (hud_inventory_order[0] != 0) {
-    int pos = Hud_GetItemPosition(*item);
-    *item = (pos == 0 && !first_item_index) ? 0 :
-        hud_inventory_order[(pos <= 0 ? kHudItemCount : pos) - 1];
-  } else {
-    *item = (*item > first_item_index) ? *item - 1 : kHudItemCount;
-  }
+  int pos = Hud_GetItemPosition(*item);
+  *item = (pos == 0 && !first_item_index) ? 0 :
+      Hud_SlotItem((pos <= 0 ? kHudItemCount : pos) - 1);
 }
 
 static void Hud_GotoNextItem(uint8 *item, uint8 first_item_index) {
-  if (hud_inventory_order[0] != 0) {
-    int i = Hud_GetItemPosition(*item);
-    *item = hud_inventory_order[((uint)i >= kHudItemCount - 1) ? 0 : i + 1];
-  } else {
-    *item = (*item < kHudItemCount) ? *item + 1 : first_item_index;
-  }
+  int i = Hud_GetItemPosition(*item);
+  if (i >= kHudItemCount - 1)
+    *item = first_item_index ? Hud_SlotItem(0) : 0;
+  else
+    *item = Hud_SlotItem(i + 1);
 }
 
 void Hud_FloorIndicator() {  // 8afd0c
@@ -911,6 +919,18 @@ void Hud_SearchForEquippedItem() {  // 8de399
   }
 }
 
+static const ItemBoxGfx *Hud_GetIconForItem(int i);
+
+// Per l'HUD moderno (hd_hud.c): le quattro caselle dell'icona di un oggetto
+// e quelle della spada attuale
+const uint16 *Hud_GetItemIconTiles(int item) {
+  return Hud_GetIconForItem(item)->v;
+}
+
+const uint16 *Hud_GetSwordIconTiles(void) {
+  return kHudItemSword[link_sword_type == 0xff || link_sword_type > 4 ? 0 : link_sword_type].v;
+}
+
 static const ItemBoxGfx *Hud_GetIconForItem(int i) {
   if (i <= 0)
     return kHudItemEmpty;
@@ -999,16 +1019,16 @@ void Hud_DrawYButtonItems() {  // 8de3d9
     {0x200C | 4 << 10, 0x200D | 4 << 10}   // R
    };
 
-  if (!kNewStyleInventory) {
-    dst[HUDXY(2, 6)] = kEquipmentLetterTiles[btn_index][0];
-    dst[HUDXY(2, 7)] = kEquipmentLetterTiles[btn_index][1]; 
-  }
+  // Lettera del tasto a cui si assegna l'oggetto: nel riquadro a 6 colonne
+  // sta sul bordo sinistro, come "ITEM" su quello in alto
+  int lx = kNewStyleInventory ? 0 : 2;
+  dst[HUDXY(lx, 6)] = kEquipmentLetterTiles[btn_index][0];
+  dst[HUDXY(lx, 7)] = kEquipmentLetterTiles[btn_index][1];
   dst[HUDXY(x + 2, 5)] = 0x246E;
   dst[HUDXY(x + 3, 5)] = 0x246F;
 
   for (int i = 0; i < kHudItemCount; i++) {
-    int j = hud_inventory_order[i];
-    Hud_DrawItem(dst + kHudItemInVramPtr[i], Hud_GetIconForItem(j == 0 ? i + 1: j) );
+    Hud_DrawItem(dst + kHudItemInVramPtr[i], Hud_GetIconForItem(Hud_SlotItem(i)));
   }
 }
 
@@ -1039,11 +1059,9 @@ void Hud_DrawAbilityBox() {  // 8de6b6
         Hud_DrawNxN(dst + HUDXY(4 + j * 5, 22 + i * 2), kHudAbilityText + i * 40 + j * 10, 5, 2);
     }
   }
-  // A
-  if (!kNewStyleInventory) {
-    dst[HUDXY(2, 22)] = 0xA4F0;
-    dst[HUDXY(2, 23)] = 0x24F2;
-  }
+  // A (rossa): nel riquadro a 6 colonne sta sul bordo sinistro
+  dst[HUDXY(kNewStyleInventory ? 0 : 2, 22)] = 0xA4F0;
+  dst[HUDXY(kNewStyleInventory ? 0 : 2, 23)] = 0x24F2;
   // DO text
   dst[HUDXY(x + 2, 21)] = 0x2482;
   dst[HUDXY(x + 3, 21)] = 0x2483;
@@ -1560,7 +1578,7 @@ static void Hud_ReorderItem(int direction) {
   // Initialize inventory order on first use
   if (hud_inventory_order[0] == 0) {
     for (int i = 0; i < 24; i++)
-      hud_inventory_order[i] = i + 1;
+      hud_inventory_order[i] = Hud_SlotItem(i);
   }
   int old_pos = Hud_GetItemPosition(hud_cur_item), new_pos = old_pos + direction;
   if (new_pos < 0)

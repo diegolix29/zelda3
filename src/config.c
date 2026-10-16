@@ -394,6 +394,14 @@ static bool HandleIniConfig(int section, const char *key, char *value) {
       return ParseBool(value, &g_config.fx_heat_haze);
     } else if (StringEqualsNoCase(key, "FxRain")) {
       return ParseBool(value, &g_config.fx_rain);
+    } else if (StringEqualsNoCase(key, "FxMenuBlur")) {
+      return ParseBool(value, &g_config.fx_menu_blur);
+    } else if (StringEqualsNoCase(key, "FxSpriteShadows")) {
+      return ParseBool(value, &g_config.fx_sprite_shadows);
+    } else if (StringEqualsNoCase(key, "FxSoftIris")) {
+      return ParseBool(value, &g_config.fx_soft_iris);
+    } else if (StringEqualsNoCase(key, "FxButtonHints")) {
+      return ParseBool(value, &g_config.fx_button_hints);
     } else if (StringEqualsNoCase(key, "DynamicLighting")) {
       return ParseBool(value, &g_config.dynamic_light);
     } else if (StringEqualsNoCase(key, "HighRefreshInterpolation")) {
@@ -513,6 +521,10 @@ static bool HandleIniConfig(int section, const char *key, char *value) {
       return ParseBoolBit(value, &g_config.features0, kFeatures0_FastTransitions);
     } else if (StringEqualsNoCase(key, "ContinuousTransitions")) {
       return ParseBoolBit(value, &g_config.features0, kFeatures0_ContinuousTransitions);
+    } else if (StringEqualsNoCase(key, "ContinuousWorld")) {
+      return ParseBoolBit(value, &g_config.features0, kFeatures0_ContinuousWorld);
+    } else if (StringEqualsNoCase(key, "ModernHud")) {
+      return ParseBoolBit(value, &g_config.features0, kFeatures0_ModernHud);
     } else if (StringEqualsNoCase(key, "ShowXLRItemsInHud")) {
       return ParseBoolBit(value, &g_config.features0, kFeatures0_ShowXLRItemsInHud);
     } else if (StringEqualsNoCase(key, "TextSpeed")) {

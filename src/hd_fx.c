@@ -3,14 +3,17 @@
 // e non toccano la logica di gioco.
 #include <math.h>
 #include <string.h>
+#include <stdlib.h>
 #include "hd_fx.h"
 #include "tile_detect.h"
 #include "hd_light.h"
 #include "zelda_rtl.h"
 #include "variables.h"
 #include "snes/ppu.h"
+#include "hd_world.h"
 
 bool g_fx_embers, g_fx_window_rays, g_fx_item_glow, g_fx_heat_haze, g_fx_rain;
+bool g_fx_menu_blur, g_fx_sprite_shadows, g_fx_soft_iris, g_fx_button_hints;
 
 const uint16 *Dungeon_GetObjectTiles(int subtype, int idx);
 
@@ -486,6 +489,9 @@ void HdFx_MarkWater(uint8 *pixels, int pitch, int width, int height, int bias_x,
         uint8 attr;
         if (mod == 7)
           attr = dung_bg2_attr_table[((wy & 0x1f8) << 3) + ((wx & 0x1f8) >> 3) + (layer ? 0 : 0x1000)];
+        else if (HdWorld_Active() && (HdWorld_BackgroundFromImages() || !HdWorld_InsideCurrentArea(wx, wy)))
+          continue;  // fondale dalle immagini delle aree, con l'acqua gia' segnata; nel
+                     // passaggio la mappa del gioco e' ancora quella dell'area vecchia
         else
           attr = Overworld_GetTileAttributeAtLocation((uint16)wx >> 3, (uint16)wy);
         if (!IsWaterAttr(attr))
@@ -513,7 +519,15 @@ void HdFx_MarkWater(uint8 *pixels, int pitch, int width, int height, int bias_x,
 // oscuro), niente aree speciali come il bosco della Spada Suprema.
 bool HdFx_SunnyOutdoors(void) {
   int mod;
-  if (!InGameplay(&mod) || mod != 9 || IsRaining(mod))
+  // Anche mentre si carica l'esterno e il cerchio si apre o si chiude
+  // all'aperto (uscendo da una casa, entrandoci): altrimenti le nuvole
+  // comparirebbero di colpo un attimo dopo
+  bool iris = (main_module_index == 8 || main_module_index == 15 || main_module_index == 16) && !player_is_indoors;
+  if (iris)
+    mod = 9;
+  else if (!InGameplay(&mod) || mod != 9)
+    return false;
+  if (IsRaining(mod))
     return false;
   int si = BYTE(overworld_screen_index);
   if (si >= 0x80)
@@ -626,5 +640,263 @@ void HdFx_AfterLight(uint8 *pixels, int pitch, int width, int height, int bias_x
     ApplyLightning(pixels, pitch, width, height, step);
   } else {
     g_flash = 0, g_flash_rise = false;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Sfocatura del gioco dietro inventario, dialoghi, menu di salvataggio e menu
+// opzioni: il gioco sotto si sfoca e si scurisce con una breve dissolvenza,
+// mentre l'interfaccia (layer 2) resta nitida. I pixel dell'interfaccia non
+// entrano nella media, cosi' i riquadri non "sbavano" sul gioco.
+
+bool HdMenu_IsOpen();
+
+static int32 *g_blur_buf, *g_blur_tmp;
+static int g_blur_cap;
+
+// Media mobile di raggio r su una riga o colonna di n elementi (4 canali)
+static void BoxBlur1D(const int32 *src, int32 *dst, int n, int stride, int r) {
+  int32 sum[4] = { 0 };
+  for (int i = -r; i <= r; i++) {
+    int k = i < 0 ? 0 : i >= n ? n - 1 : i;
+    for (int c = 0; c < 4; c++)
+      sum[c] += src[k * stride * 4 + c];
+  }
+  for (int i = 0; i < n; i++) {
+    for (int c = 0; c < 4; c++)
+      dst[i * stride * 4 + c] = sum[c];
+    int out = i - r < 0 ? 0 : i - r, in = i + r + 1 >= n ? n - 1 : i + r + 1;
+    for (int c = 0; c < 4; c++)
+      sum[c] += src[in * stride * 4 + c] - src[out * stride * 4 + c];
+  }
+}
+
+void HdFx_MenuBlur(uint8 *pixels, int pitch, int width, int height) {
+  static float amount;
+  static uint8 last_frame;
+  int mod = main_module_index, sub = submodule_index;
+  bool want = g_fx_menu_blur &&
+      ((mod == 14 && (sub == 1 || sub == 2 || sub == 11)) || HdMenu_IsOpen());
+  if (!want) {
+    amount = 0;
+    return;
+  }
+  // con il menu opzioni aperto il gioco e' fermo: la dissolvenza va avanti
+  // comunque, un passo per ogni disegno
+  if (last_frame != frame_counter || HdMenu_IsOpen()) {
+    last_frame = frame_counter;
+    amount = amount + 1.0f / 8 > 1 ? 1 : amount + 1.0f / 8;
+  }
+  int n = width * height;
+  if (n > g_blur_cap) {
+    free(g_blur_buf), free(g_blur_tmp);
+    g_blur_cap = n;
+    g_blur_buf = malloc(n * 16);
+    g_blur_tmp = malloc(n * 16);
+  }
+  for (int y = 0; y < height; y++) {
+    const uint32 *row = (const uint32 *)(pixels + y * pitch);
+    int32 *b = g_blur_buf + y * width * 4;
+    for (int x = 0; x < width; x++, b += 4) {
+      uint32 c = row[x];
+      bool ui = IsHud(c);
+      b[0] = ui ? 0 : (c >> 16) & 0xff;
+      b[1] = ui ? 0 : (c >> 8) & 0xff;
+      b[2] = ui ? 0 : c & 0xff;
+      b[3] = ui ? 0 : 1;
+    }
+  }
+  // due passate orizzontali e verticali di raggio 3: quasi una gaussiana
+  for (int pass = 0; pass < 2; pass++) {
+    for (int y = 0; y < height; y++)
+      BoxBlur1D(g_blur_buf + y * width * 4, g_blur_tmp + y * width * 4, width, 1, 3);
+    for (int x = 0; x < width; x++)
+      BoxBlur1D(g_blur_tmp + x * 4, g_blur_buf + x * 4, height, width, 3);
+  }
+  float keep = 1.0f - amount, dark = 1.0f - 0.30f * amount;
+  for (int y = 0; y < height; y++) {
+    uint32 *row = (uint32 *)(pixels + y * pitch);
+    const int32 *b = g_blur_buf + y * width * 4;
+    for (int x = 0; x < width; x++, b += 4) {
+      uint32 c = row[x];
+      if (IsHud(c) || b[3] == 0)
+        continue;
+      float inv = amount / b[3];
+      int r = (int)((((c >> 16) & 0xff) * keep + b[0] * inv) * dark);
+      int g = (int)((((c >> 8) & 0xff) * keep + b[1] * inv) * dark);
+      int bl = (int)(((c & 0xff) * keep + b[2] * inv) * dark);
+      row[x] = (c & 0xff000000) | ClampByte(r) << 16 | ClampByte(g) << 8 | ClampByte(bl);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Cerchio di transizione morbido. Il gioco disegna un'ellisse con le finestre
+// dello SNES, che arrivano solo ai 256 pixel centrali: in 16:9 le fasce
+// laterali restavano nere e si accendevano di colpo alla fine. Qui, mentre il
+// cerchio e' in corso, la PPU disegna tutto (HdFx_IrisBeforeRender) e il
+// cerchio viene tracciato a parte su tutta la larghezza, con il bordo sfumato.
+// Il raggio e' la frazione di quello del gioco (0-126) rispetto alla distanza
+// dell'angolo piu' lontano: aperto del tutto copre l'intero schermo.
+
+extern int g_hd_iris_x, g_hd_iris_y, g_hd_iris_r;
+extern uint8 g_hd_iris_frame;
+extern bool g_hd_iris_valid;
+
+static uint16 g_iris_saved_table[240];
+static bool g_iris_override;
+
+static bool IrisActive(void) {
+  if (!g_fx_soft_iris || !g_hd_iris_valid)
+    return false;
+  if ((uint8)(frame_counter - g_hd_iris_frame) > 1) {
+    g_hd_iris_valid = false;
+    return false;
+  }
+  return true;
+}
+
+void HdFx_IrisBeforeRender(Ppu *ppu) {
+  g_iris_override = IrisActive();
+  if (!g_iris_override)
+    return;
+  memcpy(g_iris_saved_table, hdma_table_dynamic, sizeof(g_iris_saved_table));
+  for (int i = 0; i < 240; i++)
+    hdma_table_dynamic[i] = 0xff00;  // finestra su tutta la riga
+  ppu->windowFullSides = true;
+}
+
+void HdFx_IrisAfterRender(Ppu *ppu) {
+  if (!g_iris_override)
+    return;
+  memcpy(hdma_table_dynamic, g_iris_saved_table, sizeof(g_iris_saved_table));
+  ppu->windowFullSides = false;
+}
+
+void HdFx_SoftIris(uint8 *pixels, int pitch, int width, int height) {
+  if (!g_iris_override)
+    return;
+  const float kSoft = 8.0f;
+  int ext = (width - 256) / 2;
+  float cx = g_hd_iris_x + ext + 0.5f, cy = g_hd_iris_y + 0.5f;
+  float far2 = 0;
+  for (int k = 0; k < 4; k++) {
+    float dx = (k & 1 ? width : 0) - cx, dy = (k & 2 ? height : 0) - cy;
+    if (dx * dx + dy * dy > far2)
+      far2 = dx * dx + dy * dy;
+  }
+  float r = g_hd_iris_r * (1.0f / 126) * (sqrtf(far2) + kSoft);
+  for (int y = 0; y < height; y++) {
+    uint32 *row = (uint32 *)(pixels + y * pitch);
+    float dy = y - cy;
+    for (int x = 0; x < width; x++) {
+      float dx = x - cx, d2 = dx * dx + dy * dy;
+      if (r > kSoft && d2 < (r - kSoft) * (r - kSoft))
+        continue;
+      float k = (r - sqrtf(d2)) / kSoft;
+      if (k >= 1)
+        continue;
+      if (k < 0) k = 0;
+      k = k * k * (3 - 2 * k);
+      uint32 c = row[x];
+      row[x] = (c & 0xff000000) | (int)(((c >> 16) & 0xff) * k) << 16 |
+               (int)(((c >> 8) & 0xff) * k) << 8 | (int)((c & 0xff) * k);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Ombre di personaggi, nemici e oggetti: la sagoma di ogni sprite viene
+// "sdraiata" a terra partendo dai piedi (il pixel piu' basso di ogni colonna),
+// inclinata verso il basso a destra come le ombre dello shader, sfocata e
+// usata per scurire il fondale. Sprite e HUD non vengono scuriti.
+
+static float *g_shadow, *g_shadow_tmp;
+static int g_shadow_cap;
+
+static void BoxBlurF(const float *src, float *dst, int w, int h, int dx, int dy) {
+  for (int y = 0; y < h; y++)
+    for (int x = 0; x < w; x++) {
+      float s = 0;
+      for (int k = -1; k <= 1; k++) {
+        int xx = x + k * dx, yy = y + k * dy;
+        if (xx >= 0 && xx < w && yy >= 0 && yy < h)
+          s += src[yy * w + xx];
+      }
+      dst[y * w + x] = s * (1.0f / 3);
+    }
+}
+
+void HdFx_SpriteShadows(uint8 *pixels, int pitch, int width, int height) {
+  int mod;
+  if (!g_fx_sprite_shadows || !InGameplay(&mod))
+    return;
+  int n = width * height;
+  if (n > g_shadow_cap) {
+    free(g_shadow), free(g_shadow_tmp);
+    g_shadow_cap = n;
+    g_shadow = malloc(n * sizeof(float));
+    g_shadow_tmp = malloc(n * sizeof(float));
+  }
+  memset(g_shadow, 0, n * sizeof(float));
+  bool any = false;
+  for (int x = 0; x < width; x++) {
+    int y = 0;
+    while (y < height) {
+      if (!IsSprite(*(uint32 *)(pixels + y * pitch + x * 4))) {
+        y++;
+        continue;
+      }
+      int y0 = y;
+      while (y < height && IsSprite(*(uint32 *)(pixels + y * pitch + x * 4)))
+        y++;
+      int foot = y - 1;
+      // ogni pixel alto h sopra i piedi finisce spostato a destra e in basso
+      for (int yy = y0; yy <= foot; yy++) {
+        int h = foot - yy;
+        int sx = x + (h * 5 + 5) / 10, sy = foot + (h * 3 + 10) / 20;
+        if (sx < width && sy < height)
+          g_shadow[sy * width + sx] = 1, any = true;
+      }
+    }
+  }
+  if (!any)
+    return;
+  for (int pass = 0; pass < 2; pass++) {
+    BoxBlurF(g_shadow, g_shadow_tmp, width, height, 1, 0);
+    BoxBlurF(g_shadow_tmp, g_shadow, width, height, 0, 1);
+  }
+  for (int y = 0; y < height; y++) {
+    uint32 *row = (uint32 *)(pixels + y * pitch);
+    const float *m = g_shadow + y * width;
+    for (int x = 0; x < width; x++) {
+      if (m[x] < 0.01f || IsSprite(row[x]) || IsHud(row[x]))
+        continue;
+      float k = 1.0f - 0.42f * (m[x] > 1 ? 1 : m[x]);
+      uint32 c = row[x];
+      row[x] = (c & 0xff000000) | (int)(((c >> 16) & 0xff) * k) << 16 |
+               (int)(((c >> 8) & 0xff) * k) << 8 | (int)((c & 0xff) * k);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Fondali: nelle aree della Montagna della Morte e della Piramide lo sfondo
+// (layer 5) e' il cielo con le nuvole, e lo shader lo deve lasciare com'e'.
+// Altrove lo sfondo e' spesso il prato fra le caselle e va dipinto: per questo
+// si marca come 3 (layer non usato all'aperto) solo in queste aree.
+void HdFx_MarkBackdrop(uint8 *pixels, int pitch, int width, int height) {
+  int mod;
+  if (!InGameplay(&mod) || mod != 9)
+    return;
+  int a = BYTE(overworld_screen_index);
+  int sc = a & 0x3f;
+  if (a >= 0x80 || !(sc == 0x03 || sc == 0x05 || sc == 0x07 || a == 0x5b))
+    return;
+  for (int y = 0; y < height; y++) {
+    uint32 *row = (uint32 *)(pixels + y * pitch);
+    for (int x = 0; x < width; x++)
+      if ((row[x] >> 24) == 5)
+        row[x] = (row[x] & 0x00ffffff) | 3u << 24;
   }
 }

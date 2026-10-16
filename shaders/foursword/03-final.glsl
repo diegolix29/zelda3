@@ -94,7 +94,7 @@ float fbm(vec2 p)
 
 // --- Maschera dei layer ---------------------------------------------------
 // Il PPU di zelda3 scrive nel canale alpha l'indice del layer di ogni pixel:
-//   0 = BG1   1 = BG2   2 = BG3 (HUD)   3 = BG4   5 = sfondo
+//   0 = BG1   1 = BG2   2 = BG3 (HUD)   3 = fondale   5 = sfondo
 //   4 e 6 = OBJ (sprite, palette 0-3 e 4-7)   7 = acqua (fondale)
 // Con un eseguibile non modificato l'alpha e' 0: niente viene protetto.
 float layer_at(vec2 uv)
@@ -107,9 +107,12 @@ float sprite_of(float layer)
     return step(3.5, layer) * step(layer, 4.5) + step(5.5, layer) * step(layer, 6.5);
 }
 
+// HUD (2) e fondali (3) restano come li disegna il gioco. Il 3 lo scrive il
+// gioco solo sul cielo dietro la Piramide e sulle nuvole del Monte della
+// Morte (lo sfondo, 5, e' spesso anche il prato fra le caselle: si dipinge).
 float hud_of(float layer)
 {
-    return step(1.5, layer) * step(layer, 2.5);
+    return step(1.5, layer) * step(layer, 3.5);
 }
 
 // 7 = acqua (marcata dal gioco): niente pennellate

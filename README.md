@@ -9,17 +9,22 @@ Everything is optional and can be turned on or off from the new in-game options 
 
 **Gameplay and comfort**
 - Fast and continuous transitions between areas: Link keeps walking while the camera scrolls, no stop-and-go.
+- **Continuous world** (optional, outdoors): beyond the edge of an area you see the neighbouring areas, the camera follows Link past the edges and area changes are instant. Cut bushes and grass, lifted rocks, shovel holes and defeated enemies stay as you left them while you remain outdoors, and the enemies you leave behind stay visible, frozen, beyond the edge. Death Mountain fades into mist toward the lowlands, and the Lost Woods fog covers the whole screen.
 - Smooth camera that follows Link with a slight delay (4 levels), with interpolation on displays above 60 Hz.
 - In-game options menu with key and gamepad remapping; settings are written back to `zelda3.ini` keeping its comments.
 - Silent automatic saves on every area change and dungeon/house entrance (rotating slots), plus quick save slots.
 - Interactive world map: free scrolling, crosshair, personal markers saved per save file, recenter on Link.
 - Dungeon map shows the dungeon name; faster floor switching.
 - Items assigned to X, L and R shown in the HUD; faster dialogue text while holding A or B.
+- Inventory with the bottles in their own column on the right.
+- The options menu, the button hints and the messages are in Italian or English depending on the language.
+- **Modern HUD** (optional): hearts and a thin magic bar top left, Y/A/B buttons top right like on the controller with the item (and its ammo), the sword and the action of the A button (Talk, Read, Open, Lift, Grab, Pull, Throw, Dash, Swim), rupees and dungeon keys bottom left.
 
 **Graphics**
 - Sharp dialogue text drawn on top of any shader.
 - Dynamic lighting: warm glow around torches, braziers, lava and fire; dark rooms lit by the Lantern and by the torches you light.
 - Embers rising from flames, light rays and dust from windows, glow behind items Link holds up, heat haze over lava, denser rain with soft lightning.
+- Blurred game behind the inventory, dialogues and menus, soft shadows under characters and enemies, a soft circle transition, on-screen button hints in the inventory and on the maps, a HUD that slides away during dialogues and an autosave icon.
 - **Four Swords Adventures look** (`shaders/foursword`): crisp pixels, a diagonal brush texture anchored to the world (not on water), soft drop shadows, glow on bright areas and cartoon cloud shadows drifting over sunny outdoor areas. HUD and characters stay untouched.
 
 **Language**
@@ -35,8 +40,10 @@ To build by hand follow the steps of the original project below; `build_msvc.bat
 
 Fork di [snesrev/zelda3](https://github.com/snesrev/zelda3) con una serie di migliorie "HD" ispirate a *Link's Awakening* per Switch e a *Four Swords Adventures*, più il supporto all'italiano. Ogni miglioria si attiva o disattiva dal nuovo menu opzioni nel gioco (**Esc** o clic della levetta destra) oppure dal [launcher](https://github.com/ghost19880/Zelda-3-Launcher).
 
+- **Mondo continuo** (facoltativo, all'aperto): oltre il bordo di un'area si vedono le aree vicine, la telecamera segue Link oltre i bordi e il cambio d'area è istantaneo. Cespugli ed erba tagliati, sassi sollevati, buche e nemici sconfitti restano come li hai lasciati finché resti all'aperto, e i nemici che ti lasci alle spalle restano visibili, fermi, oltre il bordo. La Montagna della Morte sfuma nella nebbia verso la pianura e la nebbia del Bosco Perduto copre tutto lo schermo.
+- **HUD moderno** (facoltativo): cuori e magia a sinistra, tasti Y/A/B a destra come sul controller con oggetto, spada e la scritta dell'azione del tasto A (Parla, Leggi, Apri, Solleva…), rupie e chiavi in basso a sinistra.
 - **Gioco:** transizioni veloci e continue tra le aree, telecamera fluida, menu opzioni con rimappatura di tastiera e pad, salvataggi automatici e rapidi, mappa del mondo interattiva con segnalini, nome del labirinto sulla mappa, oggetti X/L/R nell'HUD, testo più veloce.
-- **Grafica:** testo nitido nei dialoghi, illuminazione dinamica, braci, raggi dalle finestre, bagliore degli oggetti ricevuti, calore sopra la lava, pioggia e lampi migliorati, e lo shader in stile **Four Swords Adventures** (pennellate, ombre morbide, nuvole).
+- **Grafica:** testo nitido nei dialoghi, illuminazione dinamica, braci, raggi dalle finestre, bagliore degli oggetti ricevuti, calore sopra la lava, pioggia e lampi migliorati, sfocatura dietro menu e dialoghi, ombre di personaggi e nemici, cerchio di transizione morbido, suggerimenti dei tasti, HUD che scivola via nei dialoghi, icona del salvataggio automatico, e lo shader in stile **Four Swords Adventures** (pennellate, ombre morbide, nuvole).
 - **Italiano:** font con le lettere accentate; la traduzione è nel repository [zelda3-italiano](https://github.com/ghost19880/zelda3-italiano) e la scarica il launcher.
 
 Per cominciare scarica il [launcher](https://github.com/ghost19880/Zelda-3-Launcher/releases), indica la ROM americana e premi *Scarica*: al resto pensa lui.

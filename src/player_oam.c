@@ -1,9 +1,11 @@
+#include <string.h>
 #include "player_oam.h"
 #include "zelda_rtl.h"
 #include "variables.h"
 #include "snes/snes_regs.h"
 #include "player.h"
 #include "misc.h"
+#include "hd_fx.h"
 
 static const int8 kPlayerOam_StairsOffsY[] = {
   0, -2, -3, 0, -2, -3, 0, 0, 0, 0, 0, 0, 0, -2, -3, 0,
@@ -759,7 +761,36 @@ void CalculateSwordHitBox() {  // 879e63
   player_oam_x_offset = kSwordOamXOffs[i];
 }
 
-void LinkOam_Main() {  // 8da18e
+// Voci degli sprite scritte da LinkOam_Main nell'ultimo frame (i pezzi di
+// Link): il gioco ne calcola il 9° bit della x dando per scontato che Link sia
+// sullo schermo, quindi con la vista libera vanno posizionate a parte
+uint8 g_link_oam_mask[128];
+// Pezzi di Link con y = 0xF0 che non sono "nascosti" ma stanno davvero 16
+// pixel sopra la telecamera del gioco (succede con la vista libera)
+uint8 g_link_oam_real_f0[128];
+
+static void LinkOam_MainInner();
+
+void LinkOam_Main() {
+  static OamEnt saved[128];
+  memcpy(saved, oam_buf, sizeof(saved));
+  // segno nella grafica (tile 0xff, tutti gli attributi): nessun pezzo vero
+  // lo usa, mentre una posizione qualsiasi puo' essere quella di un pezzo
+  for (int i = 0; i < 128; i++)
+    WORD(oam_buf[i].charnum) = 0xffff;
+  LinkOam_MainInner();
+  int rel = (int16)(link_y_coord - BG2VOFS_copy2);
+  // 0xF0 e' una posizione vera se cade fra 16 pixel sopra e 32 sotto Link
+  bool f0_is_real = ((0xf0 - (rel - 16)) & 0xff) <= 48;
+  for (int i = 0; i < 128; i++) {
+    g_link_oam_mask[i] = (WORD(oam_buf[i].charnum) != 0xffff);
+    g_link_oam_real_f0[i] = g_link_oam_mask[i] && oam_buf[i].y == 0xf0 && f0_is_real;
+    if (!g_link_oam_mask[i])
+      WORD(oam_buf[i].charnum) = WORD(saved[i].charnum);
+  }
+}
+
+static void LinkOam_MainInner() {  // 8da18e
   uint16 y_coord_backup = link_y_coord;
 
   if (submodule_index == 18 || submodule_index == 19) {
@@ -1044,7 +1075,7 @@ continue_after_set:
           LinkOam_DrawDungeonFallShadow(r4loc, xcoord);
           r4loc = 2; // wtf
         }
-      } else {
+      } else if (!g_fx_sprite_shadows) {  // con le ombre morbide (hd_fx.c) l'ovale non serve
         // draw shadow
         int shadow_idx = (link_auxiliary_state != 0) && (link_auxiliary_state != 1 || !link_cape_mode);
         uint16 oam_y = link_y_coord - BG2VOFS_copy2 + kOffsToShadowGivenDir_Y[link_direction_facing_mirror >> 1];

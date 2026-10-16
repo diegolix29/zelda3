@@ -5,6 +5,7 @@
 #include "dungeon.h"
 #include "tagalong.h"
 #include "sprite.h"
+#include "hd_world.h"
 #include "ancilla.h"
 #include "player.h"
 #include "misc.h"
@@ -251,6 +252,11 @@ const uint8 *GetMap8toTileAttr() {
 
 const uint16 *GetMap16toMap8Table() {
   return kMap16ToMap8;
+}
+
+// Area "testa" di uno dei 64 quadrati della mappa (le aree grandi ne coprono 4)
+uint8 Overworld_AreaHead(int square) {
+  return kOverworldAreaHeads[square & 63];
 }
 
 bool LookupInOwEntranceTab(uint16 r0, uint16 r2) {
@@ -893,7 +899,18 @@ void ScrollAndCheckForSOWExit() {  // 82ab7b
   }
 }
 
+// Mondo continuo: lo scorrimento fra le aree non si vede (la vista segue
+// Link), quindi il passaggio si fa tutto in un frame e Link non rallenta
+static bool g_instant_transition;
+static int g_entry_speed;  // velocita' di Link (pixel per frame) all'inizio del passaggio
+
+static bool InstantWorldTransition(void) {
+  return (enhanced_features0 & kFeatures0_ContinuousWorld) && BYTE(overworld_screen_index) < 0x80;
+}
+
 void Module09_LoadAuxGFX() {  // 82ab88
+  int vx = abs((int8)link_x_vel), vy = abs((int8)link_y_vel);
+  g_entry_speed = vx > vy ? vx : vy;
   save_ow_event_info[0x3b] &= ~0x20;
   save_ow_event_info[0x7b] &= ~0x20;
   save_dung_info[267] &= ~0x80;
@@ -905,8 +922,12 @@ void Module09_LoadAuxGFX() {  // 82ab88
   // Transizione continua: le fasi di caricamento successive (che di norma
   // occupano un frame ciascuna, con il gioco fermo) vengono eseguite subito,
   // facendo fra l'una e l'altra il lavoro dell'NMI che copia i dati in VRAM.
-  if ((enhanced_features0 & kFeatures0_ContinuousTransitions) && submodule_index == 2) {
-    for (int guard = 0; guard < 8 && submodule_index >= 2 && submodule_index <= 4; guard++) {
+  // Con il mondo continuo si prosegue nello stesso frame fino alla fine
+  // dello scorrimento (fasi 5, 6 e 7).
+  bool instant = InstantWorldTransition();
+  if ((instant || (enhanced_features0 & kFeatures0_ContinuousTransitions)) && submodule_index == 2) {
+    int last = instant ? 7 : 4;
+    for (int guard = 0; guard < 12 && submodule_index >= 2 && submodule_index <= last; guard++) {
       NMI_DoUpdates();
       kOverworldSubmodules[submodule_index]();
     }
@@ -926,8 +947,38 @@ void Module09_LoadNewMapAndGFX() {  // 82abc6
   LoadNewSpriteGFXSet();
 }
 
+// Attiva i nemici in tutta la vista (con i margini che usa il gioco): nel
+// passaggio normale si attivano man mano che la telecamera scorre, in quello
+// istantaneo lo scorrimento non c'e'
+static void ActivateSpritesInView(void) {
+  int xt = (enhanced_features0 & kFeatures0_ExtendScreen64) ? 0x40 : 0;
+  for (int y = BG2VOFS_copy2 - 0x30; y <= BG2VOFS_copy2 + 0x110; y += 16)
+    for (int x = BG2HOFS_copy2 - 0x30 - xt; x <= BG2HOFS_copy2 + 0x110 + xt; x += 16)
+      Sprite_Overworld_ProximityMotivatedLoad((uint16)x, (uint16)y);
+}
+
 void Overworld_RunScrollTransition() {  // 82abda
   Link_HandleMovingAnimation_FullLongEntry();
+  if (InstantWorldTransition()) {
+    // Tutti i passi di scorrimento subito, con il lavoro dell'NMI (strisce di
+    // tile e grafica degli sprite) fra l'uno e l'altro. Link resta fermo.
+    uint8 sm = submodule_index;
+    g_instant_transition = true;
+    for (int guard = 0; guard < 400 && submodule_index == sm; guard++) {
+      if (guard)
+        NMI_DoUpdates();
+      Graphics_IncrementalVRAMUploadImmediate();
+      uint8 rv = OverworldScrollTransition();
+      if (!(rv & 0xf)) {
+        BYTE(overworld_screen_trans_dir_bits2) = BYTE(overworld_screen_trans_dir_bits);
+        OverworldTransitionScrollAndLoadMap();
+        BYTE(overworld_screen_trans_dir_bits2) = 0;
+      }
+    }
+    g_instant_transition = false;
+    ActivateSpritesInView();
+    return;
+  }
   Graphics_IncrementalVRAMUpload();
   // Con le transizioni veloci si fanno due passi di scorrimento per frame.
   // Due passi da 8px attraversano al massimo un multiplo di 16px, quindi
@@ -955,6 +1006,7 @@ void Module09_LoadNewSprites() {  // 82abed
   }
   Sprite_OverworldReloadAll_justLoad();
   num_memorized_tiles = 0;
+  HdWorld_RememberTiles();  // mondo persistente
   if (sram_progress_indicator >= 2 && submodule_index != 18)
     Overworld_SetFixedColAndScroll();
   Overworld_StartScrollTransition();
@@ -1746,7 +1798,9 @@ int OverworldScrollTransition() {  // 82c001
     rv = (BG2VOFS_copy2 += d);
     if (BYTE(overworld_screen_index) != 0x1b && BYTE(overworld_screen_index) != 0x5b)
       BG1VOFS_copy2 = BG2VOFS_copy2;
-    if (continuous)
+    if (g_instant_transition)
+      ;  // mondo continuo: Link resta dov'e'
+    else if (continuous)
       ContinuousTransition_MoveLink(&link_y_coord, d, (uint16)rv, (&up_down_scroll_target)[y], kOverworld_Func6B_Tab2[y]);
     else if (transition_counter >= kOverworld_Func6B_Tab2[y])
       link_y_coord += d;
@@ -1754,7 +1808,10 @@ int OverworldScrollTransition() {  // 82c001
       return rv;
     if (y == 0)
       BG2VOFS_copy2 -= 2;
-    link_y_coord &= ~7;
+    // allineamento a 8 pixel (non nel passaggio istantaneo: Link farebbe un
+    // piccolo balzo, e il passo automatico finale non ne ha bisogno)
+    if (!g_instant_transition)
+      link_y_coord &= ~7;
     camera_y_coord_scroll_hi = link_y_coord + kOverworld_Func6B_Tab3[y] + 11;
     camera_y_coord_scroll_low = camera_y_coord_scroll_hi + 2;
     overworld_unk1 = overworld_unk1_neg = 0;
@@ -1763,13 +1820,16 @@ int OverworldScrollTransition() {  // 82c001
     rv = (BG2HOFS_copy2 += d);
     if (BYTE(overworld_screen_index) != 0x1b && BYTE(overworld_screen_index) != 0x5b)
       BG1HOFS_copy2 = BG2HOFS_copy2;
-    if (continuous)
+    if (g_instant_transition)
+      ;  // mondo continuo: Link resta dov'e'
+    else if (continuous)
       ContinuousTransition_MoveLink(&link_x_coord, d, (uint16)rv, (&up_down_scroll_target)[y], kOverworld_Func6B_Tab2[y]);
     else if (transition_counter >= kOverworld_Func6B_Tab2[y])
       link_x_coord += d;
     if (rv != (&up_down_scroll_target)[y])
       return rv;
-    link_x_coord &= ~7;
+    if (!g_instant_transition)
+      link_x_coord &= ~7;
     camera_x_coord_scroll_hi = link_x_coord + kOverworld_Func6B_Tab3[y] + 11;
     camera_x_coord_scroll_low = camera_x_coord_scroll_hi + 2;
     overworld_unk3 = overworld_unk3_neg = 0;
@@ -1797,12 +1857,43 @@ void Overworld_SetCameraBoundaries(int big, int area) {  // 82c0c3
 
 void Overworld_FinalizeEntryOntoScreen() {  // 82c242
   Link_HandleMovingAnimation_FullLongEntry();
-  int d = (byte_7E069C & 1) ? 2 : -2;
-  if (byte_7E069C & 2)
-    link_x_coord = (d += link_x_coord);
-  else
-    link_y_coord = (d += link_y_coord);
-  if ((d & 0xfe) == kOverworld_Func8_tab[byte_7E069C]) {
+  // Link entra nell'area da solo, 2 pixel per frame. Con il mondo continuo
+  // avanza solo quanto basta perche' tutto il suo corpo (16x24 pixel, la
+  // posizione e' l'angolo in alto a sinistra) sia dentro l'area nuova: gli
+  // ostacoli si leggono dalla mappa dell'area, e fuori sarebbero caselle a
+  // caso. Il gioco fa scattare il cambio qualche pixel prima del bordo; va
+  // alla velocita' che aveva, un pixel alla volta. La zona di scatto del lato
+  // opposto fa tornare indietro solo camminando in quella direzione.
+  bool arrived;
+  if (InstantWorldTransition()) {
+    int a = BYTE(overworld_screen_index) & 0x3f;
+    bool small = kOverworldMapIsSmall[a] != 0;
+    bool horiz = (byte_7E069C & 2) != 0;
+    int base = horiz ? kOverworld_OffsetBaseX[a] : kOverworld_OffsetBaseY[a];
+    // Fuori dalle fasce in cui scatta il cambio d'area (sinistra < 6, su < 4,
+    // destra >= 0x1e4+4, giu' >= 0x1e4 per le aree piccole) con 2 pixel di
+    // margine: li' il gioco controllerebbe il terreno oltre il bordo, dove la
+    // mappa dell'area ricomincia dal lato opposto (Link cadeva nell'acqua del
+    // lato opposto invece di cambiare area)
+    int bound = (small ? 0x1e4 : 0x3e4) + (horiz ? 4 : 0);
+    int lo = base + (horiz ? 8 : 6), hi = base + bound - 2;  // hi escluso
+    uint16 *c = horiz ? &link_x_coord : &link_y_coord;
+    int dir = (byte_7E069C & 1) ? 1 : -1;
+    int step = g_entry_speed > 2 ? g_entry_speed : (frame_counter & 1) ? 1 : 2;
+    arrived = (*c >= lo && *c < hi);
+    for (int i = 0; i < step && !arrived; i++) {
+      *c += dir;
+      arrived = (*c >= lo && *c < hi);
+    }
+  } else {
+    int d = (byte_7E069C & 1) ? 2 : -2;
+    if (byte_7E069C & 2)
+      link_x_coord = (d += link_x_coord);
+    else
+      link_y_coord = (d += link_y_coord);
+    arrived = (d & 0xfe) == kOverworld_Func8_tab[byte_7E069C];
+  }
+  if (arrived) {
     submodule_index = 0;
     subsubmodule_index = 0;
     uint8 m = overworld_music[BYTE(overworld_screen_index)];
@@ -2174,6 +2265,8 @@ void Overworld_DrawQuadrantsAndOverlays() {  // 82eec5
     ow_entrance_value = 0;
   }
   Overworld_HandleOverlaysAndBombDoors();
+  if (main_module_index == 8)
+    HdWorld_EnterAreaTiles(true);  // mondo persistente: uscendo da case e labirinti
 }
 
 void Overworld_HandleOverlaysAndBombDoors() {  // 82ef29
@@ -2221,6 +2314,7 @@ void SomeTileMapChange() {  // 82efe8
   for (int i = 0; i < 64; i++)
     dung_bg1[i] = 0xdc4;
   Overworld_HandleOverlaysAndBombDoors();
+  HdWorld_EnterAreaTiles(false);  // mondo persistente
   submodule_index++;
 }
 
@@ -2812,8 +2906,10 @@ getout:
 }
 
 void Overworld_Memorize_Map16_Change(uint16 pos, uint16 value) {  // 8edd40
-  if (value == 0xdc5 || value == 0xdc9)
+  if (value == 0xdc5 || value == 0xdc9) {
+    HdWorld_RememberExtraTile(pos, value);  // mondo persistente
     return;
+  }
 
   int x = num_memorized_tiles;
   memorized_tile_value[x >> 1] = value;

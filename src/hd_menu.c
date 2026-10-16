@@ -15,6 +15,7 @@
 #include "snes/ppu.h"
 #include "hd_light.h"
 #include "hd_fx.h"
+#include "hd_hud.h"
 
 void ZeldaApuLock();
 void ZeldaApuUnlock();
@@ -41,6 +42,10 @@ typedef struct MenuItem {
   int id;
 } MenuItem;
 
+// Testi del menu: scritti in italiano, in inglese con le altre lingue
+static const char *Tr(const char *it);
+static bool IsItalian();
+
 static bool g_menu_open;
 static int g_page;
 static int g_cursor[6];
@@ -50,6 +55,8 @@ static bool g_capture_pad;
 static bool g_slot_action_save;
 static char g_message[96];
 static int g_message_timer;
+static int g_save_icon_timer;  // icona del salvataggio automatico
+static bool g_last_input_pad;  // ultimo tasto premuto sul pad (non sulla tastiera)
 static bool g_controls_dirty, g_msu_dirty;
 static bool g_msu_on;
 static uint8 g_last_stick;
@@ -69,6 +76,8 @@ typedef struct FeatureOption {
 static const FeatureOption kFeatureOptions[] = {
   { "Transizioni veloci", "FastTransitions", kFeatures0_FastTransitions },
   { "Transizione continua tra aree", "ContinuousTransitions", kFeatures0_ContinuousTransitions },
+  { "Mondo continuo all'esterno", "ContinuousWorld", kFeatures0_ContinuousWorld },
+  { "HUD moderno", "ModernHud", kFeatures0_ModernHud },
   { "Oggetti X, L, R nell'HUD", "ShowXLRItemsInHud", kFeatures0_ShowXLRItemsInHud },
   { "Cambio oggetti con L e R", "ItemSwitchLR", kFeatures0_SwitchLR },
   { "Raccogli oggetti con la spada", "CollectItemsWithSword", kFeatures0_CollectItemsWithSword },
@@ -256,11 +265,14 @@ static bool FileTime(const char *name, time_t *t) {
 static void FormatFileTime(const char *name, char *buf, size_t size) {
   time_t t;
   if (!FileTime(name, &t)) {
-    snprintf(buf, size, "vuoto");
+    snprintf(buf, size, "%s", Tr("vuoto"));
     return;
   }
   struct tm *tm = localtime(&t);
-  snprintf(buf, size, "%02d.%02d  ore %02d.%02d", tm->tm_mday, tm->tm_mon + 1, tm->tm_hour, tm->tm_min);
+  if (IsItalian())
+    snprintf(buf, size, "%02d.%02d  ore %02d.%02d", tm->tm_mday, tm->tm_mon + 1, tm->tm_hour, tm->tm_min);
+  else
+    snprintf(buf, size, "%02d/%02d  %02d:%02d", tm->tm_mday, tm->tm_mon + 1, tm->tm_hour, tm->tm_min);
 }
 
 static int AutosaveCount() {
@@ -288,7 +300,7 @@ static int FindAutosave(bool newest) {
 }
 
 static void ShowMessage(const char *msg) {
-  snprintf(g_message, sizeof(g_message), "%s", msg);
+  snprintf(g_message, sizeof(g_message), "%s", Tr(msg));
   g_message_timer = 150;
 }
 
@@ -297,10 +309,13 @@ void HdMenu_ShowMessage(const char *msg) {
 }
 
 static int g_autosave_last_key = -1;
+enum { kSaveIconFrames = 120 };
 
 void HdMenu_AfterFrame(bool is_replay) {
   if (g_message_timer)
     g_message_timer--;
+  if (g_save_icon_timer)
+    g_save_icon_timer--;
   if (is_replay || !g_config.autosave_areas)
     return;
   int mod = main_module_index;
@@ -318,6 +333,7 @@ void HdMenu_AfterFrame(bool is_replay) {
   AutosaveName(FindAutosave(false), name, sizeof(name));
   // Salvataggio silenzioso: un messaggio a ogni cambio di area disturberebbe
   SaveLoadNamed(kSaveLoad_Save, name);
+  g_save_icon_timer = kSaveIconFrames;
 }
 
 static void LoadLatestAutosave() {
@@ -349,7 +365,7 @@ static void QuickSlotAction(int slot) {
   SaveLoadSlot(g_slot_action_save ? kSaveLoad_Save : kSaveLoad_Load, slot);
   ZeldaApuUnlock();
   char msg[64];
-  snprintf(msg, sizeof(msg), g_slot_action_save ? "Salvato nello slot %d" : "Slot %d caricato", slot + 1);
+  snprintf(msg, sizeof(msg), Tr(g_slot_action_save ? "Salvato nello slot %d" : "Slot %d caricato"), slot + 1);
   ShowMessage(msg);
   if (!g_slot_action_save) {
     g_autosave_last_key = -1;
@@ -368,10 +384,124 @@ void HdMenu_ApplyConfig() {
   g_fx_embers = g_config.fx_embers, g_fx_window_rays = g_config.fx_window_rays;
   g_fx_item_glow = g_config.fx_item_glow;
   g_fx_heat_haze = g_config.fx_heat_haze, g_fx_rain = g_config.fx_rain;
+  g_fx_menu_blur = g_config.fx_menu_blur, g_fx_sprite_shadows = g_config.fx_sprite_shadows;
+  g_fx_soft_iris = g_config.fx_soft_iris, g_fx_button_hints = g_config.fx_button_hints;
 }
 
 static bool IsItalian() {
   return g_config.language && StringEqualsNoCase(g_config.language, "it");
+}
+
+static const char *Tr(const char *it) {
+  static const char *const kTr[][2] = {
+    { "Transizioni veloci", "Fast transitions" },
+    { "Transizione continua tra aree", "Continuous area transitions" },
+    { "Mondo continuo all'esterno", "Continuous overworld" },
+    { "HUD moderno", "Modern HUD" },
+    { "Oggetti X, L, R nell'HUD", "X, L, R items in the HUD" },
+    { "Cambio oggetti con L e R", "Switch items with L and R" },
+    { "Raccogli oggetti con la spada", "Collect items with the sword" },
+    { "Rompi vasi con la spada", "Break pots with the sword" },
+    { "Sterza durante lo scatto", "Turn while dashing" },
+    { "Fino a 4 bombe insieme", "Up to 4 bombs at once" },
+    { "Massimi in giallo nell'HUD", "Maximums in yellow in the HUD" },
+    { "Disattiva bip vita bassa", "Disable low health beep" },
+    { "Annulla il volo con X", "Cancel bird travel with X" },
+    { "Specchio verso le Tenebre", "Mirror to the Dark World" },
+    { "Correzioni di bug", "Bug fixes" },
+    { "Su", "Up" },
+    { "Gi\xc3\xb9", "Down" },
+    { "Sinistra", "Left" },
+    { "Destra", "Right" },
+    { "Spenta", "Off" },
+    { "Leggera", "Light" },
+    { "Media", "Medium" },
+    { "Forte", "Strong" },
+    { "Originale", "Original" },
+    { "Veloce con A o B", "Fast with A or B" },
+    { "Istantanea", "Instant" },
+    { "Grafica", "Graphics" },
+    { "Gioco", "Game" },
+    { "Controlli", "Controls" },
+    { "Salvataggi", "Saves" },
+    { "Opzioni", "Options" },
+    { "Riprendi", "Resume" },
+    { "Esci dal gioco", "Quit game" },
+    { "Telecamera fluida", "Smooth camera" },
+    { "Schermo intero", "Fullscreen" },
+    { "Mappa del mondo in HD", "HD world map" },
+    { "Mostra FPS", "Show FPS" },
+    { "Testo nitido nei dialoghi", "Sharp dialogue text" },
+    { "Fluidit\xc3\xa0 oltre i 60 Hz", "Smoothness above 60 Hz" },
+    { "Illuminazione dinamica", "Dynamic lighting" },
+    { "Braci dalle fiamme", "Embers from flames" },
+    { "Raggi dalle finestre", "Light rays from windows" },
+    { "Bagliore degli oggetti ricevuti", "Glow of received items" },
+    { "Calore sopra la lava", "Heat haze over lava" },
+    { "Pioggia e lampi migliorati", "Improved rain and lightning" },
+    { "Sfocatura dietro menu e dialoghi", "Blur behind menus and dialogues" },
+    { "Ombre di personaggi e nemici", "Shadows of characters and enemies" },
+    { "Cerchio di transizione morbido", "Soft transition circle" },
+    { "Suggerimenti dei tasti", "Button hints" },
+    { "Velocit\xc3\xa0 del testo", "Text speed" },
+    { "Lingua dei dialoghi", "Dialogue language" },
+    { "Musica orchestrale MSU", "MSU orchestral music" },
+    { "(al riavvio)", "(on restart)" },
+    { "Menu opzioni", "Options menu" },
+    { "Ripristina tasti predefiniti", "Restore default keys" },
+    { "Salva a ogni cambio di area", "Save on every area change" },
+    { "Salvataggi automatici da tenere", "Autosaves to keep" },
+    { "Carica l'ultimo automatico", "Load the latest autosave" },
+    { "Azione sugli slot", "Slot action" },
+    { "Salva", "Save" },
+    { "Carica", "Load" },
+    { "vuoto", "empty" },
+    { "S\xc3\xac", "Yes" },
+    { "Nessun salvataggio automatico", "No autosave" },
+    { "Salvataggio automatico caricato", "Autosave loaded" },
+    { "Caricamento non riuscito", "Loading failed" },
+    { "Lo slot e' vuoto", "The slot is empty" },
+    { "Salvato nello slot %d", "Saved to slot %d" },
+    { "Slot %d caricato", "Slot %d loaded" },
+    { "Tasti predefiniti ripristinati", "Default keys restored" },
+    { "Scegli", "Select" },
+    { "Chiudi", "Close" },
+    { "Riordina", "Sort" },
+    { "Segnalino", "Marker" },
+    { "Centra su Link", "Center on Link" },
+    { "Veloce", "Fast" },
+    { "Riduci", "Zoom out" },
+    { "Ingrandisci", "Zoom in" },
+    { "Cambia piano", "Change floor" },
+    { "Croce", "D-pad" },
+    { "Frecce", "Arrows" },
+    { "Fogne del castello", "Sewers" },
+    { "Castello di Hyrule", "Hyrule Castle" },
+    { "Palazzo dell'Est", "Eastern Palace" },
+    { "Castello di Sabbia", "Desert Palace" },
+    { "Sala superiore del castello", "Agahnim's Tower" },
+    { "Dedalo d'Acqua", "Swamp Palace" },
+    { "Palazzo Cupo", "Palace of Darkness" },
+    { "Malapalude", "Misery Mire" },
+    { "Bosco d'Ossa", "Skull Woods" },
+    { "Forte Ghiaccio", "Ice Palace" },
+    { "Torre di Hera", "Tower of Hera" },
+    { "Villaggio dei Ladroni", "Thieves' Town" },
+    { "Rocca Tartaruga", "Turtle Rock" },
+    { "Torre di Ganon", "Ganon's Tower" },
+    { "Premi il nuovo tasto o pulsante  (Esc o Back annulla)", "Press the new key or button  (Esc or Back cancels)" },
+    { "A conferma   B indietro   Sinistra e Destra cambiano", "A confirm   B back   Left and Right change" },
+    { "Segnalino tolto", "Marker removed" },
+    { "Troppi segnalini, togline qualcuno", "Too many markers, remove some" },
+    { "Segnalino aggiunto", "Marker added" },
+    { "A segnalino   Y centra su Link   tieni B per scorrere veloce", "A marker   Y center on Link   hold B to scroll fast" },
+  };
+  if (IsItalian())
+    return it;
+  for (int i = 0; i < countof(kTr); i++)
+    if (!strcmp(it, kTr[i][0]))
+      return kTr[i][1];
+  return it;
 }
 
 static void SetFeature(uint32 bit, bool on) {
@@ -387,7 +517,7 @@ static void AddIni(IniValue *v, int *n, const char *section, const char *key, co
 }
 
 static void SaveSettings() {
-  IniValue v[48];
+  IniValue v[64];
   int n = 0;
   AddIni(v, &n, "[Graphics]", "SmoothCamera", "%d", g_config.smooth_camera);
   AddIni(v, &n, "[Graphics]", "EnhancedMode7", "%d", g_config.enhanced_mode7);
@@ -399,6 +529,10 @@ static void SaveSettings() {
   AddIni(v, &n, "[Graphics]", "FxItemGlow", "%d", g_config.fx_item_glow);
   AddIni(v, &n, "[Graphics]", "FxHeatHaze", "%d", g_config.fx_heat_haze);
   AddIni(v, &n, "[Graphics]", "FxRain", "%d", g_config.fx_rain);
+  AddIni(v, &n, "[Graphics]", "FxMenuBlur", "%d", g_config.fx_menu_blur);
+  AddIni(v, &n, "[Graphics]", "FxSpriteShadows", "%d", g_config.fx_sprite_shadows);
+  AddIni(v, &n, "[Graphics]", "FxSoftIris", "%d", g_config.fx_soft_iris);
+  AddIni(v, &n, "[Graphics]", "FxButtonHints", "%d", g_config.fx_button_hints);
   AddIni(v, &n, "[General]", "AutosaveOnAreaChange", "%d", g_config.autosave_areas);
   AddIni(v, &n, "[General]", "AutosaveSlots", "%d", AutosaveCount());
   v[n].section = "[General]", v[n].key = "Language";
@@ -443,8 +577,8 @@ static void SaveSettings() {
 static MenuItem *AddItem(int id, const char *label, const char *value) {
   MenuItem *it = &g_items[g_num_items++];
   it->id = id;
-  snprintf(it->label, sizeof(it->label), "%s", label);
-  snprintf(it->value, sizeof(it->value), "%s", value ? value : "");
+  snprintf(it->label, sizeof(it->label), "%s", Tr(label));
+  snprintf(it->value, sizeof(it->value), "%s", value ? Tr(value) : "");
   return it;
 }
 
@@ -479,7 +613,7 @@ static void BuildItems() {
   case kPage_Graphics:
     AddItem(0, "Telecamera fluida", kSmoothCameraNames[g_config.smooth_camera & 3]);
     AddItem(1, "Schermo intero", YesNo(Host_IsFullscreen()));
-    snprintf(buf, sizeof(buf), "%s%s", YesNo(g_config.enhanced_mode7), Host_IsOpenGL() ? "" : " (al riavvio)");
+    snprintf(buf, sizeof(buf), "%s%s%s", Tr(YesNo(g_config.enhanced_mode7)), Host_IsOpenGL() ? "" : " ", Host_IsOpenGL() ? "" : Tr("(al riavvio)"));
     AddItem(2, "Mappa del mondo in HD", buf);
     AddItem(3, "Mostra FPS", YesNo(Host_GetDisplayPerf()));
     AddItem(4, "Testo nitido nei dialoghi", YesNo(g_config.hd_text));
@@ -490,6 +624,10 @@ static void BuildItems() {
     AddItem(9, "Bagliore degli oggetti ricevuti", YesNo(g_config.fx_item_glow));
     AddItem(10, "Calore sopra la lava", YesNo(g_config.fx_heat_haze));
     AddItem(11, "Pioggia e lampi migliorati", YesNo(g_config.fx_rain));
+    AddItem(12, "Sfocatura dietro menu e dialoghi", YesNo(g_config.fx_menu_blur));
+    AddItem(13, "Ombre di personaggi e nemici", YesNo(g_config.fx_sprite_shadows));
+    AddItem(14, "Cerchio di transizione morbido", YesNo(g_config.fx_soft_iris));
+    AddItem(15, "Suggerimenti dei tasti", YesNo(g_config.fx_button_hints));
     break;
   case kPage_Game:
     AddItem(100, "Velocit\xc3\xa0 del testo", kTextSpeedNames[g_config.text_speed % 3]);
@@ -500,7 +638,7 @@ static void BuildItems() {
   case kPage_Audio:
     snprintf(buf, sizeof(buf), "%d%%", Host_GetVolume());
     AddItem(0, "Volume", buf);
-    snprintf(buf, sizeof(buf), "%s (al riavvio)", YesNo(g_msu_on));
+    snprintf(buf, sizeof(buf), "%s %s", Tr(YesNo(g_msu_on)), Tr("(al riavvio)"));
     AddItem(1, "Musica orchestrale MSU", buf);
     break;
   case kPage_Controls:
@@ -561,9 +699,10 @@ static void Activate(int id, int dir) {
     } else if (id == 6) {
       g_config.dynamic_light = !g_config.dynamic_light;
       g_dynamic_light = g_config.dynamic_light;
-    } else if (id >= 7 && id <= 11) {
-      bool *opt[5] = { &g_config.fx_embers, &g_config.fx_window_rays, &g_config.fx_item_glow,
-                       &g_config.fx_heat_haze, &g_config.fx_rain };
+    } else if (id >= 7 && id <= 15) {
+      bool *opt[9] = { &g_config.fx_embers, &g_config.fx_window_rays, &g_config.fx_item_glow,
+                       &g_config.fx_heat_haze, &g_config.fx_rain, &g_config.fx_menu_blur,
+                       &g_config.fx_sprite_shadows, &g_config.fx_soft_iris, &g_config.fx_button_hints };
       *opt[id - 7] = !*opt[id - 7];
       HdMenu_ApplyConfig();
     }
@@ -666,6 +805,8 @@ void HdMenu_Close() {
 
 bool HdMenu_HandleKey(int code, int mod, bool pressed) {
   int cmd = FindCmdForSdlKey(code, mod);
+  if (pressed)
+    g_last_input_pad = false;
   if (!g_menu_open) {
     if (cmd == kKeys_HdMenu && pressed) {
       HdMenu_Open();
@@ -708,6 +849,8 @@ bool HdMenu_HandleKey(int code, int mod, bool pressed) {
 }
 
 bool HdMenu_HandlePadButton(int button, bool pressed) {
+  if (pressed)
+    g_last_input_pad = true;
   if (!g_menu_open)
     return false;
   if (!pressed)
@@ -739,6 +882,8 @@ bool HdMenu_HandlePadButton(int button, bool pressed) {
 }
 
 void HdMenu_HandleStick(uint8 dir_bits) {
+  if (dir_bits)
+    g_last_input_pad = true;
   if (!g_menu_open || g_capture >= 0) {
     g_last_stick = dir_bits;
     return;
@@ -763,6 +908,240 @@ static void DrawMessage(Canvas *cv) {
   DrawText(cv, x + 8, y + 1, g_message, 0xf8f8f8);
 }
 
+// Pixel mescolato con quello sotto (a = opacita')
+static void BlendPixel(Canvas *cv, int x, int y, uint32 c, float a) {
+  if ((unsigned)x >= (unsigned)cv->width || (unsigned)y >= (unsigned)cv->height)
+    return;
+  for (int yy = 0; yy < cv->scale; yy++) {
+    uint32 *row = (uint32 *)(cv->pixels + (y * cv->scale + yy) * cv->pitch) + x * cv->scale;
+    for (int xx = 0; xx < cv->scale; xx++) {
+      uint32 o = row[xx];
+      int r = (int)((o >> 16 & 0xff) * (1 - a) + (c >> 16 & 0xff) * a);
+      int g = (int)((o >> 8 & 0xff) * (1 - a) + (c >> 8 & 0xff) * a);
+      int b = (int)((o & 0xff) * (1 - a) + (c & 0xff) * a);
+      row[xx] = 0x02000000 | r << 16 | g << 8 | b;
+    }
+  }
+}
+
+// Icona del salvataggio automatico: una piccola Triforce in basso a destra che
+// compare e scompare con una dissolvenza, con un riflesso che la attraversa
+static void DrawSaveIcon(Canvas *cv) {
+  if (!g_save_icon_timer)
+    return;
+  int t = kSaveIconFrames - g_save_icon_timer;
+  float a = t < 12 ? t / 12.0f : g_save_icon_timer < 30 ? g_save_icon_timer / 30.0f : 1.0f;
+  // tre triangoli quasi equilateri alti 9 pixel (meta' larghezza per riga)
+  static const uint8 kHalf[9] = { 0, 1, 1, 2, 2, 3, 4, 4, 5 };
+  int x0 = cv->width - 8 - 21, y0 = cv->height - 8 - 18;
+  int shine = (t * 2) % 100 - 20;  // posizione della diagonale del riflesso
+  for (int tri = 0; tri < 3; tri++) {
+    // le punte dei triangoli in basso toccano gli angoli di quello in alto
+    int cx = x0 + 10 + (tri == 1 ? -5 : tri == 2 ? 5 : 0), cy = y0 + (tri ? 9 : 0);
+    for (int r = 0; r < 9; r++)
+      for (int dx = -kHalf[r]; dx <= kHalf[r]; dx++) {
+        int x = cx + dx, y = cy + r;
+        bool edge = (dx == -kHalf[r] || dx == kHalf[r] || r == 8);
+        uint32 c = edge ? 0xb07808 : (r < 3 ? 0xfff070 : 0xf8d030);
+        int d = (x - x0) + (y - y0) - shine;
+        if (d >= 0 && d < 3)
+          c = 0xfffff0;
+        BlendPixel(cv, x, y, c, a);
+      }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Suggerimenti dei tasti in inventario e mappe: mostrano il tasto davvero
+// assegnato, della tastiera o del pad secondo l'ultimo dispositivo usato.
+
+enum { kBtn_Dpad = -1, kBtn_Select = 4, kBtn_Start = 5, kBtn_A = 6, kBtn_B = 7, kBtn_X = 8, kBtn_Y = 9, kBtn_L = 10, kBtn_R = 11 };
+
+static void ButtonName(int btn, char *buf, size_t size) {
+  if (btn == kBtn_Dpad) {
+    if (g_last_input_pad) {
+      snprintf(buf, size, "%s", Tr("Croce"));
+      return;
+    }
+    char k[4][48];
+    for (int i = 0; i < 4; i++)
+      Config_KeyName(Config_GetKeyForCmd(kKeys_Controls + i), k[i], sizeof(k[i]));
+    if (!strcmp(k[0], "Up") && !strcmp(k[1], "Down") && !strcmp(k[2], "Left") && !strcmp(k[3], "Right"))
+      snprintf(buf, size, "%s", Tr("Frecce"));
+    else
+      snprintf(buf, size, "%s %s %s %s", k[0], k[2], k[1], k[3]);
+    return;
+  }
+  if (g_last_input_pad) {
+    snprintf(buf, size, "%s", Config_PadButtonName(Config_GetPadButtonForCmd(kKeys_Controls + btn)));
+    return;
+  }
+  char k[48];
+  Config_KeyName(Config_GetKeyForCmd(kKeys_Controls + btn), k, sizeof(k));
+  static const char *const kNames[][2] = {
+    { "Return", "Invio" }, { "Right Shift", "Maiusc dx" }, { "Left Shift", "Maiusc sx" },
+    { "Space", "Spazio" }, { "Backspace", "Canc" }, { "Right Ctrl", "Ctrl dx" }, { "Left Ctrl", "Ctrl sx" },
+  };
+  for (int i = 0; i < countof(kNames) && IsItalian(); i++)
+    if (!strcmp(k, kNames[i][0])) {
+      snprintf(buf, size, "%s", kNames[i][1]);
+      return;
+    }
+  if (k[0] && !k[1] && k[0] >= 'a' && k[0] <= 'z')
+    k[0] -= 32;  // lettere in maiuscolo, come sui tasti
+  snprintf(buf, size, "%s", k);
+}
+
+typedef struct Hint {
+  int btn;
+  const char *label;
+} Hint;
+
+// Riquadro scuro semitrasparente con gli angoli smussati
+static void DrawPanel(Canvas *cv, int x, int y, int w, int h, uint32 color, float a) {
+  for (int yy = 0; yy < h; yy++)
+    for (int xx = 0; xx < w; xx++) {
+      bool corner = (yy == 0 || yy == h - 1) && (xx == 0 || xx == w - 1);
+      if (!corner)
+        BlendPixel(cv, x + xx, y + yy, color, a);
+    }
+}
+
+static void DrawHints(Canvas *cv, const Hint *h, int n, int bottom) {
+  char names[8][48];
+  int total = 0;
+  for (int i = 0; i < n; i++) {
+    ButtonName(h[i].btn, names[i], sizeof(names[i]));
+    total += TextWidth(names[i]) + 8 + 4 + TextWidth(Tr(h[i].label)) + (i ? 14 : 0);
+  }
+  int x = (cv->width - total) / 2, y = cv->height - bottom;
+  DrawPanel(cv, x - 8, y - 2, total + 16, 20, 0x101020, 0.70f);
+  for (int i = 0; i < n; i++) {
+    if (i)
+      x += 14;
+    int kw = TextWidth(names[i]) + 8;
+    DrawPanel(cv, x, y + 1, kw, 14, 0xe0e0e8, 1.0f);
+    DrawPanel(cv, x + 1, y + 2, kw - 2, 12, 0x383848, 1.0f);
+    DrawText(cv, x + 4, y - 1, names[i], 0xf8f8f8);
+    x += kw + 4;
+    x = DrawText(cv, x, y - 1, Tr(h[i].label), 0xf8e070);
+  }
+}
+
+// Suggerimenti in colonna ai lati dello schermo: per ognuno il tasto e sotto
+// la sua azione, centrati nella fascia laterale
+static void DrawHintColumn(Canvas *cv, const Hint *h, int n, int cx) {
+  int y = cv->height - 12 - n * 40;
+  for (int i = 0; i < n; i++, y += 40) {
+    char name[48];
+    ButtonName(h[i].btn, name, sizeof(name));
+    int kw = TextWidth(name) + 8, lw = TextWidth(Tr(h[i].label));
+    int pw = (kw > lw ? kw : lw) + 12;
+    DrawPanel(cv, cx - pw / 2, y - 3, pw, 37, 0x101020, 0.70f);
+    int kx = cx - kw / 2;
+    DrawPanel(cv, kx, y, kw, 14, 0xe0e0e8, 1.0f);
+    DrawPanel(cv, kx + 1, y + 1, kw - 2, 12, 0x383848, 1.0f);
+    DrawText(cv, kx + 4, y - 2, name, 0xf8f8f8);
+    DrawText(cv, cx - lw / 2, y + 15, Tr(h[i].label), 0xf8e070);
+  }
+}
+
+// Contorno nero di 2 pixel attorno alle lettere dei tasti sul bordo sinistro
+// dei riquadri dell'inventario (Y/X/L/R e la A rossa). Le lettere sono caselle
+// dello strato 3: si cercano nella sua mappa (colonna 0) e se ne ricava la
+// posizione sullo schermo dallo scorrimento, cosi' il contorno segue il menu
+// anche mentre scende e risale.
+static void DrawInventoryLetterOutlines(Canvas *cv) {
+  if (main_module_index != 14 || submodule_index != 1)
+    return;
+  Ppu *ppu = g_zenv.ppu;
+  BgLayer *bg = &ppu->bgLayer[2];
+  int ext = (cv->width - 256) / 2;
+  int rows = bg->tilemapHigher ? 64 : 32;
+  for (int ty = 0; ty + 1 < rows; ty++) {
+    int base = bg->tilemapAdr + (ty & 31) * 32 + ((ty & 32) ? (bg->tilemapWider ? 0x800 : 0x400) : 0);
+    int base2 = bg->tilemapAdr + ((ty + 1) & 31) * 32 + (((ty + 1) & 32) ? (bg->tilemapWider ? 0x800 : 0x400) : 0);
+    uint16 top = ppu->vram[base & 0x7fff], bot = ppu->vram[base2 & 0x7fff];
+    int t = top & 0x3ff, b = bot & 0x3ff;
+    bool letter = (t == 0xf0 && (b == 0xf1 || b == 0xf0 || b == 0xf2)) ||
+                  (t == 0x0e && b == 0x0f) || (t == 0x0c && b == 0x0d);
+    if (!letter)
+      continue;
+    // forma della lettera (8x16), dalle due caselle a 2 bit per pixel
+    uint8 glyph[16][8];
+    for (int half = 0; half < 2; half++) {
+      uint16 e = half ? bot : top;
+      bool hf = (e & 0x4000) != 0, vf = (e & 0x8000) != 0;
+      for (int r = 0; r < 8; r++) {
+        uint16 w = ppu->vram[(bg->tileAdr + (e & 0x3ff) * 8 + (vf ? 7 - r : r)) & 0x7fff];
+        for (int c = 0; c < 8; c++) {
+          int bit = hf ? c : 7 - c;
+          glyph[half * 8 + r][c] = ((w >> bit) & 1) | ((w >> (8 + bit)) & 1);
+        }
+      }
+    }
+    int wrap = rows * 8;
+    int sy = ((ty * 8 - bg->vScroll) % wrap + wrap) % wrap;
+    if (sy >= 256)
+      sy -= wrap;
+    int sx = ext - (bg->hScroll & 0xff);
+    for (int y = -2; y < 18; y++)
+      for (int x = -2; x < 10; x++) {
+        if (y >= 0 && y < 16 && x >= 0 && x < 8 && glyph[y][x])
+          continue;
+        bool near = false;
+        for (int dy = -2; dy <= 2 && !near; dy++)
+          for (int dx = -2; dx <= 2 && !near; dx++) {
+            if (abs(dx) + abs(dy) > 3)
+              continue;  // angoli arrotondati
+            int gy = y + dy, gx = x + dx;
+            near = gy >= 0 && gy < 16 && gx >= 0 && gx < 8 && glyph[gy][gx];
+          }
+        if (near)
+          Canvas_Pixel(cv, sx + x, sy + y, 0x000000);
+      }
+  }
+}
+
+static void DrawButtonHints(Canvas *cv) {
+  if (!g_config.fx_button_hints || main_module_index != 14)
+    return;
+  // il tasto della mappa e' X, oppure Select se a X e' assegnato un oggetto
+  int map_btn = hud_cur_item_x != 0 ? kBtn_Select : kBtn_X;
+  int sub = submodule_index;
+  if (sub == 1) {  // inventario: ai lati, due e due, per non coprire i riquadri
+    Hint left[2] = { { kBtn_Dpad, "Scegli" }, { kBtn_Start, "Chiudi" } };
+    Hint right[2];
+    int nr = 0;
+    if (sram_progress_indicator)
+      right[nr++] = (Hint){ kBtn_Select, "Salva" };
+    if (enhanced_features0 & kFeatures0_SwitchLR)
+      right[nr++] = (Hint){ kBtn_Y, "Riordina" };
+    int side = (cv->width - 256) / 2;
+    if (side >= 60) {
+      DrawHintColumn(cv, left, 2, side / 2);
+      if (nr)
+        DrawHintColumn(cv, right, nr, cv->width - side / 2);
+    } else {
+      Hint all[4] = { left[0], left[1] };
+      for (int i = 0; i < nr; i++)
+        all[2 + i] = right[i];
+      DrawHints(cv, all, 2 + nr, 22);
+    }
+  } else if (sub == 7 && overworld_map_state >= 4 && overworld_map_state <= 5) {  // mappa del mondo
+    if (overworld_map_flags & 1) {
+      Hint h[4] = { { kBtn_A, "Segnalino" }, { kBtn_Y, "Centra su Link" }, { kBtn_B, "Veloce" }, { kBtn_L, "Riduci" } };
+      DrawHints(cv, h, 4, 22);
+    } else {
+      Hint h[2] = { { kBtn_L, "Ingrandisci" }, { map_btn, "Chiudi" } };
+      DrawHints(cv, h, 2, 22);
+    }
+  } else if (sub == 3 && overworld_map_state >= 2 && overworld_map_state <= 4) {  // mappa del labirinto
+    Hint h[2] = { { kBtn_Dpad, "Cambia piano" }, { map_btn, "Chiudi" } };
+    DrawHints(cv, h, 2, 46);  // sopra il nome del labirinto
+  }
+}
+
 // Nome del labirinto mostrato sulla mappa del dungeon
 static void DrawDungeonMapStatus(Canvas *cv) {
   static const char *const kDungeonNames[14] = {
@@ -776,7 +1155,7 @@ static void DrawDungeonMapStatus(Canvas *cv) {
   int dung = cur_palace_index_x2 >> 1;
   if (dung < 0 || dung >= 14)
     return;
-  const char *name = kDungeonNames[dung];
+  const char *name = Tr(kDungeonNames[dung]);
   int w = TextWidth(name);
   int x = (cv->width - w) / 2;
   Canvas_Rect(cv, x - 8, cv->height - 20, w + 16, 18, 0x101830);
@@ -788,7 +1167,11 @@ void HdMenu_Draw(uint8 *pixels, int pitch, int width, int height, int scale) {
   if (!g_menu_open) {
     if (!g_font_data)
       Font_Load();
+    HdHud_Draw(pixels, pitch, width, height, scale);
     DrawDungeonMapStatus(&cv);
+    DrawSaveIcon(&cv);
+    DrawInventoryLetterOutlines(&cv);
+    DrawButtonHints(&cv);
     DrawMessage(&cv);
     return;
   }
@@ -813,7 +1196,7 @@ void HdMenu_Draw(uint8 *pixels, int pitch, int width, int height, int scale) {
 
   // Titolo
   Canvas_Rect(&cv, panel_x, top, panel_w, 20, 0x30285c);
-  const char *title = PageTitle();
+  const char *title = Tr(PageTitle());
   DrawText(&cv, panel_x + (panel_w - TextWidth(title)) / 2, top + 1, title, 0xf8d878);
 
   int y = top + 24;
@@ -836,9 +1219,9 @@ void HdMenu_Draw(uint8 *pixels, int pitch, int width, int height, int scale) {
     DrawText(&cv, panel_x + panel_w - 14, cv.height - 38, "\xe2\x86\x93", 0xf8f8f8);
 
   // Riga di aiuto
-  const char *help = g_capture >= 0 ?
+  const char *help = Tr(g_capture >= 0 ?
       "Premi il nuovo tasto o pulsante  (Esc o Back annulla)" :
-      "A conferma   B indietro   Sinistra e Destra cambiano";
+      "A conferma   B indietro   Sinistra e Destra cambiano");
   int hw = TextWidth(help);
   if (g_capture >= 0)
     Canvas_Rect(&cv, (cv.width - hw) / 2 - 8, cv.height - 22, hw + 16, 20, 0x803020);

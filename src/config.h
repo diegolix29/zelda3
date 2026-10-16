@@ -78,6 +78,7 @@ typedef struct Config {
   bool dynamic_light;
   // Effetti visivi aggiuntivi
   bool fx_embers, fx_window_rays, fx_item_glow, fx_heat_haze, fx_rain;
+  bool fx_menu_blur, fx_sprite_shadows, fx_soft_iris, fx_button_hints;
   uint8 text_speed;         // 0 = originale, 1 = veloce, 2 = istantaneo
 
   const char *link_graphics;

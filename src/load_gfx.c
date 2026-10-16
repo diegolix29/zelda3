@@ -1456,8 +1456,16 @@ void SpotlightInternal(uint8 x, uint8 y) {  // 80f29d
   INIDISP_copy = 0xf;
 }
 
+// Cerchio del gioco in questo frame (centro sullo schermo, raggio da 0 a 126),
+// usato per disegnarlo morbido e su tutta la larghezza (hd_fx.c)
+int g_hd_iris_x, g_hd_iris_y, g_hd_iris_r;
+uint8 g_hd_iris_frame;
+bool g_hd_iris_valid;
+
 void IrisSpotlight_ConfigureTable() {  // 80f312
   uint16 r14 = link_y_coord - BG2VOFS_copy2 + 12;
+  g_hd_iris_frame = frame_counter;
+  g_hd_iris_valid = true;
   spotlight_y_lower = r14 - spotlight_var1;
   spotlight_y_upper = r14 + spotlight_var1;
   spotlight_var3 = link_x_coord - BG2HOFS_copy2 + 8;
@@ -1489,6 +1497,9 @@ void IrisSpotlight_ConfigureTable() {  // 80f312
   memcpy(hdma_table_unused, hdma_table_dynamic, 224  * sizeof(uint16));
 
   spotlight_var1 += kSpotlight_delta_size[spotlight_var2 >> 1];
+  g_hd_iris_x = (int16)spotlight_var3;
+  g_hd_iris_y = (int16)r14;
+  g_hd_iris_r = spotlight_var1;
 
   if (spotlight_var1 != kSpotlight_goal[spotlight_var2 >> 1])
     return;

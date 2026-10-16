@@ -21,14 +21,14 @@ void main()
 {
     vec4 c = COMPAT_TEXTURE(Source, vTexCoord);
     float layer = floor(c.a * 255.0 + 0.5);
-    // 2 = HUD, 4 e 6 = sprite (vedi 03-final.glsl)
-    float bg = 1.0 - step(1.5, layer) * step(layer, 2.5)
-                   - step(3.5, layer) * step(layer, 4.5)
+    // 2 = HUD, 3 = fondale (cielo e nuvole dietro la Piramide o sul Monte
+    // della Morte), 4 e 6 = sprite: niente ombre da questi (vedi 03-final.glsl)
+    float bg = 1.0 - step(1.5, layer) * step(layer, 4.5)
                    - step(5.5, layer) * step(layer, 6.5);
     float luma = dot(c.rgb, vec3(0.299, 0.587, 0.114));
     float occluder = (1.0 - smoothstep(FSA_SHADOW_DARK * 0.35, FSA_SHADOW_DARK, luma)) * bg;
     float bright = smoothstep(FSA_BLOOM_THRESHOLD, min(FSA_BLOOM_THRESHOLD + 0.15, 1.0), luma)
-                 * (1.0 - step(1.5, layer) * step(layer, 2.5));
+                 * (1.0 - step(1.5, layer) * step(layer, 3.5));
     FragColor = vec4(occluder, bright, 0.0, 1.0);
 }
 
