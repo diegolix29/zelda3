@@ -515,19 +515,20 @@ int main(int argc, char** argv) {
         SDL_PauseAudioDevice(device, audiopaused);
     }
 
+    // Con il menu opzioni aperto il gioco e' fermo: si ridisegna solo
+    // l'ultimo frame con il menu sopra (anche in pausa, altrimenti il menu
+    // sarebbe aperto ma invisibile)
+    if (menu_open) {
+      DrawPpuFrameWithPerf();
+      SDL_Delay(16);
+      continue;
+    }
+
     if (g_paused) {
       if (g_pause_redraw) {
         g_pause_redraw = false;
         DrawPpuFrameWithPerf();
       }
-      SDL_Delay(16);
-      continue;
-    }
-
-    // Con il menu opzioni aperto il gioco e' fermo: si ridisegna solo
-    // l'ultimo frame con il menu sopra.
-    if (menu_open) {
-      DrawPpuFrameWithPerf();
       SDL_Delay(16);
       continue;
     }
@@ -620,6 +621,8 @@ int main(int argc, char** argv) {
       }
     }
   }
+  // Finestra chiusa con il menu opzioni aperto: le impostazioni si salvano lo stesso
+  HdMenu_Close();
   if (g_config.autosave)
     HandleCommand(kKeys_Save + 0, true);
 

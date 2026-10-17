@@ -14,26 +14,14 @@
 extern uint8 g_ram[131072];
 #define ZELDA_BG2HOFS (*(uint16 *)(g_ram + 0xE2))
 #define ZELDA_BG2VOFS (*(uint16 *)(g_ram + 0xE8))
-// Modulo di gioco corrente: 14 = inventario, 0-5 = intro e selezione file.
-// Serve allo shader per spegnersi nei menu.
-#define ZELDA_MAIN_MODULE (*(uint8 *)(g_ram + 0x10))
-#define ZELDA_SUBMODULE (*(uint8 *)(g_ram + 0x11))
-#define ZELDA_SAVED_MODULE_FOR_MENU (*(uint8 *)(g_ram + 0x10C))
 // Spostamento del fondale nel frame disegnato (zelda_rtl.c)
 extern int g_render_bias_x, g_render_bias_y;
 
-// Modulo da comunicare allo shader. Inventario (sottomodulo 1), dialoghi (2)
-// e menu salva/esci (11) si aprono sopra il gioco: per lo shader valgono come
-// il modulo di gioco sottostante, cosi' l'effetto resta sul mondo e l'HUD/menu
-// (BG3) resta nitido grazie alla maschera dei layer.
+// Modulo da comunicare allo shader: quello della scena sullo schermo
+// (HdFx_SceneModule), cosi' l'effetto si accende e si spegne esattamente
+// quando compare o sparisce il mondo di gioco
 static int ZeldaModuleForShader() {
-  int m = ZELDA_MAIN_MODULE;
-  if (m == 14) {
-    int sub = ZELDA_SUBMODULE;
-    if (sub == 1 || sub == 2 || sub == 11)
-      m = ZELDA_SAVED_MODULE_FOR_MENU;
-  }
-  return m;
+  return HdFx_SceneModule();
 }
 
 #define STB_IMAGE_IMPLEMENTATION

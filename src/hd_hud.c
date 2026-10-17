@@ -308,6 +308,33 @@ static void DrawSmallText(Canvas *cv, int x, int y, const char *s, uint32 color)
   }
 }
 
+// "1/2" della barra della magia: caratteri 4x6, alti quanto l'interno della
+// barra (il contorno scuro cade sul bordo esterno)
+enum { kMagicTextW = 3 * 4 + 2 };
+
+static void DrawMagicText(Canvas *cv, int x, int y) {
+  static const uint8 kGlyphs[3][6] = {
+    { 2, 6, 2, 2, 2, 7 },     // 1
+    { 1, 1, 2, 4, 8, 8 },     // /
+    { 6, 9, 1, 2, 4, 15 },    // 2
+  };
+  for (int pass = 0; pass < 2; pass++)
+    for (int i = 0; i < 3; i++)
+      for (int r = 0; r < 6; r++)
+        for (int c = 0; c < 4; c++) {
+          if (!(kGlyphs[i][r] >> (3 - c) & 1))
+            continue;
+          int px = x + i * 5 + c, py = y + r;
+          if (pass == 0) {
+            for (int dy = -1; dy <= 1; dy++)
+              for (int dx = -1; dx <= 1; dx++)
+                Px(cv, px + dx, py + dy, 0x101010);
+          } else {
+            Px(cv, px, py, 0xf8f8f8);
+          }
+        }
+}
+
 #include "hd_hud_buttons.h"
 
 // I tre tasti, disposti come li ha disegnati l'utente (pulsanti.png)
@@ -377,9 +404,22 @@ void HdHud_Draw(uint8 *pixels, int pitch, int width, int height, int scale) {
   const int x0 = 8, y0 = 8;
   int hearts = link_health_capacity >> 3;
   int hp = (link_health_current + 3) & ~3;
+  // Cuori che si riempiono (fata, pozione, cuore preso): come nell'HUD
+  // originale (Hud_AnimateHeartRefill), il cuore appena aggiunto lampeggia
+  // con i tile 0x24A3, 0x24A4, 0x24A3 prima di restare pieno; fino al primo
+  // lampo mostra ancora com'era prima
+  int anim_heart = is_doing_heart_animation ? ((link_health_current & ~7) - 1) >> 3 : -1;
   for (int i = 0; i < hearts; i++) {
     int left = hp - i * 8;
     uint16 t = left >= 8 ? 0x24A0 : left >= 4 ? 0x24A1 : 0x24A2;
+    if (i == anim_heart) {
+      static const uint16 kAnimHeartPartial[4] = { 0x24A3, 0x24A4, 0x24A3, 0x24A0 };
+      int sub = animate_heart_refill_countdown_subpos;
+      if (sub)
+        t = kAnimHeartPartial[sub - 1];
+      else
+        t = left - 8 >= 8 ? 0x24A0 : left - 8 >= 4 ? 0x24A1 : 0x24A2;
+    }
     DrawTile(&cv, x0 + (i % 10) * 8, y0 + (i / 10) * 8, t);
   }
   int rows = hearts > 10 ? 2 : 1;
@@ -408,10 +448,9 @@ void HdHud_Draw(uint8 *pixels, int pitch, int width, int height, int scale) {
           col = 0x100c08;
         Px(&cv, bx + x, by + y, col);
       }
-    if (link_magic_consumption >= 1) {
-      const char *t = link_magic_consumption >= 2 ? "1/4" : "1/2";
-      DrawSmallText(&cv, bx + (bw - SmallTextWidth(t)) / 2, by + 2, t, 0xc8c8c8);
-    }
+    // come il gioco originale: "1/2" anche con il consumo a 1/4
+    if (link_magic_consumption >= 1)
+      DrawMagicText(&cv, bx + (bw - kMagicTextW) / 2, by + 1);
   }
 
   // --- Tasti: il punto piu' alto a filo con i cuori, il piu' a destra con

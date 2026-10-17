@@ -57,8 +57,9 @@ static char g_message[96];
 static int g_message_timer;
 static int g_save_icon_timer;  // icona del salvataggio automatico
 static bool g_last_input_pad;  // ultimo tasto premuto sul pad (non sulla tastiera)
-static bool g_controls_dirty, g_msu_dirty;
+static bool g_controls_dirty, g_msu_dirty, g_lang_dirty;
 static bool g_msu_on;
+static uint8 g_msu_mode;  // modalita' dell'ini (deluxe, opuz...) da riscrivere riaccendendo la musica
 static uint8 g_last_stick;
 
 static MenuItem g_items[kMaxItems];
@@ -280,23 +281,43 @@ static int AutosaveCount() {
   return n < 1 ? 3 : n > kMaxAutosaves ? kMaxAutosaves : n;
 }
 
-// Restituisce lo slot automatico piu' recente (newest=true) o da sovrascrivere
+static int g_autosave_newest = -1;  // ultimo slot automatico scritto in questa sessione
+
+// Restituisce lo slot automatico piu' recente (newest=true) o da sovrascrivere.
+// Gli slot si scrivono a rotazione (0, 1, 2, 0...): quello da sovrascrivere e'
+// il successivo al piu' recente. L'orario dei file ha la precisione di un
+// secondo, quindi a parita' di orario il piu' recente e' l'ultimo nell'ordine
+// di rotazione.
 static int FindAutosave(bool newest) {
-  int best = -1;
-  time_t best_t = 0;
+  int n = AutosaveCount();
+  bool has[kMaxAutosaves];
+  time_t t[kMaxAutosaves];
   char name[64];
-  for (int i = 0; i < AutosaveCount(); i++) {
-    time_t t;
+  int any = -1;
+  for (int i = 0; i < n; i++) {
     AutosaveName(i, name, sizeof(name));
-    if (!FileTime(name, &t)) {
-      if (!newest)
-        return i;  // slot libero
-      continue;
-    }
-    if (best < 0 || (newest ? t > best_t : t < best_t))
-      best = i, best_t = t;
+    has[i] = FileTime(name, &t[i]);
+    if (!has[i] && !newest)
+      return i;  // slot libero
+    if (has[i] && (any < 0 || t[i] > t[any]))
+      any = i;
   }
-  return best < 0 ? 0 : best;
+  if (any < 0)
+    return 0;
+  int last = (g_autosave_newest >= 0 && g_autosave_newest < n && has[g_autosave_newest]) ? g_autosave_newest : -1;
+  if (last < 0) {
+    // fra gli slot con l'orario piu' recente, quello dopo il quale la
+    // rotazione non continua
+    last = any;
+    for (int i = 0; i < n; i++) {
+      int next = (i + 1) % n;
+      if (has[i] && t[i] == t[any] && !(has[next] && t[next] == t[any])) {
+        last = i;
+        break;
+      }
+    }
+  }
+  return newest ? last : (last + 1) % n;
 }
 
 static void ShowMessage(const char *msg) {
@@ -330,9 +351,11 @@ void HdMenu_AfterFrame(bool is_replay) {
   if (first)
     return;  // non salvare appena caricato
   char name[64];
-  AutosaveName(FindAutosave(false), name, sizeof(name));
+  int slot = FindAutosave(false);
+  AutosaveName(slot, name, sizeof(name));
   // Salvataggio silenzioso: un messaggio a ogni cambio di area disturberebbe
   SaveLoadNamed(kSaveLoad_Save, name);
+  g_autosave_newest = slot;
   g_save_icon_timer = kSaveIconFrames;
 }
 
@@ -380,6 +403,8 @@ void HdMenu_ApplyConfig() {
   g_smooth_camera = g_config.smooth_camera;
   g_text_speed = g_config.text_speed;
   g_msu_on = g_config.enable_msu != 0;
+  if (g_msu_on)
+    g_msu_mode = g_config.enable_msu;
   g_dynamic_light = g_config.dynamic_light;
   g_fx_embers = g_config.fx_embers, g_fx_window_rays = g_config.fx_window_rays;
   g_fx_item_glow = g_config.fx_item_glow;
@@ -535,14 +560,25 @@ static void SaveSettings() {
   AddIni(v, &n, "[Graphics]", "FxButtonHints", "%d", g_config.fx_button_hints);
   AddIni(v, &n, "[General]", "AutosaveOnAreaChange", "%d", g_config.autosave_areas);
   AddIni(v, &n, "[General]", "AutosaveSlots", "%d", AutosaveCount());
-  v[n].section = "[General]", v[n].key = "Language";
-  snprintf(v[n].value, sizeof(v[n].value), "%s", IsItalian() ? "it" : "us"), n++;
+  // La lingua si scrive solo se cambiata dal menu (altrimenti resta quella
+  // dell'ini, anche de, fr...)
+  if (g_lang_dirty) {
+    v[n].section = "[General]", v[n].key = "Language";
+    snprintf(v[n].value, sizeof(v[n].value), "%s", g_config.language ? g_config.language : "us"), n++;
+  }
   for (int i = 0; i < countof(kFeatureOptions); i++)
     AddIni(v, &n, "[Features]", kFeatureOptions[i].ini_key, "%d", (g_config.features0 & kFeatureOptions[i].bit) != 0);
   AddIni(v, &n, "[Features]", "TextSpeed", "%d", g_config.text_speed);
   if (g_msu_dirty) {
     v[n].section = "[Sound]", v[n].key = "EnableMSU";
-    snprintf(v[n].value, sizeof(v[n].value), "%s", g_msu_on ? "true" : "false"), n++;
+    const char *mode = "true";
+    if ((g_msu_mode & (kMsuEnabled_MsuDeluxe | kMsuEnabled_Opuz)) == (kMsuEnabled_MsuDeluxe | kMsuEnabled_Opuz))
+      mode = "deluxe-opuz";
+    else if (g_msu_mode & kMsuEnabled_MsuDeluxe)
+      mode = "deluxe";
+    else if (g_msu_mode & kMsuEnabled_Opuz)
+      mode = "opuz";
+    snprintf(v[n].value, sizeof(v[n].value), "%s", g_msu_on ? mode : "false"), n++;
   }
   if (g_controls_dirty) {
     char buf[160], name[48];
@@ -713,6 +749,7 @@ static void Activate(int id, int dir) {
       g_text_speed = g_config.text_speed;
     } else if (id == 101) {
       g_config.language = IsItalian() ? "us" : "it";
+      g_lang_dirty = true;
       ZeldaSetLanguage(g_config.language);
       Font_Load();
     } else {
@@ -820,7 +857,8 @@ bool HdMenu_HandleKey(int code, int mod, bool pressed) {
     if (code == SDLK_ESCAPE) {
       g_capture = -1;
     } else if (code != SDLK_LSHIFT && code != SDLK_RSHIFT && code != SDLK_LCTRL &&
-               code != SDLK_RCTRL && code != SDLK_LALT && code != SDLK_RALT) {
+               code != SDLK_RCTRL && code != SDLK_LALT && code != SDLK_RALT &&
+               code != SDLK_COMMA) {  // la virgola separa i tasti nella riga Controls dell'ini
       Config_SetKeyForCmd(g_capture == 12 ? kKeys_HdMenu : kKeys_Controls + g_capture, code, mod);
       g_controls_dirty = true;
       g_capture = -1;
@@ -1117,16 +1155,13 @@ static void DrawButtonHints(Canvas *cv) {
       right[nr++] = (Hint){ kBtn_Select, "Salva" };
     if (enhanced_features0 & kFeatures0_SwitchLR)
       right[nr++] = (Hint){ kBtn_Y, "Riordina" };
+    // in 4:3 non c'e' spazio ai lati: niente suggerimenti (sotto coprirebbero
+    // i riquadri dell'inventario)
     int side = (cv->width - 256) / 2;
     if (side >= 60) {
       DrawHintColumn(cv, left, 2, side / 2);
       if (nr)
         DrawHintColumn(cv, right, nr, cv->width - side / 2);
-    } else {
-      Hint all[4] = { left[0], left[1] };
-      for (int i = 0; i < nr; i++)
-        all[2 + i] = right[i];
-      DrawHints(cv, all, 2 + nr, 22);
     }
   } else if (sub == 7 && overworld_map_state >= 4 && overworld_map_state <= 5) {  // mappa del mondo
     if (overworld_map_flags & 1) {

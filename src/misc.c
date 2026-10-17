@@ -422,7 +422,10 @@ void NMI_PrepareSprites() {  // 8085fc
   dma_source_addr_15 = dma_source_addr_10 + 0x100;
 
   if (--bg_tile_animation_countdown == 0) {
-    bg_tile_animation_countdown = (BYTE(overlay_index) == 0xb5 || BYTE(overlay_index) == 0xbc) ? 0x17 : 9;
+    // Al chiuso (fiamme di torce e bracieri) a meta' velocita': 18 frame
+    // invece di 9
+    bg_tile_animation_countdown = (BYTE(overlay_index) == 0xb5 || BYTE(overlay_index) == 0xbc) ? 0x17 :
+                                  player_is_indoors ? 18 : 9;
 
     uint16 t = word_7EC00F + 0x400;
     if (t == 0xc00)

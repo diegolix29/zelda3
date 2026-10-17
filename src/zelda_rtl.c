@@ -322,7 +322,7 @@ static void ApplyRenderBias() {
 // essere "poco sotto lo schermo" o "27 pixel sopra". Per ogni sprite si
 // sceglie l'interpretazione piu' vicina a un oggetto vero del gioco (Link,
 // nemici, oggetti in volo), visto che ogni sprite si disegna vicino al suo.
-extern uint8 g_link_oam_mask[128], g_link_oam_real_f0[128];
+extern uint8 g_link_oam_mask[128], g_link_oam_real_f0[128], g_sprite_oam_owner[128];
 
 // Fra v + k*period sceglie il valore la cui posizione sullo schermo (v - bias)
 // cade nella finestra [lo, lo + period)
@@ -348,14 +348,23 @@ static void ResolveSpritePositions(Ppu *ppu) {
   if (ppu->objBiasY == 0 && ppu->objBiasX == 0)
     return;
   int link_x = (int16)(link_x_coord - BG2HOFS_copy2) + 8;
-  int oy[32], n = 0, cy = BG2VOFS_copy2;
-  oy[n++] = (int16)(link_y_coord - cy);
+  // Si confronta anche la x: un nemico fermo 256 pixel piu' in alto ma
+  // lontano in orizzontale non deve "rubare" i pezzi di uno sprite vicino
+  // (il corpo del vecchio della Montagna spariva sopra lo schermo)
+  int oy[32], ox[32], n = 0, cy = BG2VOFS_copy2, cx = BG2HOFS_copy2;
+  int slot[16];  // posto di ogni nemico in oy/ox, -1 = non attivo
+  oy[n] = (int16)(link_y_coord - cy), ox[n++] = link_x - 8;
   for (int k = 0; k < 16; k++)
-    if (sprite_state[k])
-      oy[n++] = (int16)((sprite_y_hi[k] << 8 | sprite_y_lo[k]) - sprite_z[k] - cy);
+    if (slot[k] = -1, sprite_state[k]) {
+      slot[k] = n;
+      oy[n] = (int16)((sprite_y_hi[k] << 8 | sprite_y_lo[k]) - sprite_z[k] - cy);
+      ox[n++] = (int16)((sprite_x_hi[k] << 8 | sprite_x_lo[k]) - cx);
+    }
   for (int k = 0; k < 10 && n < 32; k++)
-    if (ancilla_type[k])
-      oy[n++] = (int16)((ancilla_y_hi[k] << 8 | ancilla_y_lo[k]) - cy);
+    if (ancilla_type[k]) {
+      oy[n] = (int16)((ancilla_y_hi[k] << 8 | ancilla_y_lo[k]) - cy);
+      ox[n++] = (int16)((ancilla_x_hi[k] << 8 | ancilla_x_lo[k]) - cx);
+    }
   for (int i = 0; i < 128; i++) {
     int lo = ppu->oam[i * 2] & 0xff, yy = ppu->oam[i * 2] >> 8;
     int hi = ppu->oam[0x100 + (i >> 3)] >> ((i & 7) * 2) & 1;
@@ -369,12 +378,22 @@ static void ResolveSpritePositions(Ppu *ppu) {
     }
     ppu->objX[i] = (int16)x;
     // i pezzi di Link si riferiscono solo a Link (oy[0]): un nemico 256 pixel
-    // piu' in la' li porterebbe fuori dallo schermo
-    int best = 1 << 30, y = yy, nk = g_link_oam_mask[i] ? 1 : n;
+    // piu' in la' li porterebbe fuori dallo schermo. Allo stesso modo i pezzi
+    // di un nemico si riferiscono solo a lui (la spada di un soldato fuori
+    // dallo schermo non deve finire accanto a Link); per gli altri (oggetti in
+    // volo, effetti) l'oggetto piu' vicino
+    int k0 = 0, k1 = n, o = g_sprite_oam_owner[i];
+    if (g_link_oam_mask[i])
+      k1 = 1;
+    else if (o < 16 && slot[o] >= 0)
+      k0 = slot[o], k1 = k0 + 1;
+    int best = 1 << 30, y = yy;
     for (int c = -1; c <= 1; c++)
-      for (int k = 0; k < nk; k++)
-        if (abs(yy + c * 256 - oy[k]) < best)
-          best = abs(yy + c * 256 - oy[k]), y = yy + c * 256;
+      for (int k = k0; k < k1; k++) {
+        int d = abs(yy + c * 256 - oy[k]) + abs(x - ox[k]);
+        if (d < best)
+          best = d, y = yy + c * 256;
+      }
     ppu->objY[i] = (int16)y;
     ppu->objShowF0[i] = g_link_oam_real_f0[i];
   }

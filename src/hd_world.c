@@ -29,10 +29,47 @@ static bool FeatureOn(void) {
   return (enhanced_features0 & kFeatures0_ContinuousWorld) != 0;
 }
 
+// Dialoghi, inventario, pozioni e menu di salvataggio aperti all'aperto: il
+// mondo resta visibile dietro e la vista libera resta ferma dov'era
+static bool InMenuOverWorld(void) {
+  int sub = submodule_index;
+  // mappa (7) e Ocarina (10): nella fase 0 il mondo si scurisce ancora visibile
+  return main_module_index == 14 && saved_module_for_menu == 9 &&
+         (sub == 1 || sub == 2 || sub == 4 || sub == 8 || sub == 9 || sub == 11 ||
+          ((sub == 7 || sub == 10) && overworld_map_state == 0));
+}
+
+// Arrivo con l'Ocarina: dalla fase 7 l'area di arrivo e' caricata e compare
+// schiarendosi, poi l'uccello posa Link. La vista libera deve essere gia' al
+// suo posto, non spostarsi dopo
+static bool InFluteArrival(void) {
+  return main_module_index == 14 && submodule_index == 10 && overworld_map_state >= 7;
+}
+
+// Ritorno dalla mappa del mondo: il gioco ricarica le sovrapposizioni e
+// schiarisce lo schermo (sottomoduli 32-34) prima di ridare il controllo
+static bool InMapReturn(void) {
+  return main_module_index == 9 && submodule_index >= 32 && submodule_index <= 34;
+}
+
 bool HdWorld_Active(void) {
-  if (!FeatureOn() || main_module_index != 9 || overworld_screen_index >= 0x80)
+  if (!FeatureOn() || overworld_screen_index >= 0x80)
+    return false;
+  if (main_module_index != 9 && !InMenuOverWorld() && !InFluteArrival())
     return false;
   return g_zenv.ppu->mode != 7;
+}
+
+// Luminosita' dello schermo (registro INIDISP, 0-15): il gioco la usa per le
+// dissolvenze, per esempio all'arrivo con l'Ocarina. La PPU la applica ai
+// suoi pixel; a quelli presi dalle immagini delle aree si applica qui.
+static int g_bright = 15;
+
+static inline uint32 Dim(uint32 c) {
+  if (g_bright >= 15)
+    return c;
+  uint32 r = (c >> 16 & 255) * g_bright / 15, g = (c >> 8 & 255) * g_bright / 15, b = (c & 255) * g_bright / 15;
+  return (c & 0xff000000) | r << 16 | g << 8 | b;
 }
 
 static bool InTransition(void) {
@@ -83,7 +120,7 @@ bool HdWorld_InsideCurrentArea(int wx, int wy) {
 
 enum { kMaxExtra = 1024 };  // erba tagliata e buche della pala
 enum { kMaxTiles = 256, kMaxKilled = 128, kMaxAlive = 16, kEnemyResetGap = 2 };  // 2 quadrati in mezzo = 3 aree
-enum { kPatchW = 48, kPatchH = 56 };
+enum { kPatchW = 64, kPatchH = 72 };
 
 // Tabelle del gioco con un valore per ogni nemico (indirizzo in g_ram, byte)
 typedef struct SpriteField { uint32 addr; uint8 size; } SpriteField;
@@ -326,7 +363,9 @@ static void CaptureEnemies(uint8 *pixels, int pitch, int width, int height) {
     if (!IsAreaEnemy(k))
       continue;
     int wx = SpriteWorldX(k), wy = SpriteWorldY(k), z = sprite_z[k];
-    int ox = -16, oy = -36;  // riquadro largo: lance, elmi e scudi non vanno tagliati
+    // riquadro largo: lance, elmi, scudi e la spada abbassata dei soldati
+    // (fino a 28 pixel sotto) non vanno tagliati
+    int ox = -24, oy = -36;
     int sx = wx + ox - cam_x, sy = wy - z + oy - cam_y;
     if (sx < 0 || sy < 0 || sx + kPatchW > width || sy + kPatchH > height)
       continue;  // non tutto sullo schermo: si tiene l'aspetto precedente
@@ -368,10 +407,20 @@ static void DrawFrozenEnemies(uint8 *pixels, int pitch, int width, int height, i
   int cur = BYTE(overworld_screen_index) & 0x7f;
   for (int a = 0; a < 128; a++) {
     AreaState *st = &g_states[a];
-    if (!st->used || a == cur || ((a ^ cur) & 0x40) || !st->n_alive)
+    // l'area appena raggiunta si salta, tranne nel primo frame del passaggio,
+    // quando il gioco non ha ancora caricato i suoi nemici (sparivano per un
+    // frame)
+    if (!st->used || (a == cur && !InTransition()) || ((a ^ cur) & 0x40) || !st->n_alive)
       continue;
     for (int i = 0; i < st->n_alive; i++) {
       EnemyRec *r = &st->alive[i];
+      if (a == cur) {
+        bool loaded = false;
+        for (int k = 0; k < 16 && !loaded; k++)
+          loaded = sprite_state[k] && sprite_N_word[k] == r->blk;
+        if (loaded)
+          continue;
+      }
       EnemyPatch *pt = NULL;
       for (int j = 0; j < kMaxAlive && !pt; j++)
         if (g_patches[a][j].valid && g_patches[a][j].blk == r->blk)
@@ -396,7 +445,7 @@ static void DrawFrozenEnemies(uint8 *pixels, int pitch, int width, int height, i
             continue;  // HUD e sprite veri restano davanti
           if (HdWorld_InsideCurrentArea(cam_x + sx, cam_y + sy) && !InTransition())
             continue;
-          row[sx] = c;
+          row[sx] = Dim(c);
         }
       }
     }
@@ -411,6 +460,8 @@ static float g_vis_x, g_vis_y;     // posizione della vista libera
 static int g_last_lx, g_last_ly;   // Link nel frame precedente
 static bool g_vis_valid;
 static int g_prev_mode;
+static int g_prev_module;
+static bool g_vis_glide;           // uscita da una casa: la vista scivola al suo posto
 
 // Avvicina v a t, muovendosi al massimo quanto Link (m) piu' un quarto di
 // pixel; mentre Link cammina la vista non va mai nel verso opposto al suo,
@@ -432,7 +483,25 @@ void HdWorld_UpdateCamera(int *cam_x, int *cam_y) {
     HdWorld_ResetStates();
   else if (main_module_index == 9 && submodule_index == 0 && PersistOn())
     SnapshotArea();
-  int mode = !HdWorld_Active() ? 0 : submodule_index == 0 ? 1 : InTransition() ? 2 :
+  // Mappa del mondo aperta: la vista si conserva per il ritorno, cosi' alla
+  // chiusura l'inquadratura e' la stessa di prima
+  if (main_module_index == 14 && submodule_index == 7 && saved_module_for_menu == 9 && g_vis_valid) {
+    *cam_x = gx + g_world_dx;
+    *cam_y = gy + g_world_dy;
+    return;
+  }
+  if (HdWorld_Active() && InMenuOverWorld() && g_vis_valid) {
+    // menu o dialogo aperto: la vista non si muove (e alla chiusura riprende
+    // a seguire Link da dove era)
+    *cam_x = gx + g_world_dx;
+    *cam_y = gy + g_world_dy;
+    return;
+  }
+  int prev_module = g_prev_module;
+  g_prev_module = main_module_index;
+  // fase 10: Link esce dalla porta dopo il cerchio che si apre
+  int mode = !HdWorld_Active() ? 0 : InFluteArrival() ? 1 : main_module_index != 9 ? 0 :
+             submodule_index == 0 || submodule_index == 10 || InMapReturn() ? 1 : InTransition() ? 2 :
              InMosaicTransition() ? 3 : 0;
   int prev_mode = g_prev_mode;
   g_prev_mode = mode;
@@ -483,8 +552,23 @@ void HdWorld_UpdateCamera(int *cam_x, int *cam_y) {
     if (gx != ow_scroll_vars0.xend && tx > gx) tx = gx;
     if (gy != ow_scroll_vars0.ystart && ty < gy) ty = gy;
     if (gy != ow_scroll_vars0.yend && ty > gy) ty = gy;
-    if (!g_vis_valid) {
+    if (!g_vis_valid && prev_module == 16) {
+      // Uscita da una casa: durante il cerchio che si apre la vista e' quella
+      // del gioco (le aree vicine comparirebbero fuori dal cerchio); da li'
+      // scivola dolcemente al suo posto invece di saltare
+      g_vis_x = (float)gx, g_vis_y = (float)gy;
+      g_vis_glide = true;
+    } else if (!g_vis_valid) {
       g_vis_x = (float)tx, g_vis_y = (float)ty;
+      g_vis_glide = false;
+    } else if (g_vis_glide) {
+      float dx = tx - g_vis_x, dy = ty - g_vis_y;
+      if (fabsf(dx) < 0.5f && fabsf(dy) < 0.5f) {
+        g_vis_x = (float)tx, g_vis_y = (float)ty;
+        g_vis_glide = false;
+      } else {
+        g_vis_x += dx * 0.12f, g_vis_y += dy * 0.12f;
+      }
     } else {
       // La vista insegue quel punto muovendosi al massimo quanto Link piu'
       // un quarto di pixel per frame: segue sempre Link, e le differenze
@@ -582,7 +666,7 @@ static void DrawLoadedArea(AreaImage *img) {
           if (img->n_anim < img->cap_anim) {
             AnimCell *ac = &img->anim[img->n_anim++];
             ac->x = ox, ac->y = oy, ac->entry = e;
-            ac->color[0] = water ? (backdrop & 0xffffff) | 7u << 24 : backdrop;
+            ac->color[0] = water && !backdrop_scene ? (backdrop & 0xffffff) | 7u << 24 : backdrop;
             for (int v = 1; v < 16; v++)
               ac->color[v] = Bgr15ToPixel(main_palette_buffer[pal * 16 + v], water ? 7 : 1);
           }
@@ -595,8 +679,10 @@ static void DrawLoadedArea(AreaImage *img) {
             int bit = hf ? col : 7 - col;
             int v = (p01 >> bit & 1) | (p01 >> (8 + bit) & 1) << 1 |
                     (p23 >> bit & 1) << 2 | (p23 >> (8 + bit) & 1) << 3;
+            // sulla montagna lo sfondo e' il cielo anche nelle caselle che per
+            // il gioco sono acqua profonda (il vuoto oltre i dirupi)
             dst[col] = v ? Bgr15ToPixel(main_palette_buffer[pal * 16 + v], water ? 7 : 1) :
-                       water ? (backdrop & 0xffffff) | 7u << 24 : backdrop;
+                       water && !backdrop_scene ? (backdrop & 0xffffff) | 7u << 24 : backdrop;
           }
         }
       }
@@ -628,9 +714,6 @@ static void RenderArea(AreaImage *img, int head) {
   memcpy(g_ram, g_saved_ram, sizeof(g_saved_ram));
   memcpy(ppu->vram, g_saved_vram, sizeof(g_saved_vram));
 }
-
-static uint32 StateVersion(int head);
-static void ApplyTiles(int head, bool memorize);
 
 static bool IsCached(int head) {
   uint32 key = AreaKey(head), ver = StateVersion(head);
@@ -729,17 +812,102 @@ static void PrefetchNeighbors(void) {
     }
 }
 
+// Strato sovrapposto dell'area corrente (nebbia del Bosco Perduto, pioggia e
+// buio del temporale, nuvole): il gioco lo mette sullo schermo secondario
+// (BG1) e lo somma a meta' al terreno e agli sprite. Sullo schermo copre
+// tutto, ma dove il terreno viene dalle immagini delle aree il disegno della
+// PPU viene sostituito: lo si somma qui allo stesso modo, leggendolo dalla
+// memoria video, su tutto quello che si disegna al posto della PPU (immagini,
+// caselle animate, nemici fermi), cosi' il tempo atmosferico continua oltre
+// il bordo dell'area.
+//
+// Sulla Montagna della Morte e alla Piramide lo stesso schermo secondario
+// porta invece il panorama sotto le nuvole, che scorre piu' lento del
+// terreno: il gioco lo somma solo allo sfondo (dove il terreno e'
+// trasparente). Le immagini delle aree hanno li' il colore di fondo, a cui
+// si somma qui il panorama dal vivo: continua oltre il bordo dell'area e
+// non cambia quando si passa da un'area all'altra.
+typedef struct OverlayCtx {
+  bool on;     // strato sommato a meta' a tutto (nebbia, pioggia, nuvole)
+  bool sky;    // strato sommato solo allo sfondo (panorama della montagna)
+  bool half;   // somma dimezzata
+  int x0, y0;  // posizione nello strato del pixel 0,0 dello schermo
+} OverlayCtx;
+
+static void OverlayBegin(OverlayCtx *o, int ext) {
+  Ppu *ppu = g_zenv.ppu;
+  bool sub = (ppu->screenEnabled[1] & 1) && !(ppu->screenEnabled[0] & 1) && ppu->addSubscreen &&
+             !ppu->subtractColor && ppu->mode != 7;
+  o->on = sub && (ppu->mathEnabled & 2) && ppu->halfColor;
+  o->sky = sub && !o->on && (ppu->mathEnabled & 0x20);
+  o->half = ppu->halfColor;
+  o->x0 = ppu->bgLayer[0].hScroll + ppu->bgBiasX - ext;
+  o->y0 = ppu->bgLayer[0].vScroll + ppu->bgBiasY + 1;
+}
+
+// Colore (BGR a 15 bit) dello strato BG1 nel pixel sx, sy dello schermo; -1
+// dove e' trasparente
+static int OverlayColor(const OverlayCtx *o, int sx, int sy) {
+  Ppu *ppu = g_zenv.ppu;
+  const BgLayer *bg = &ppu->bgLayer[0];
+  int px = (o->x0 + sx) & 0x3ff, py = (o->y0 + sy) & 0x3ff;
+  int tx = px >> 3 & 63, ty = py >> 3 & 63;
+  uint16 adr = bg->tilemapAdr + ((ty & 31) << 5 | (tx & 31));
+  if ((tx & 32) && bg->tilemapWider) adr += 0x400;
+  if ((ty & 32) && bg->tilemapHigher) adr += bg->tilemapWider ? 0x800 : 0x400;
+  uint16 e = ppu->vram[adr & 0x7fff];
+  int row = (e & 0x8000) ? 7 - (py & 7) : (py & 7);
+  int bit = (e & 0x4000) ? (px & 7) : 7 - (px & 7);
+  const uint16 *t = &ppu->vram[(bg->tileAdr + (e & 0x3ff) * 16) & 0x7fff];
+  uint16 p01 = t[row], p23 = t[row + 8];
+  int v = (p01 >> bit & 1) | (p01 >> (8 + bit) & 1) << 1 | (p23 >> bit & 1) << 2 | (p23 >> (8 + bit) & 1) << 3;
+  return v ? ppu->cgram[(e >> 10 & 7) * 16 + v] : -1;
+}
+
+static inline uint32 OverlayBlend(const OverlayCtx *o, uint32 c, int sx, int sy) {
+  if (o->sky) {
+    uint32 l = c >> 24;
+    if (l != 3 && l != 5)
+      return c;  // solo lo sfondo
+    // come la PPU: colore di fondo attuale piu' lo strato (somma dimezzata
+    // se richiesto), o piu' il colore fisso dove lo strato e' trasparente.
+    // Colori a 5 bit, R nei bit bassi.
+    Ppu *ppu = g_zenv.ppu;
+    int col = OverlayColor(o, sx, sy);
+    bool half = o->half && col >= 0;
+    if (col < 0)
+      col = ppu->fixedColorR | ppu->fixedColorG << 5 | ppu->fixedColorB << 10;
+    int base = ppu->cgram[0], ch[3];
+    for (int k = 0; k < 3; k++) {
+      int v = (base >> (5 * k) & 31) + (col >> (5 * k) & 31);
+      if (half) v >>= 1;
+      if (v > 31) v = 31;
+      ch[k] = v << 3 | v >> 2;
+    }
+    return Dim((c & 0xff000000) | ch[0] << 16 | ch[1] << 8 | ch[2]);
+  }
+  if (!o->on)
+    return c;
+  int col = OverlayColor(o, sx, sy);
+  if (col < 0)
+    return c;  // trasparente: il terreno resta com'e'
+  int r = col & 31, g = col >> 5 & 31, b = col >> 10 & 31;
+  r = r << 3 | r >> 2, g = g << 3 | g >> 2, b = b << 3 | b >> 2;
+  return (c & 0xff000000) | (((c >> 16 & 255) + r) >> 1) << 16 | (((c >> 8 & 255) + g) >> 1) << 8 | ((c & 255) + b) >> 1;
+}
+
 // Ridisegna le caselle animate delle immagini visibili con il fotogramma
 // d'animazione attuale (stessa memoria video per tutte le aree dello stesso
 // mondo), dove il fondale viene dalle immagini
-static void DrawAnimatedCells(uint8 *pixels, int pitch, int width, int height, int cam_x, int cam_y, bool all) {
+static void DrawAnimatedCells(uint8 *pixels, int pitch, int width, int height, int cam_x, int cam_y, bool all,
+                              const OverlayCtx *ov) {
   Ppu *ppu = g_zenv.ppu;
   uint16 chr_base = ppu->bgLayer[1].tileAdr;
   for (int i = 0; i < kMaxImages; i++) {
     AreaImage *img = &g_images[i];
     if (!img->key || !img->n_anim || ((img->key ^ BYTE(overworld_screen_index)) & 0x40) ||
-        img->version != StateVersion(img->key & 0x7f))
-      continue;  // vuota, dell'altro mondo, o una versione vecchia dell'area
+        img->version != StateVersion(img->key & 0x7f) || img->key != AreaKey(img->key & 0x7f))
+      continue;  // vuota, dell'altro mondo, o una versione vecchia dell'area (o di prima di un evento)
     if (img->x + img->size <= cam_x || img->x >= cam_x + width ||
         img->y + img->size <= cam_y || img->y >= cam_y + height)
       continue;
@@ -750,6 +918,13 @@ static void DrawAnimatedCells(uint8 *pixels, int pitch, int width, int height, i
         continue;
       if (ac->y + 8 > img->size - kHiddenRows)
         continue;  // ultime righe nascoste: lasciate come sono
+      // celle allineate a 8 pixel e aree a 512: questi controlli valgono per
+      // tutta la cella
+      int cwx = img->x + ac->x, cwy = img->y + ac->y;
+      if (!all && HdWorld_InsideCurrentArea(cwx, cwy))
+        continue;  // qui disegna gia' il gioco
+      if (HeadAt(cwx, cwy) != (img->key & 0x7f))
+        continue;  // coperta da un'altra area (o fuori dalla mappa)
       int e = ac->entry, tile = e & 0x3ff;
       bool hf = (e & 0x4000) != 0, vf = (e & 0x8000) != 0;
       const uint16 *t = &ppu->vram[(chr_base + tile * 16) & 0x7fff];
@@ -767,14 +942,10 @@ static void DrawAnimatedCells(uint8 *pixels, int pitch, int width, int height, i
           uint32 l = dst[sx] >> 24;
           if (l == 2 || l == 4 || l == 6)
             continue;  // HUD e sprite restano davanti
-          if (!all && HdWorld_InsideCurrentArea(cam_x + sx, cam_y + sy))
-            continue;  // qui disegna gia' il gioco
-          if (HeadAt(cam_x + sx, cam_y + sy) != (img->key & 0x7f))
-            continue;  // coperta da un'altra area (o fuori dalla mappa)
           int bit = hf ? col : 7 - col;
           int v = (p01 >> bit & 1) | (p01 >> (8 + bit) & 1) << 1 |
                   (p23 >> bit & 1) << 2 | (p23 >> (8 + bit) & 1) << 3;
-          dst[sx] = ac->color[v];
+          dst[sx] = OverlayBlend(ov, Dim(ac->color[v]), sx, sy);
         }
       }
     }
@@ -793,19 +964,24 @@ static bool IsMountainArea(int head) {
 // cosi' si capisce che in mezzo c'e' un dislivello (vale nei due versi)
 static void DrawHeightFog(uint8 *pixels, int pitch, int width, int height, int cam_x, int cam_y) {
   enum { kFogDist = 128, kFogInside = 5 };  // lunghezza della sfumatura, in pixel
-  const uint32 kFog = 0xc4ccd4;
+  const uint32 kFog = Dim(0xc4ccd4);
   const float kFogStart = 0.6f;  // velatura sul confine
   bool cur_high = IsMountainArea(overworld_screen_index);
   int ax, ay, as;
   AreaRect(overworld_screen_index, &ax, &ay, &as);
-  // lati dell'area corrente che confinano con l'altro livello (su, giu',
-  // sinistra, destra): la nebbia comincia gia' 5 pixel dentro l'area
-  bool side[4];
-  for (int k = 0; k < 4; k++) {
-    int px = k == 2 ? ax - 1 : k == 3 ? ax + as : ax + as / 2;
-    int py = k == 0 ? ay - 1 : k == 1 ? ay + as : ay + as / 2;
-    int h = HeadAt(px, py);
-    side[k] = h >= 0 && IsMountainArea(h) != cur_high;
+  // Dentro l'area la nebbia comincia gia' 5 pixel prima dei lati che
+  // confinano con l'altro livello. Il vicino si guarda proprio di fronte al
+  // pixel: lungo il lato di un'area grande ci possono essere aree di tutti e
+  // due i livelli. Sopra e sotto: una colonna per volta (in blocchi da 8).
+  enum { kMaxFogCols = 1024 / 8 + 2 };
+  bool col_up[kMaxFogCols], col_down[kMaxFogCols];
+  int ncols = (width + 7) / 8 + 1;
+  if (ncols > kMaxFogCols) ncols = kMaxFogCols;
+  for (int i = 0; i < ncols; i++) {
+    int wx = ((cam_x >> 3) + i) << 3;
+    int hu = HeadAt(wx, ay - 1), hd = HeadAt(wx, ay + as);
+    col_up[i] = hu >= 0 && IsMountainArea(hu) != cur_high;
+    col_down[i] = hd >= 0 && IsMountainArea(hd) != cur_high;
   }
   for (int y = 0; y < height; y++) {
     uint32 *row = (uint32 *)(pixels + y * pitch);
@@ -813,6 +989,9 @@ static void DrawHeightFog(uint8 *pixels, int pitch, int width, int height, int c
     int dy = wy < ay ? ay - wy : wy >= ay + as ? wy - (ay + as - 1) : 0;
     int last_head = -2;
     bool other = false;
+    int hl = HeadAt(ax - 1, wy), hr = HeadAt(ax + as, wy);
+    bool side_left = hl >= 0 && IsMountainArea(hl) != cur_high;
+    bool side_right = hr >= 0 && IsMountainArea(hr) != cur_high;
     for (int x = 0; x < width; x++) {
       int wx = cam_x + x;
       int dx = wx < ax ? ax - wx : wx >= ax + as ? wx - (ax + as - 1) : 0;
@@ -822,11 +1001,13 @@ static void DrawHeightFog(uint8 *pixels, int pitch, int width, int height, int c
         // dentro l'area corrente, vicino a un lato che da' sull'altro livello
         if (l == 2 || l == 4 || l == 6)
           continue;  // HUD e sprite restano nitidi
-        int k = kFogInside;
-        if (side[0] && wy - ay < k) k = wy - ay;
-        if (side[1] && ay + as - 1 - wy < k) k = ay + as - 1 - wy;
-        if (side[2] && wx - ax < k) k = wx - ax;
-        if (side[3] && ax + as - 1 - wx < k) k = ax + as - 1 - wx;
+        int k = kFogInside, ci = (wx >> 3) - (cam_x >> 3);
+        if (ci < 0) ci = 0;
+        if (ci >= ncols) ci = ncols - 1;
+        if (col_up[ci] && wy - ay < k) k = wy - ay;
+        if (col_down[ci] && ay + as - 1 - wy < k) k = ay + as - 1 - wy;
+        if (side_left && wx - ax < k) k = wx - ax;
+        if (side_right && ax + as - 1 - wx < k) k = ax + as - 1 - wx;
         if (k >= kFogInside)
           continue;
         f = kFogStart * (kFogInside - k) / (kFogInside + 1);
@@ -849,46 +1030,6 @@ static void DrawHeightFog(uint8 *pixels, int pitch, int width, int height, int c
       row[x] = 3u << 24 | r << 16 | g << 8 | b;
     }
   }
-}
-
-// Strato sovrapposto dell'area corrente (nebbia del Bosco Perduto, pioggia,
-// nuvole): il gioco lo mette sullo schermo secondario (BG1) e lo somma a meta'
-// al terreno. Sullo schermo copre tutto, ma dove il terreno viene dalle
-// immagini delle aree il disegno della PPU viene sostituito: lo si somma qui
-// allo stesso modo, leggendolo dalla memoria video.
-typedef struct OverlayCtx {
-  bool on;
-  int x0, y0;  // posizione nello strato del pixel 0,0 dello schermo
-} OverlayCtx;
-
-static void OverlayBegin(OverlayCtx *o, int ext) {
-  Ppu *ppu = g_zenv.ppu;
-  o->on = (ppu->screenEnabled[1] & 1) && !(ppu->screenEnabled[0] & 1) && (ppu->mathEnabled & 2) &&
-          ppu->addSubscreen && !ppu->subtractColor && ppu->halfColor && ppu->mode != 7;
-  o->x0 = ppu->bgLayer[0].hScroll + ppu->bgBiasX - ext;
-  o->y0 = ppu->bgLayer[0].vScroll + ppu->bgBiasY + 1;
-}
-
-static inline uint32 OverlayBlend(const OverlayCtx *o, uint32 c, int sx, int sy) {
-  Ppu *ppu = g_zenv.ppu;
-  const BgLayer *bg = &ppu->bgLayer[0];
-  int px = (o->x0 + sx) & 0x3ff, py = (o->y0 + sy) & 0x3ff;
-  int tx = px >> 3 & 63, ty = py >> 3 & 63;
-  uint16 adr = bg->tilemapAdr + ((ty & 31) << 5 | (tx & 31));
-  if ((tx & 32) && bg->tilemapWider) adr += 0x400;
-  if ((ty & 32) && bg->tilemapHigher) adr += bg->tilemapWider ? 0x800 : 0x400;
-  uint16 e = ppu->vram[adr & 0x7fff];
-  int row = (e & 0x8000) ? 7 - (py & 7) : (py & 7);
-  int bit = (e & 0x4000) ? (px & 7) : 7 - (px & 7);
-  const uint16 *t = &ppu->vram[(bg->tileAdr + (e & 0x3ff) * 16) & 0x7fff];
-  uint16 p01 = t[row], p23 = t[row + 8];
-  int v = (p01 >> bit & 1) | (p01 >> (8 + bit) & 1) << 1 | (p23 >> bit & 1) << 2 | (p23 >> (8 + bit) & 1) << 3;
-  if (!v)
-    return c;  // trasparente: il terreno resta com'e'
-  uint16 col = ppu->cgram[(e >> 10 & 7) * 16 + v];
-  int r = col & 31, g = col >> 5 & 31, b = col >> 10 & 31;
-  r = r << 3 | r >> 2, g = g << 3 | g >> 2, b = b << 3 | b >> 2;
-  return (c & 0xff000000) | (((c >> 16 & 255) + r) >> 1) << 16 | (((c >> 8 & 255) + g) >> 1) << 8 | ((c & 255) + b) >> 1;
 }
 
 // Il gioco scurisce lo schermo abbassando i colori delle palette (rispetto
@@ -925,8 +1066,12 @@ void HdWorld_Composite(uint8 *pixels, int pitch, int width, int height) {
   if (!HdWorld_Active())
     return;
   Ppu *ppu = g_zenv.ppu;
+  g_bright = ppu->forcedBlank ? 0 : ppu->brightness;
   bool mosaic = InMosaicTransition();
   bool all = InTransition() || mosaic;
+  // aspetto dei nemici, anche quando la vista coincide con quella del gioco
+  if (main_module_index == 9 && submodule_index == 0 && PersistOn())
+    CaptureEnemies(pixels, pitch, width, height);
   if (!all && g_world_dx == 0 && g_world_dy == 0 && ppu->extraLeftRight == 0) {
     PrefetchNeighbors();
     return;
@@ -938,8 +1083,6 @@ void HdWorld_Composite(uint8 *pixels, int pitch, int width, int height) {
   int cam_y = (int16)BG2VOFS_copy + ppu->bgBiasY + 1;
   int ax, ay, as;
   AreaRect(overworld_screen_index, &ax, &ay, &as);
-  if (main_module_index == 9 && submodule_index == 0 && PersistOn())
-    CaptureEnemies(pixels, pitch, width, height);
   // area vicina non ancora disegnata (al massimo un frame): colore di fondo
   uint32 outside = Bgr15ToPixel(main_palette_buffer[0], 5);
   int last_head = -2, edge_head = -2, edge_side = -1;
@@ -976,7 +1119,7 @@ void HdWorld_Composite(uint8 *pixels, int pitch, int width, int height) {
           edge_head = eh, edge_side = side;
           edge_color = ei ? ei->edge[side] : 5u << 24;
         }
-        row[x] = edge_color;
+        row[x] = OverlayBlend(&ov, Dim(edge_color), x, y);
         continue;
       }
       if (head != last_head) {
@@ -985,21 +1128,19 @@ void HdWorld_Composite(uint8 *pixels, int pitch, int width, int height) {
       }
       if (!img) {
         if (!inside)
-          row[x] = outside;
+          row[x] = OverlayBlend(&ov, Dim(outside), x, y);
         continue;
       }
       int ix = wx - img->x, iy = wy - img->y;
       if (iy >= img->size - kHiddenRows)
         iy = img->size - kHiddenRows - 1;
       if ((unsigned)ix < (unsigned)img->size && (unsigned)iy < (unsigned)img->size) {
-        row[x] = img->pix[iy * img->size + ix];
-        if (ov.on)
-          row[x] = OverlayBlend(&ov, row[x], x, y);
+        row[x] = OverlayBlend(&ov, Dim(img->pix[iy * img->size + ix]), x, y);
       }
     }
   }
   if (!mosaic) {
-    DrawAnimatedCells(pixels, pitch, width, height, cam_x, cam_y, all);
+    DrawAnimatedCells(pixels, pitch, width, height, cam_x, cam_y, all, &ov);
     if (PersistOn())
       DrawFrozenEnemies(pixels, pitch, width, height, cam_x, cam_y);
   }

@@ -39,9 +39,11 @@ static inline bool IsSprite(uint32 c) {
   return l == 4 || l == 6;
 }
 
-// Somma un colore al pixel (luce additiva)
+// Somma un colore al pixel (luce additiva); l'HUD resta intatto
 static inline void AddColor(uint32 *p, float r, float g, float b, float a) {
   uint32 c = *p;
+  if (IsHud(c))
+    return;
   int cr = ClampByte(((c >> 16) & 0xff) + (int)(r * a));
   int cg = ClampByte(((c >> 8) & 0xff) + (int)(g * a));
   int cb = ClampByte((c & 0xff) + (int)(b * a));
@@ -51,7 +53,7 @@ static inline void AddColor(uint32 *p, float r, float g, float b, float a) {
 // Segna il pixel come "sprite": lo shader four sword non lo dipinge (lo
 // cancellerebbe, essendo largo un solo pixel) ma gli applica il colore
 static inline void MarkSharp(uint32 *p) {
-  if (!IsSprite(*p))
+  if (!IsSprite(*p) && !IsHud(*p))
     *p = (*p & 0x00ffffff) | 4u << 24;
 }
 
@@ -136,7 +138,7 @@ static void ClassifyCells(const uint8 *pixels, int pitch, int width, int height,
 // 7. Calore sopra la lava: l'aria tremola appena, con un'onda ancorata al mondo
 // (non scivola quando la telecamera si sposta) e spostamenti sotto il pixel
 
-static uint32 g_fx_frames;  // contatore dei frame di gioco che non si azzera
+uint32 g_fx_frames;  // contatore dei frame di gioco che non si azzera (frame_counter e' a 8 bit)
 
 static inline uint32 MixColor(uint32 a, uint32 b, float k) {
   int ra = (a >> 16) & 0xff, ga = (a >> 8) & 0xff, ba = a & 0xff;
@@ -349,7 +351,7 @@ static void ApplyWindowRays(uint8 *pixels, int pitch, int width, int height, int
     ScanWindows();
     g_shaft_timer = 30;
   }
-  float t = frame_counter * 0.02f;
+  float t = g_fx_frames * 0.02f;
   for (int i = 0; i < g_num_shafts; i++) {
     WindowShaft *sh = &g_shafts[i];
     // posizione sullo schermo con lo scorrimento del layer su cui sta la luce
@@ -417,7 +419,7 @@ static void ApplyItemGlow(uint8 *pixels, int pitch, int width, int height, int c
     float cy = (ancilla_y_hi[k] << 8 | ancilla_y_lo[k]) + 9 - lift - cam_y;
     float big = (type == 0x22) ? 1.0f : 1.5f;
     float radius = 52 * big;
-    float rot = frame_counter * 0.03f;
+    float rot = g_fx_frames * 0.03f;
     int x0 = IntMax((int)(cx - radius), 0), x1 = IntMin((int)(cx + radius), width - 1);
     int y0 = IntMax((int)(cy - radius), 0), y1 = IntMin((int)(cy + radius), height - 1);
     for (int y = y0; y <= y1; y++) {
@@ -472,10 +474,52 @@ static bool IsWaterAttr(uint8 a) {
   return a == 0x08 || a == 0x09;
 }
 
+// Aree in cui lo sfondo e' il cielo con il panorama sotto le nuvole: la
+// Montagna della Morte (chiara e oscura) e la Piramide
+static bool IsBackdropScene(void) {
+  int a = BYTE(overworld_screen_index), sc = a & 0x3f;
+  return a < 0x80 && (sc == 0x03 || sc == 0x05 || sc == 0x07 || a == 0x5b);
+}
+
+int HdFx_SceneModule(void) {
+  int m = main_module_index, sub = submodule_index;
+  if (m == 14) {
+    // inventario (1), dialoghi (2) e menu salva/esci (11) si aprono sopra il
+    // gioco, che resta sotto
+    if (sub == 1 || sub == 2 || sub == 11)
+      return saved_module_for_menu;
+    // Ocarina: prima (0) il mondo si scurisce, dalla fase 7 l'area di arrivo
+    // e' gia' caricata e compare, poi scende l'uccello. In mezzo c'e' la mappa
+    if (sub == 10 && (overworld_map_state == 0 || overworld_map_state >= 7))
+      return 9;
+    // mappa del mondo: nella fase 0 il mondo si scurisce ancora sotto
+    if (sub == 7 && overworld_map_state == 0)
+      return saved_module_for_menu;
+    // mappa del labirinto: il labirinto si scurisce (0) e, alla chiusura, si
+    // ricarica e si riaccende (dalla fase 6)
+    if (sub == 3 && (overworld_map_state == 0 || overworld_map_state >= 6))
+      return saved_module_for_menu;
+    return 14;
+  }
+  // cerchio che si chiude (15) o si riapre (16): la scena dentro o fuori
+  if (m == 15 || m == 16)
+    return player_is_indoors ? 7 : 9;
+  // transizione dello specchio (ondeggiamento e caricamento dell'altro mondo)
+  if (m == 9 && (sub == 35 || sub == 44))
+    return 14;
+  return m;
+}
+
 void HdFx_MarkWater(uint8 *pixels, int pitch, int width, int height, int bias_x, int bias_y) {
-  int mod;
-  if (!InGameplay(&mod))
+  // anche durante il cerchio di transizione e l'arrivo con l'Ocarina:
+  // altrimenti lo shader dipingerebbe l'acqua per qualche fotogramma
+  int mod = HdFx_SceneModule();
+  if (mod != 7 && mod != 9)
     return;
+  // sulla Montagna della Morte e alla Piramide il vuoto oltre i dirupi e'
+  // "acqua profonda" per il gioco, ma sullo schermo e' il cielo: lo sfondo
+  // resta sfondo (HdFx_MarkBackdrop), invece di diventare acqua a blocchi
+  bool sky = mod == 9 && IsBackdropScene();
   int ext = (width - 256) / 2;
   for (int layer = 0; layer < 2; layer++) {
     // all'aperto conta solo il terreno (BG2); nei labirinti anche il piano di sopra (BG1)
@@ -505,7 +549,7 @@ void HdFx_MarkWater(uint8 *pixels, int pitch, int width, int height, int bias_x,
               continue;
             uint32 l = row[x] >> 24;
             // solo il fondale del layer giusto: HUD (2) e personaggi (4, 6) restano
-            if (l == (uint32)(layer ? 1 : 0) || (layer && l == 5))
+            if (l == (uint32)(layer ? 1 : 0) || (layer && l == 5 && !sky))
               row[x] = (row[x] & 0x00ffffff) | (uint32)kLayerWater << 24;
           }
         }
@@ -671,14 +715,22 @@ static void BoxBlur1D(const int32 *src, int32 *dst, int n, int stride, int r) {
   }
 }
 
+static float g_blur_amount;  // 0 = niente sfocatura, 1 = piena
+
+bool HdFx_MenuBlurActive(void) {
+  // sulla mappa del mondo (Mode 7) la sfocatura non viene disegnata
+  return g_blur_amount > 0 && g_zenv.ppu->mode != 7;
+}
+
 void HdFx_MenuBlur(uint8 *pixels, int pitch, int width, int height) {
-  static float amount;
+  float amount = g_blur_amount;
   static uint8 last_frame;
   int mod = main_module_index, sub = submodule_index;
+  // inventario (1), menu di salvataggio (11) e menu opzioni; non i dialoghi
   bool want = g_fx_menu_blur &&
-      ((mod == 14 && (sub == 1 || sub == 2 || sub == 11)) || HdMenu_IsOpen());
+      ((mod == 14 && (sub == 1 || sub == 11)) || HdMenu_IsOpen());
   if (!want) {
-    amount = 0;
+    g_blur_amount = 0;
     return;
   }
   // con il menu opzioni aperto il gioco e' fermo: la dissolvenza va avanti
@@ -686,13 +738,16 @@ void HdFx_MenuBlur(uint8 *pixels, int pitch, int width, int height) {
   if (last_frame != frame_counter || HdMenu_IsOpen()) {
     last_frame = frame_counter;
     amount = amount + 1.0f / 8 > 1 ? 1 : amount + 1.0f / 8;
+    g_blur_amount = amount;
   }
   int n = width * height;
   if (n > g_blur_cap) {
     free(g_blur_buf), free(g_blur_tmp);
-    g_blur_cap = n;
     g_blur_buf = malloc(n * 16);
     g_blur_tmp = malloc(n * 16);
+    g_blur_cap = g_blur_buf && g_blur_tmp ? n : 0;
+    if (!g_blur_cap)
+      return;
   }
   for (int y = 0; y < height; y++) {
     const uint32 *row = (const uint32 *)(pixels + y * pitch);
@@ -834,9 +889,11 @@ void HdFx_SpriteShadows(uint8 *pixels, int pitch, int width, int height) {
   int n = width * height;
   if (n > g_shadow_cap) {
     free(g_shadow), free(g_shadow_tmp);
-    g_shadow_cap = n;
     g_shadow = malloc(n * sizeof(float));
     g_shadow_tmp = malloc(n * sizeof(float));
+    g_shadow_cap = g_shadow && g_shadow_tmp ? n : 0;
+    if (!g_shadow_cap)
+      return;
   }
   memset(g_shadow, 0, n * sizeof(float));
   bool any = false;
@@ -887,11 +944,7 @@ void HdFx_SpriteShadows(uint8 *pixels, int pitch, int width, int height) {
 // si marca come 3 (layer non usato all'aperto) solo in queste aree.
 void HdFx_MarkBackdrop(uint8 *pixels, int pitch, int width, int height) {
   int mod;
-  if (!InGameplay(&mod) || mod != 9)
-    return;
-  int a = BYTE(overworld_screen_index);
-  int sc = a & 0x3f;
-  if (a >= 0x80 || !(sc == 0x03 || sc == 0x05 || sc == 0x07 || a == 0x5b))
+  if (!InGameplay(&mod) || mod != 9 || !IsBackdropScene())
     return;
   for (int y = 0; y < height; y++) {
     uint32 *row = (uint32 *)(pixels + y * pitch);

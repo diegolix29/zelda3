@@ -796,6 +796,17 @@ void Module09_00_PlayerControl() {  // 82a53c
   }
 }
 
+static bool InstantWorldTransition(void);
+
+// Distanza dal bordo destro (meno 0x1c) a cui scatta il cambio d'area verso
+// destra. Il gioco lascia 8 pixel prima del bordo, ma ne bastano 4 (gli altri
+// lati ne hanno 4): Link corre al massimo a 4 pixel per frame e i controlli
+// delle caselle arrivano a 16 pixel dalla sua posizione. Col mondo continuo
+// cosi' Link cammina da solo meno strada al passaggio.
+static int RightTransitionExtra(void) {
+  return InstantWorldTransition() ? 8 : 4;
+}
+
 void OverworldHandleTransitions() {  // 82a9c4
   if (BYTE(overworld_screen_trans_dir_bits2))
     OverworldHandleMapScroll();
@@ -810,7 +821,7 @@ void OverworldHandleTransitions() {  // 82a9c4
   if (link_x_vel != 0) {
     dir = link_direction & 3;
     t = link_x_coord - kOverworld_OffsetBaseX[BYTE(current_area_of_player) >> 1];
-    if ((y = 2, x = 2, t < 6) || (y = 0, x = 1, t >= (uint16)(overworld_right_bottom_bound_for_scroll + 4))) {
+    if ((y = 2, x = 2, t < 6) || (y = 0, x = 1, t >= (uint16)(overworld_right_bottom_bound_for_scroll + RightTransitionExtra()))) {
 compare:
       if (x == dir && !Link_CheckForEdgeScreenTransition())
         goto after;
@@ -1870,13 +1881,14 @@ void Overworld_FinalizeEntryOntoScreen() {  // 82c242
     bool small = kOverworldMapIsSmall[a] != 0;
     bool horiz = (byte_7E069C & 2) != 0;
     int base = horiz ? kOverworld_OffsetBaseX[a] : kOverworld_OffsetBaseY[a];
-    // Fuori dalle fasce in cui scatta il cambio d'area (sinistra < 6, su < 4,
-    // destra >= 0x1e4+4, giu' >= 0x1e4 per le aree piccole) con 2 pixel di
-    // margine: li' il gioco controllerebbe il terreno oltre il bordo, dove la
-    // mappa dell'area ricomincia dal lato opposto (Link cadeva nell'acqua del
-    // lato opposto invece di cambiare area)
-    int bound = (small ? 0x1e4 : 0x3e4) + (horiz ? 4 : 0);
-    int lo = base + (horiz ? 8 : 6), hi = base + bound - 2;  // hi escluso
+    // Fino al primo pixel fuori dalle fasce in cui scatta il cambio d'area
+    // (sinistra < 6, su < 4, destra >= 0x1e4+8, giu' >= 0x1e4 per le aree
+    // piccole), non oltre: dentro una fascia, camminando verso il bordo, il
+    // gioco controllerebbe il terreno oltre il bordo, dove la mappa dell'area
+    // ricomincia dal lato opposto (Link cadeva nell'acqua del lato opposto
+    // invece di cambiare area)
+    int bound = (small ? 0x1e4 : 0x3e4) + (horiz ? RightTransitionExtra() : 0);
+    int lo = base + (horiz ? 6 : 4), hi = base + bound;  // hi escluso
     uint16 *c = horiz ? &link_x_coord : &link_y_coord;
     int dir = (byte_7E069C & 1) ? 1 : -1;
     int step = g_entry_speed > 2 ? g_entry_speed : (frame_counter & 1) ? 1 : 2;
@@ -2912,6 +2924,10 @@ void Overworld_Memorize_Map16_Change(uint16 pos, uint16 value) {  // 8edd40
   }
 
   int x = num_memorized_tiles;
+  // La lista ha posto per 256 caselle: con il mondo persistente si riempie
+  // visita dopo visita, e oltre scriverebbe sulle variabili che seguono
+  if (x >= 0x200)
+    return;
   memorized_tile_value[x >> 1] = value;
   memorized_tile_addr[x >> 1] = pos;
   num_memorized_tiles = x + 2;

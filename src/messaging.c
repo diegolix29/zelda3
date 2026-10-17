@@ -181,8 +181,6 @@ static const uint16 kOwMapCrystal6_tab[9] = {0, 0, 0, 0, 0, 0, 0, 0x6434, 0};
 static const uint8 kOwMap_tab2[4] = {0x68, 0x69, 0x78, 0x69};
 static const uint8 kOverworldMap_Table4[4] = {0x34, 0x74, 0xf4, 0xb4};
 static const uint8 kOverworldMap_Timer[2] = {33, 12};
-static const int16 kOverworldMap_Table3[8] = {0, 0, 1, 2, -1, -2, 1, 2};
-static const int16 kOverworldMap_Table2[8] = {0, 0, 224, 480, -72, -224, 0, 0};
 static PlayerHandlerFunc *const kMessagingSubmodules[12] = {
   &Module_Messaging_0,
   &Hud_Module_Run,
@@ -1340,15 +1338,21 @@ void WorldMap_PlayerControl() {  // 8abae6
       WorldMap_ToggleMarkerAtCenter();
     // Tenendo B lo scorrimento e' tre volte piu' veloce
     int steps = (joypad1H_last & 0x80) ? 3 : 1;
+    // Limiti veri invece del confronto esatto dell'originale: con due
+    // direzioni opposte premute insieme (facile da tastiera) la vista
+    // scorreva oltre il bordo e usciva dalla mappa. I limiti sono quelli
+    // della vista centrata su Link agli angoli del mondo (0 e 4095, vedi
+    // WorldMap_CenterOnLink): il mirino resta sempre sopra la mappa
+    enum { kMapMinV = -72, kMapMaxV = 182, kMapMinH = -192, kMapMaxH = 444 };
+    int dy = ((joypad1H_last & 4) ? 1 : 0) - ((joypad1H_last & 8) ? 1 : 0);
+    int dx = ((joypad1H_last & 1) ? 2 : 0) - ((joypad1H_last & 2) ? 2 : 0);
     for (int i = 0; i < steps; i++) {
-      int k = (joypad1H_last & 12) >> 1;
-      if (BG1VOFS_copy2 != (uint16)kOverworldMap_Table2[k]) {
-        BG1VOFS_copy2 += kOverworldMap_Table3[k];
+      if (dy) {
+        BG1VOFS_copy2 = IntMin(IntMax((int16)BG1VOFS_copy2 + dy, kMapMinV), kMapMaxV);
         M7Y_copy = BG1VOFS_copy2 + 0x100;
       }
-      k = (joypad1H_last & 3) * 2 + 1;
-      if (BG1HOFS_copy2 != (uint16)kOverworldMap_Table2[k])
-        BG1HOFS_copy2 += kOverworldMap_Table3[k];
+      if (dx)
+        BG1HOFS_copy2 = IntMin(IntMax((int16)BG1HOFS_copy2 + dx, kMapMinH), kMapMaxH);
     }
   }
   WorldMap_HandleSprites();

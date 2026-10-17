@@ -933,9 +933,14 @@ int Sprite_ShowSolicitedMessage(int k, uint16 msg) {  // 85e1a7
       Sprite_CheckIfLinkIsBusy())
     return sprite_D[k];
   // HUD moderno: Link e' nella posizione giusta per parlare (manca solo A)
-  if (!sprite_delay_aux4[k] && link_auxiliary_state != 2 &&
-      link_direction_facing == kShowMessageFacing_Tab0[Sprite_DirectionToFaceLink(k, NULL)])
-    HdHud_CanTalk();
+  // (tmp_counter si conserva: il gioco originale chiama
+  // Sprite_DirectionToFaceLink solo premendo A)
+  if ((enhanced_features0 & kFeatures0_ModernHud) && !sprite_delay_aux4[k] && link_auxiliary_state != 2) {
+    uint8 saved_tmp_counter = tmp_counter;
+    if (link_direction_facing == kShowMessageFacing_Tab0[Sprite_DirectionToFaceLink(k, NULL)])
+      HdHud_CanTalk();
+    tmp_counter = saved_tmp_counter;
+  }
   if (!(filtered_joypad_L & 0x80) ||
       sprite_delay_aux4[k] || link_auxiliary_state == 2)
     return sprite_D[k];
@@ -1114,6 +1119,9 @@ void Sprite_SpawnSecret(int k) {  // 868264
   }
 }
 
+// Nemico (0-15) che ha scritto ogni voce OAM nell'ultimo frame, 0xff = nessuno
+uint8 g_sprite_oam_owner[128];
+
 void Sprite_Main() {  // 868328
   if (!player_is_indoors) {
     ancilla_floor[0] = 0;
@@ -1145,9 +1153,22 @@ void Sprite_Main() {  // 868328
   Ancilla_Main();
   Overlord_Main();
   archery_game_out_of_arrows = 0;
+  memset(g_sprite_oam_owner, 0xff, sizeof(g_sprite_oam_owner));
   for (int i = 15; i >= 0; i--) {
     cur_object_index = i;
+    // Si segna quali voci OAM scrive ogni nemico (come per Link in
+    // LinkOam_Main): con la vista spostata la posizione di ogni pezzo si
+    // ricava dal suo nemico invece che dall'oggetto piu' vicino
+    uint16 saved[128];
+    for (int j = 0; j < 128; j++)
+      saved[j] = WORD(oam_buf[j].charnum), WORD(oam_buf[j].charnum) = 0xffff;
     Sprite_ExecuteSingle(i);
+    for (int j = 0; j < 128; j++) {
+      if (WORD(oam_buf[j].charnum) != 0xffff)
+        g_sprite_oam_owner[j] = i;
+      else
+        WORD(oam_buf[j].charnum) = saved[j];
+    }
   }
   Garnish_ExecuteLowerSlots();
   byte_7E069E[0] = byte_7E069E[1] = 0;

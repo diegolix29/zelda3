@@ -7,6 +7,7 @@
 #include "glsl_shader.h"
 #include "config.h"
 #include "hd_menu.h"
+#include "hd_fx.h"
 
 #define CODE(...) #__VA_ARGS__
 
@@ -14,7 +15,7 @@ static SDL_Window *g_window;
 static uint8 *g_screen_buffer;
 static size_t g_screen_buffer_size;
 static int g_draw_width, g_draw_height;
-static unsigned int g_program, g_VAO;
+static unsigned int g_program, g_VAO, g_VBO;
 static GlTextureWithSize g_texture;
 static GlslShader *g_glsl_shader;
 static bool g_opengl_es;
@@ -76,15 +77,14 @@ static bool OpenGLRenderer_Init(SDL_Window *window) {
   };
 
   // create a vertex buffer object
-  unsigned int vbo;
-  glGenBuffers(1, &vbo);
+  glGenBuffers(1, &g_VBO);
 
   // vertex array object
   glGenVertexArrays(1, &g_VAO);
   // 1. bind Vertex Array Object
   glBindVertexArray(g_VAO);
   // 2. copy our vertices array in a buffer for OpenGL to use
-  glBindBuffer(GL_ARRAY_BUFFER, vbo);
+  glBindBuffer(GL_ARRAY_BUFFER, g_VBO);
   glBufferData(GL_ARRAY_BUFFER, sizeof(kVertices), kVertices, GL_STATIC_DRAW);
   // position attribute
   glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void *)0);
@@ -197,6 +197,20 @@ static void OpenGLRenderer_BeginDraw(int width, int height, uint8 **pixels, int 
   *pitch = width * 4;
 }
 
+// Disegna il rettangolo con g_program. I vertici si reimpostano ogni volta:
+// lo shader GLSL usa lo stesso oggetto dei vertici, cambia i puntatori e alla
+// fine disattiva gli attributi (senza questo il disegno uscirebbe nero)
+static void DrawQuad() {
+  glUseProgram(g_program);
+  glBindVertexArray(g_VAO);
+  glBindBuffer(GL_ARRAY_BUFFER, g_VBO);
+  glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void *)0);
+  glEnableVertexAttribArray(0);
+  glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void *)(3 * sizeof(float)));
+  glEnableVertexAttribArray(1);
+  glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+}
+
 static void OpenGLRenderer_EndDraw() {
   int drawable_width, drawable_height;
 
@@ -232,14 +246,16 @@ static void OpenGLRenderer_EndDraw() {
   glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
   glClear(GL_COLOR_BUFFER_BIT);
 
-  if (g_glsl_shader == NULL) {
+  // Con il gioco sfocato dietro inventario e menu lo shader non si applica:
+  // torna appena la sfocatura finisce
+  if (g_glsl_shader == NULL || HdFx_MenuBlurActive()) {
     glViewport(viewport_x, viewport_y, viewport_width, viewport_height);
-    glUseProgram(g_program);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, g_texture.gl_texture);
     int filter = g_config.linear_filtering ? GL_LINEAR : GL_NEAREST;
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
-    glBindVertexArray(g_VAO);
-    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    DrawQuad();
   } else {
     GlslShader_Render(g_glsl_shader, &g_texture, viewport_x, viewport_y, viewport_width, viewport_height);
   }
@@ -270,9 +286,7 @@ static void OpenGLRenderer_EndDraw() {
     glViewport(x0, y0, x1 - x0, y1 - y0);
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, g_overlay_texture);
-    glUseProgram(g_program);
-    glBindVertexArray(g_VAO);
-    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    DrawQuad();
     glBindTexture(GL_TEXTURE_2D, g_texture.gl_texture);
   }
 
