@@ -233,6 +233,7 @@
     <ClCompile Include="src\glsl_shader.c" />
     <ClCompile Include="src\hd_menu.c" />
     <ClCompile Include="src\hd_light.c" />
+    <ClCompile Include="src\hd_burn.c" />
     <ClCompile Include="src\hd_fx.c" />
     <ClCompile Include="src\hd_hud.c" />
     <ClCompile Include="src\hd_world.c" />

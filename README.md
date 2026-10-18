@@ -27,6 +27,10 @@ Everything is optional and can be turned on or off from the new in-game options 
 - Blurred game behind the inventory, dialogues and menus, soft shadows under characters and enemies, a soft circle transition, on-screen button hints in the inventory and on the maps, a HUD that slides away during dialogues and an autosave icon.
 - **Four Swords Adventures look** (`shaders/foursword`): crisp pixels, a diagonal brush texture anchored to the world (not on water), soft drop shadows, glow on bright areas and cartoon cloud shadows drifting over sunny outdoor areas. HUD and characters stay untouched.
 
+<img width="500" height="281" alt="1" src="https://github.com/user-attachments/assets/57f92bd8-ecea-4552-8463-49ebad60474d" />
+<img width="500" height="281" alt="2" src="https://github.com/user-attachments/assets/648afd26-692d-482a-9c59-6dac186eea85" />
+<img width="500" height="281" alt="3" src="https://github.com/user-attachments/assets/0c60e144-1db2-4f56-be3f-a57565a06f60" />
+
 **Language**
 - Italian: the dialogue font gains accented letters; the translation itself lives in a separate repository, [zelda3-italiano](https://github.com/ghost19880/zelda3-italiano), and is downloaded by the launcher.
 

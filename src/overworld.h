@@ -89,6 +89,7 @@ void Overworld_EnterSpecialArea();
 void LoadOverworldFromSpecialOverworld();
 void FluteMenu_LoadTransport();
 void Overworld_LoadBirdTravelPos(int k);
+void Overworld_LoadBirdTravel9();
 void FluteMenu_LoadSelectedScreenPalettes();
 void FindPartnerWhirlpoolExit();
 void Overworld_LoadAmbientOverlay(bool load_map_data);

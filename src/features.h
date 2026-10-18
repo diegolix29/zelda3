@@ -25,8 +25,18 @@ enum {
   kFeatures0_SwitchLR = 2,
   kFeatures0_TurnWhileDashing = 4,
   kFeatures0_MirrorToDarkworld = 8,
-  kFeatures0_CollectItemsWithSword = 16,
-  kFeatures0_BreakPotsWithSword = 32,
+  // Spade e oggetti come su GBA, che interagiscono con l'ambiente (prima
+  // CollectItemsWithSword): ogni spada raccoglie gli oggetti, dalla Spada
+  // Suprema rompe i cartelli, la Spada d'Oro rompe i vasi; le frecce rompono
+  // i vasi (quelle d'argento tutti quelli sul percorso), il martello rompe
+  // cespugli e rocce piccole chiare; Lanterna e Bacchetta del Fuoco incendiano
+  // cespugli ed erba alta e il fuoco si propaga (hd_burn.c); il primo oggetto
+  // magico ricevuto riempie la barra della magia
+  kFeatures0_SwordAndItems = 16,
+  // Punto di volo 9 dell'uccello: in cima al Monte della Morte a est, sulla
+  // piattaforma dei pioli della Roccia della Tartaruga (prima era
+  // BreakPotsWithSword, ora dentro SwordAndItems)
+  kFeatures0_BirdTravel9 = 32,
   kFeatures0_DisableLowHealthBeep = 64,
   kFeatures0_SkipIntroOnKeypress = 128,
   kFeatures0_ShowMaxItemsInYellow = 256,

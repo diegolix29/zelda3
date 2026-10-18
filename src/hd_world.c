@@ -577,6 +577,11 @@ void HdWorld_UpdateCamera(int *cam_x, int *cam_y) {
       g_vis_x = Approach(g_vis_x, (float)tx, mx);
       g_vis_y = Approach(g_vis_y, (float)ty, my);
     }
+    int vx = (int)floorf(g_vis_x + 0.5f), vy = (int)floorf(g_vis_y + 0.5f);
+    int cx = vx, cy = vy;
+    HdWorld_ClampView(&cx, &cy);
+    if (cx != vx) g_vis_x = (float)cx;
+    if (cy != vy) g_vis_y = (float)cy;
   }
   g_vis_valid = true;
   g_world_dx = (int)floorf(g_vis_x + 0.5f) - gx;
@@ -596,6 +601,32 @@ enum { kMaxImages = 16 };
 // si ripete la riga sopra, e il bordo sud della mappa finisce 2 righe prima.
 enum { kHiddenRows = 2, kWorldBottom = 4096 - kHiddenRows };
 
+// Oltre i quattro bordi della mappa del mondo non c'e' nessuna area: la
+// vista si ferma come quella del gioco, e con lo schermo largo si ferma
+// prima, cosi' neanche le colonne in piu' escono dalla mappa (anche se la
+// telecamera del gioco, ferma a 0, le mostrerebbe). In verticale, se il
+// gioco mostra qualche riga in piu' (gy), la vista puo' arrivare fin li';
+// in fondo pero' il gioco si ferma contando 224 righe: con 240 la vista sale
+// delle 16 in piu', cosi' l'ultima riga visibile resta quella del gioco.
+void HdWorld_ClampView(int *cam_x, int *cam_y) {
+  if (!HdWorld_Active())
+    return;
+  Ppu *ppu = g_zenv.ppu;
+  int gx = BG2HOFS_copy2, gy = BG2VOFS_copy2;
+  int ext = ppu->extraLeftRight;
+  // righe dello schermo (240 con extend_y); la riga 0 dello schermo e' la
+  // riga 1 del fondale (HdWorld_Composite)
+  int rows = (ppu->renderFlags & kPpuRenderFlags_Height240) ? 240 : 224;
+  int min_x = ext, max_x = 4096 - 256 - ext;
+  int min_y = 0, max_y = kWorldBottom - 1 - rows;
+  if (gy < min_y) min_y = gy;
+  if (gy - (rows - 224) > max_y) max_y = gy - (rows - 224);
+  if (*cam_x < min_x) *cam_x = min_x;
+  if (*cam_x > max_x) *cam_x = max_x;
+  if (*cam_y < min_y) *cam_y = min_y;
+  if (*cam_y > max_y) *cam_y = max_y;
+}
+
 // Casella animata (fiori, acqua...): nell'immagine sarebbe ferma, quindi la
 // si ridisegna a ogni frame con il fotogramma attuale del gioco
 typedef struct AnimCell {
@@ -609,7 +640,6 @@ typedef struct AreaImage {
   int x, y, size;
   uint32 *pix;     // size * size pixel 0xLLRRGGBB
   uint32 last_use;
-  uint32 edge[4];  // colore prevalente lungo i bordi: su, destra, giu', sinistra
   AnimCell *anim;
   int n_anim, cap_anim;
 } AreaImage;
@@ -644,6 +674,8 @@ static void DrawLoadedArea(AreaImage *img) {
   int n16 = img->size / 16;
   int a = BYTE(overworld_screen_index), sc = a & 0x3f;
   bool backdrop_scene = sc == 0x03 || sc == 0x05 || sc == 0x07 || a == 0x5b;
+  // sulla montagna le nuvole (palette 3) non hanno pennellate, come l'acqua (hd_fx.c)
+  bool mountain = sc == 0x03 || sc == 0x05 || sc == 0x07;
   uint32 backdrop = Bgr15ToPixel(main_palette_buffer[0], backdrop_scene ? 3 : 5);
   for (int r = 0; r < n16; r++) {
     for (int c = 0; c < n16; c++) {
@@ -656,6 +688,7 @@ static void DrawLoadedArea(AreaImage *img) {
         const uint16 *t = &ppu->vram[(chr_base + tile * 16) & 0x7fff];
         uint8 at = attr8[e & 0x1ff];
         bool water = (at == 0x08 || at == 0x09);
+        bool smooth = water || (mountain && pal == 3);
         if (tile >= kAnimTileFirst && tile < kAnimTileEnd) {
           if (img->n_anim == img->cap_anim) {
             int cap = img->cap_anim ? img->cap_anim * 2 : 256;
@@ -668,7 +701,7 @@ static void DrawLoadedArea(AreaImage *img) {
             ac->x = ox, ac->y = oy, ac->entry = e;
             ac->color[0] = water && !backdrop_scene ? (backdrop & 0xffffff) | 7u << 24 : backdrop;
             for (int v = 1; v < 16; v++)
-              ac->color[v] = Bgr15ToPixel(main_palette_buffer[pal * 16 + v], water ? 7 : 1);
+              ac->color[v] = Bgr15ToPixel(main_palette_buffer[pal * 16 + v], smooth ? 7 : 1);
           }
         }
         for (int row = 0; row < 8; row++) {
@@ -681,7 +714,7 @@ static void DrawLoadedArea(AreaImage *img) {
                     (p23 >> bit & 1) << 2 | (p23 >> (8 + bit) & 1) << 3;
             // sulla montagna lo sfondo e' il cielo anche nelle caselle che per
             // il gioco sono acqua profonda (il vuoto oltre i dirupi)
-            dst[col] = v ? Bgr15ToPixel(main_palette_buffer[pal * 16 + v], water ? 7 : 1) :
+            dst[col] = v ? Bgr15ToPixel(main_palette_buffer[pal * 16 + v], smooth ? 7 : 1) :
                        water && !backdrop_scene ? (backdrop & 0xffffff) | 7u << 24 : backdrop;
           }
         }
@@ -723,33 +756,6 @@ static bool IsCached(int head) {
   return false;
 }
 
-static int CompareU32(const void *a, const void *b) {
-  uint32 x = *(const uint32 *)a, y = *(const uint32 *)b;
-  return x < y ? -1 : x > y;
-}
-
-// Colore piu' frequente sulla riga o colonna piu' esterna di ogni lato
-static void ComputeEdgeColors(AreaImage *img) {
-  static uint32 tmp[1024];
-  int n = img->size;
-  for (int side = 0; side < 4; side++) {
-    for (int i = 0; i < n; i++) {
-      int x = side == 1 ? n - 1 : side == 3 ? 0 : i;
-      int y = side == 2 ? n - 1 - kHiddenRows : side == 0 ? 0 : i;
-      tmp[i] = img->pix[y * n + x] & 0xffffff;
-    }
-    qsort(tmp, n, 4, CompareU32);
-    uint32 best = tmp[0];
-    int best_n = 0;
-    for (int i = 0, j; i < n; i = j) {
-      for (j = i; j < n && tmp[j] == tmp[i]; j++) {}
-      if (j - i > best_n)
-        best_n = j - i, best = tmp[i];
-    }
-    img->edge[side] = 1u << 24 | best;  // come terreno: lo shader lo dipinge
-  }
-}
-
 static AreaImage *GetAreaImage(int head) {
   uint32 key = AreaKey(head), ver = StateVersion(head);
   AreaImage *free_img = NULL;
@@ -781,7 +787,6 @@ static AreaImage *GetAreaImage(int head) {
   img->n_anim = 0;
   img->last_use = ++g_use_counter;
   RenderArea(img, head);
-  ComputeEdgeColors(img);
   return img;
 }
 
@@ -1083,10 +1088,16 @@ void HdWorld_Composite(uint8 *pixels, int pitch, int width, int height) {
   int cam_y = (int16)BG2VOFS_copy + ppu->bgBiasY + 1;
   int ax, ay, as;
   AreaRect(overworld_screen_index, &ax, &ay, &as);
+  // La PPU ha le caselle dell'area solo attorno alla telecamera del gioco
+  // (con lo schermo largo, ext pixel in piu' per lato). Ai bordi sinistro e
+  // destro del mondo la vista si ferma piu' all'interno (HdWorld_ClampView):
+  // le colonne oltre quelle caricate vengono dall'immagine dell'area.
+  int in_x0 = (int16)BG2HOFS_copy - ext, in_x1 = (int16)BG2HOFS_copy + 256 + ext;
+  if (in_x0 < ax) in_x0 = ax;
+  if (in_x1 > ax + as) in_x1 = ax + as;
   // area vicina non ancora disegnata (al massimo un frame): colore di fondo
   uint32 outside = Bgr15ToPixel(main_palette_buffer[0], 5);
-  int last_head = -2, edge_head = -2, edge_side = -1;
-  uint32 edge_color = 0;
+  int last_head = -2;
   AreaImage *img = NULL;
   // Mosaico del gioco anche sulle immagini (blocchi allineati come nella PPU)
   int msz = mosaic && (ppu->mosaicEnabled & 3) && ppu->mosaicSize > 1 ? ppu->mosaicSize : 1;
@@ -1099,29 +1110,15 @@ void HdWorld_Composite(uint8 *pixels, int pitch, int width, int height) {
       wy = cam_y + (y + 1) - (y + 1) % msz - 1;
     for (int x = 0; x < width; x++) {
       int wx = cam_x + x - (msz > 1 ? x % msz : 0);
-      bool inside = wx >= ax && wx < ax + as && wy >= ay && wy < ay + as - kHiddenRows;
+      bool inside = wx >= in_x0 && wx < in_x1 && wy >= ay && wy < ay + as - kHiddenRows;
       if (inside && !all)
         continue;
       uint32 l = row[x] >> 24;
       if (l == 2 || l == 4 || l == 6)
         continue;  // HUD e sprite restano
       int head = HeadAt(wx, wy);
-      if (head < 0) {
-        // oltre il bordo della mappa del mondo non c'e' nessuna area: un
-        // colore pieno, quello prevalente sul bordo dell'area che confina col
-        // vuoto (nero finche' la sua immagine non e' pronta)
-        int side = wy >= kWorldBottom ? 2 : wy < 0 ? 0 : wx < 0 ? 3 : 1;
-        int ex = wx < 0 ? 0 : wx > 4095 ? 4095 : wx;
-        int ey = wy < 0 ? 0 : wy >= kWorldBottom ? kWorldBottom - 1 : wy;
-        int eh = HeadAt(ex, ey);
-        if (eh != edge_head || side != edge_side) {
-          AreaImage *ei = GetAreaImage(eh);
-          edge_head = eh, edge_side = side;
-          edge_color = ei ? ei->edge[side] : 5u << 24;
-        }
-        row[x] = OverlayBlend(&ov, Dim(edge_color), x, y);
-        continue;
-      }
+      if (head < 0)
+        continue;  // oltre la mappa (la vista si ferma prima: HdWorld_ClampView)
       if (head != last_head) {
         img = GetAreaImage(head);
         last_head = head;

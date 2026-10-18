@@ -11,6 +11,16 @@ static const uint8 kDetectTiles_tab3[] = { 15, 15, 23, 23 };
 static const int8 kDetectTiles_tab4[] = { 7, 24, -1, 16 };
 static const uint8 kDetectTiles_tab5[] = { 0, 0, 8, 8 };
 static const uint8 kDetectTiles_tab6[] = { 15, 15, 23, 23 };
+uint16 Overworld_GetMap8AtLocation(uint16 x, uint16 y) {
+  uint16 t;
+  t = ((y - overworld_offset_base_y) & overworld_offset_mask_y) * 8;
+  t |= ((x - overworld_offset_base_x) & overworld_offset_mask_x);
+  t = overworld_tileattr[t >> 1] * 4;
+  t |= (y & 8) >> 2;
+  t |= (x & 1);
+  return GetMap16toMap8Table()[t];
+}
+
 uint8 Overworld_GetTileAttributeAtLocation(uint16 x, uint16 y) {  // 80882e
   uint16 t;
 

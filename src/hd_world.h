@@ -10,6 +10,9 @@ bool HdWorld_Active(void);
 // Una volta per frame di gioco: posizione della telecamera "libera", cioe'
 // quella che il gioco avrebbe se non si fermasse ai bordi dell'area
 void HdWorld_UpdateCamera(int *cam_x, int *cam_y);
+// Ai quattro bordi della mappa del mondo la vista si ferma come nel gioco:
+// riporta dentro la posizione (x, y) della telecamera se mostrerebbe il vuoto
+void HdWorld_ClampView(int *cam_x, int *cam_y);
 // Dopo il disegno della PPU: il fondale fuori dall'area corrente (e durante
 // il passaggio fra aree, tutto il fondale) viene preso dalle immagini delle aree
 void HdWorld_Composite(uint8 *pixels, int pitch, int width, int height);

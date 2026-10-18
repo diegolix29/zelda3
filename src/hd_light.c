@@ -8,6 +8,7 @@
 #include "variables.h"
 #include "snes/ppu.h"
 #include "hd_fx.h"
+#include "hd_burn.h"
 
 bool g_dynamic_light;
 
@@ -266,6 +267,18 @@ static void CollectLights(int mod, bool dark, int frame_w, int bias_x, int bias_
       AddFireLight(x, y, radius * 1.3f, 1.2f, 0.95f, 0.65f, 0.6f);
     else
       AddFireLight(x, y, radius, 0.55f, 0.32f, 0.10f, 0.6f);
+  }
+  // Cespugli ed erba in fiamme (hd_burn.c): un po' di luce calda e le braci
+  if (mod == 9) {
+    const HdBurnTile *tiles;
+    int n = HdBurn_GetBurning(&tiles);
+    for (int i = 0; i < n; i++) {
+      float age = tiles[i].age;
+      float inten = (age < 10 ? age / 10.0f : 1.0f) * (age > kHdBurnTime - 20 ? (kHdBurnTime - age) / 20.0f : 1.0f);
+      float x = tiles[i].x + 8 - cam_x + ext, y = tiles[i].y + 4 - cam_y;
+      float flicker = 1.0f + 0.10f * sinf(t * 2.3f + tiles[i].seed);
+      AddFireLight(x, y, 34 * inten * flicker, 0.40f * inten, 0.22f * inten, 0.06f * inten, 0.7f * inten);
+    }
   }
 }
 

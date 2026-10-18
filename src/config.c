@@ -500,10 +500,10 @@ static bool HandleIniConfig(int section, const char *key, char *value) {
       return ParseBoolBit(value, &g_config.features0, kFeatures0_TurnWhileDashing);
     } else if (StringEqualsNoCase(key, "MirrorToDarkworld")) {
       return ParseBoolBit(value, &g_config.features0, kFeatures0_MirrorToDarkworld);
-    } else if (StringEqualsNoCase(key, "CollectItemsWithSword")) {
-      return ParseBoolBit(value, &g_config.features0, kFeatures0_CollectItemsWithSword);
-    } else if (StringEqualsNoCase(key, "BreakPotsWithSword")) {
-      return ParseBoolBit(value, &g_config.features0, kFeatures0_BreakPotsWithSword);
+    } else if (StringEqualsNoCase(key, "SwordAndItemsInteraction")) {
+      return ParseBoolBit(value, &g_config.features0, kFeatures0_SwordAndItems);
+    } else if (StringEqualsNoCase(key, "CollectItemsWithSword") || StringEqualsNoCase(key, "BreakPotsWithSword")) {
+      return true;  // vecchie opzioni, ora dentro SwordAndItemsInteraction
     } else if (StringEqualsNoCase(key, "DisableLowHealthBeep")) {
       return ParseBoolBit(value, &g_config.features0, kFeatures0_DisableLowHealthBeep);
     } else if (StringEqualsNoCase(key, "SkipIntroOnKeypress")) {
@@ -520,6 +520,8 @@ static bool HandleIniConfig(int section, const char *key, char *value) {
       return ParseBoolBit(value, &g_config.features0, kFeatures0_GameChangingBugFixes);
     } else if (StringEqualsNoCase(key, "CancelBirdTravel")) {
       return ParseBoolBit(value, &g_config.features0, kFeatures0_CancelBirdTravel);
+    } else if (StringEqualsNoCase(key, "BirdTravelPoint9")) {
+      return ParseBoolBit(value, &g_config.features0, kFeatures0_BirdTravel9);
     } else if (StringEqualsNoCase(key, "FastTransitions")) {
       return ParseBoolBit(value, &g_config.features0, kFeatures0_FastTransitions);
     } else if (StringEqualsNoCase(key, "ContinuousTransitions")) {

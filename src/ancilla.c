@@ -11,6 +11,7 @@
 #include "dungeon.h"
 #include "sprite_main.h"
 #include "assets.h"
+#include "hd_burn.h"
 
 static const uint8 kAncilla_Pflags[68] = {
   0,    8,  0xc, 0x10, 0x10,    4, 0x10, 0x18,    8,    8,    8,    0, 0x14, 0, 0x10, 0x28,
@@ -617,6 +618,7 @@ void SomariaBlock_SpawnBullets(int k) {  // 8881a7
 }
 
 void Ancilla_Main() {  // 888242
+  HdBurn_Update();
   Ancilla_WeaponTink();
   Ancilla_ExecuteAll();
 }
@@ -820,12 +822,27 @@ void SomarianBlast_Draw(int k) {  // 888650
               0x82 + kSomarianBlast_Draw_Char1[j], info.flags | kSomarianBlast_Draw_Flags1[j], 0);
 }
 
+// La fiammata della Bacchetta del Fuoco attraversa cespugli ed erba e li
+// incendia: brucia subito quelli nei punti in cui controlla i muri, cosi'
+// non la fermano
+static void FireRodShot_BurnAhead(int k) {
+  static const int8 kProbe8_X[4] = {4, 4, 4, 12}, kProbe8_Y[4] = {4, 12, 5, 5};
+  static const int8 kProbe12_X[4] = {12, 12, 4, 12}, kProbe12_Y[4] = {4, 12, 12, 12};
+  if (ancilla_type[k] != 2)
+    return;
+  int d = ancilla_dir[k] & 3;
+  uint16 x = Ancilla_GetX(k), y = Ancilla_GetY(k);
+  HdBurn_Ignite(x + kProbe8_X[d], y + kProbe8_Y[d]);
+  HdBurn_Ignite(x + kProbe12_X[d], y + kProbe12_Y[d]);
+}
+
 void Ancilla02_FireRodShot(int k) {  // 8886d2
   if (ancilla_step[k] == 0) {
     if (!submodule_index) {
       ancilla_L[k] = 0;
       Ancilla_MoveX(k);
       Ancilla_MoveY(k);
+      FireRodShot_BurnAhead(k);
       uint8 coll = Ancilla_CheckSpriteCollision(k) >= 0;
       if (!coll) {
         ancilla_dir[k] |= 8;
@@ -1901,6 +1918,21 @@ void DoorDebris_Draw(int k) {  // 88a091
   }
 }
 
+// Vaso davanti alla punta della freccia (stesso punto del controllo dei muri): lo rompe
+static bool Arrow_SmashPot(int k) {
+  static const int8 kArrowTip_X[4] = {8, 8, 0, 16};
+  static const int8 kArrowTip_Y[4] = {0, 16, 5, 5};
+  if (!player_is_indoors || !(enhanced_features0 & kFeatures0_SwordAndItems))
+    return false;
+  int d = ancilla_dir[k] & 3;
+  uint16 x = Ancilla_GetX(k) + kArrowTip_X[d];
+  uint16 y = Ancilla_GetY(k) + kArrowTip_Y[d];
+  if ((uint16)(y - BG2VOFS_copy2) >= 224 || (uint16)(x - BG2HOFS_copy2) >= 256)
+    return false;
+  uint16 pos = (ancilla_floor[k] ? 0x1000 : 0) + ((x & 0x1f8) >> 3) + ((y & 0x1f8) << 3);
+  return Dungeon_SmashPotAtPos(pos);
+}
+
 void Ancilla09_Arrow(int k) {  // 88a131
   static const int8 kArrow_Y[4] = {-4, 2, 0, 0};
   static const int8 kArrow_X[4] = {0, 0, -4, 4};
@@ -1942,7 +1974,12 @@ void Ancilla09_Arrow(int k) {  // 88a131
     } else {
       byte_7E0B88 = 0;
     }
-  } else if ((j = Ancilla_CheckTileCollision(k)) != 0) {
+  } else if ((j = Arrow_SmashPot(k)) != 0 && (link_item_bow & 4)) {
+    // la freccia d'argento rompe il vaso e prosegue
+    Arrow_Draw(k);
+    return;
+  } else if (j != 0 || (j = Ancilla_CheckTileCollision(k)) != 0) {
+    // la freccia normale si ferma sul primo vaso che rompe
     ancilla_H[k] = j >> 1;
     j = ancilla_dir[k] & 3;
     Ancilla_SetX(k, Ancilla_GetX(k) + kArrow_X[j]);

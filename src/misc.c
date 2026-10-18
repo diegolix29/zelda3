@@ -16,6 +16,7 @@
 #include "attract.h"
 #include "snes/snes_regs.h"
 #include "assets.h"
+#include "features.h"
 
 static void KillAgahnim_LoadMusic();
 static void KillAghanim_Init();
@@ -713,6 +714,25 @@ void TriforceRoom_LinkApproachTriforce() {  // 87f49c
   }
 }
 
+// Oggetti che usano la magia: la prima volta che si ricevono la barra della
+// magia si riempie, come regalo (Spada e oggetti interazione ambiente)
+static bool IsMagicItemReceipt(int j) {
+  switch (j) {
+  case 0x07:  // Bacchetta del Fuoco
+  case 0x08:  // Bacchetta del Ghiaccio
+  case 0x0d:  // Polvere Magica (il fungo, 0x29, non conta)
+  case 0x0f:  // Medaglione Bombos
+  case 0x10:  // Medaglione Etere
+  case 0x11:  // Medaglione Terremoto
+  case 0x12:  // Lanterna
+  case 0x15:  // Bastone di Somaria
+  case 0x18:  // Bastone di Byrna
+  case 0x19:  // Mantello Magico
+    return true;
+  }
+  return false;
+}
+
 void AncillaAdd_ItemReceipt(uint8 ain, uint8 yin, int chest_pos) {  // 8985e8
   int ancilla = Ancilla_AddAncilla(ain, yin);
   if (ancilla < 0)
@@ -728,6 +748,10 @@ void AncillaAdd_ItemReceipt(uint8 ain, uint8 yin, int chest_pos) {  // 8985e8
 
   uint8 v = kValueToGiveItemTo[j];
   uint8 *p = &g_ram[kMemoryLocationToGiveItemTo[j]];
+  // prima volta: l'oggetto non c'era ancora (per la Polvere Magica il fungo
+  // vale 1 e la polvere 2: conta solo l'arrivo della polvere)
+  if ((enhanced_features0 & kFeatures0_SwordAndItems) && IsMagicItemReceipt(j) && !sign8(v) && *p < v)
+    link_magic_filler = 0x80;
   if (!sign8(v))
     *p = v;
 

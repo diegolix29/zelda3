@@ -12,6 +12,7 @@
 #include "misc.h"
 #include "player_oam.h"
 #include "sprite_main.h"
+#include "hd_burn.h"
 
 static bool g_ApplyLinksMovementToCamera_called;
 
@@ -2507,6 +2508,12 @@ void LinkItem_Lamp() {  // 87a24d
     AncillaAdd_MagicPowder(0x1a, 0);
     Dungeon_LightTorch();
     AncillaAdd_LampFlame(0x2f, 2);
+    // incendia il cespuglio o l'erba davanti a Link
+    if (!player_is_indoors) {
+      Point16U pt;
+      Overworld_GetLinkMap16Coords(&pt);
+      HdBurn_Ignite(pt.x, pt.y);
+    }
   }
   link_item_in_hand = 0;
   button_mask_b_y = 0;

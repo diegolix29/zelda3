@@ -11,6 +11,7 @@
 #include "variables.h"
 #include "snes/ppu.h"
 #include "hd_world.h"
+#include "hd_burn.h"
 
 bool g_fx_embers, g_fx_window_rays, g_fx_item_glow, g_fx_heat_haze, g_fx_rain;
 bool g_fx_menu_blur, g_fx_sprite_shadows, g_fx_soft_iris, g_fx_button_hints;
@@ -48,6 +49,14 @@ static inline void AddColor(uint32 *p, float r, float g, float b, float a) {
   int cg = ClampByte(((c >> 8) & 0xff) + (int)(g * a));
   int cb = ClampByte((c & 0xff) + (int)(b * a));
   *p = (c & 0xff000000) | cr << 16 | cg << 8 | cb;
+}
+
+// Sposta il pixel verso un colore, tenendo il layer
+static inline void MixPixel(uint32 *p, int r, int g, int b, float a) {
+  uint32 c = *p;
+  int cr = (c >> 16) & 0xff, cg = (c >> 8) & 0xff, cb = c & 0xff;
+  cr += (int)((r - cr) * a), cg += (int)((g - cg) * a), cb += (int)((b - cb) * a);
+  *p = (c & 0xff000000) | ClampByte(cr) << 16 | ClampByte(cg) << 8 | ClampByte(cb);
 }
 
 // Segna il pixel come "sprite": lo shader four sword non lo dipinge (lo
@@ -206,7 +215,7 @@ void HdFx_BeforeLight(uint8 *pixels, int pitch, int width, int height, int bias_
 typedef struct Particle {
   float x, y, vx, vy;
   uint16 age, life;
-  uint8 kind;  // 0 = brace, 1 = pulviscolo, 2 = spruzzo di pioggia
+  uint8 kind;  // 0 = brace, 1 = pulviscolo, 2 = spruzzo di pioggia, 3 = fumo dell'incendio
 } Particle;
 
 enum { kMaxParticles = 400 };
@@ -263,6 +272,22 @@ static void DrawParticles(uint8 *pixels, int pitch, int width, int height, int c
       float a = sinf(k * 3.14159f) * 0.45f;
       AddColor(c, 255, 245, 215, a);
       MarkSharp(c);
+    } else if (p->kind == 3) {
+      // fumo dell'incendio: sbuffo grigio chiaro che sale, si allarga e svanisce
+      float a = (k < 0.15f ? k / 0.15f : (1.0f - k) / 0.85f) * 0.40f;
+      float r = 1.5f + 3.5f * k;
+      int ir = (int)ceilf(r);
+      for (int dy = -ir; dy <= ir; dy++) {
+        for (int dx = -ir; dx <= ir; dx++) {
+          float d2 = (float)(dx * dx + dy * dy);
+          int qx = x + dx, qy = y + dy;
+          if (d2 > r * r || qx < 0 || qy < 0 || qx >= width || qy >= height)
+            continue;
+          uint32 *q = (uint32 *)(pixels + qy * pitch) + qx;
+          if (!IsHud(*q))
+            MixPixel(q, 214, 208, 198, a * (1.0f - 0.5f * sqrtf(d2) / r));
+        }
+      }
     } else {
       // spruzzo di pioggia: piccola croce che svanisce
       float a = (1.0f - k) * 0.45f;
@@ -481,6 +506,15 @@ static bool IsBackdropScene(void) {
   return a < 0x80 && (sc == 0x03 || sc == 0x05 || sc == 0x07 || a == 0x5b);
 }
 
+// Montagna della Morte (chiara e oscura): le nuvole sotto i dirupi sono
+// caselle del terreno con la palette 3. Come l'acqua non hanno pennellate
+// (lo shader le dipingerebbe come terra); vale anche per le immagini delle
+// aree vicine (hd_world.c)
+static bool IsMountainScene(void) {
+  int a = BYTE(overworld_screen_index), sc = a & 0x3f;
+  return a < 0x80 && (sc == 0x03 || sc == 0x05 || sc == 0x07);
+}
+
 int HdFx_SceneModule(void) {
   int m = main_module_index, sub = submodule_index;
   if (m == 14) {
@@ -520,6 +554,7 @@ void HdFx_MarkWater(uint8 *pixels, int pitch, int width, int height, int bias_x,
   // "acqua profonda" per il gioco, ma sullo schermo e' il cielo: lo sfondo
   // resta sfondo (HdFx_MarkBackdrop), invece di diventare acqua a blocchi
   bool sky = mod == 9 && IsBackdropScene();
+  bool mountain = mod == 9 && IsMountainScene();
   int ext = (width - 256) / 2;
   for (int layer = 0; layer < 2; layer++) {
     // all'aperto conta solo il terreno (BG2); nei labirinti anche il piano di sopra (BG1)
@@ -531,14 +566,17 @@ void HdFx_MarkWater(uint8 *pixels, int pitch, int width, int height, int bias_x,
     for (int wy = y0; wy < cam_y + height; wy += 8) {
       for (int wx = x0; wx < cam_x - ext + width; wx += 8) {
         uint8 attr;
+        bool cloud = false;
         if (mod == 7)
           attr = dung_bg2_attr_table[((wy & 0x1f8) << 3) + ((wx & 0x1f8) >> 3) + (layer ? 0 : 0x1000)];
         else if (HdWorld_Active() && (HdWorld_BackgroundFromImages() || !HdWorld_InsideCurrentArea(wx, wy)))
           continue;  // fondale dalle immagini delle aree, con l'acqua gia' segnata; nel
                      // passaggio la mappa del gioco e' ancora quella dell'area vecchia
-        else
+        else {
           attr = Overworld_GetTileAttributeAtLocation((uint16)wx >> 3, (uint16)wy);
-        if (!IsWaterAttr(attr))
+          cloud = mountain && (Overworld_GetMap8AtLocation((uint16)wx >> 3, (uint16)wy) >> 10 & 7) == 3;
+        }
+        if (!IsWaterAttr(attr) && !cloud)
           continue;
         for (int y = wy - cam_y; y < wy - cam_y + 8; y++) {
           if (y < 0 || y >= height)
@@ -659,6 +697,148 @@ static void ApplyLightning(uint8 *pixels, int pitch, int width, int height, bool
   }
 }
 
+// ---------------------------------------------------------------------------
+// 7. Incendio di cespugli ed erba (hd_burn.c): le fiamme del gioco su ogni
+// tile che brucia, fumo quando si spegne e terreno annerito
+
+static inline float Hash01(uint32 v) {
+  v ^= v >> 16, v *= 0x7feb352d, v ^= v >> 15, v *= 0x846ca68b, v ^= v >> 16;
+  return (v & 0xffffff) * (1.0f / 16777216.0f);
+}
+
+// Annerisce la tile: s = quanto (0-1), con un bordo morbido che sborda un po'
+static void DrawScorchTile(uint8 *pixels, int pitch, int width, int height, int sx, int sy, uint8 seed, float s) {
+  for (int y = -2; y < 18; y++) {
+    int py = sy + y;
+    if (py < 0 || py >= height)
+      continue;
+    uint32 *row = (uint32 *)(pixels + py * pitch);
+    for (int x = -2; x < 18; x++) {
+      int px = sx + x;
+      if (px < 0 || px >= width || IsHud(row[px]) || IsSprite(row[px]))
+        continue;
+      float dx = x - 7.5f, dy = y - 7.5f;
+      float d = sqrtf(dx * dx + dy * dy);
+      float e = d < 7.0f ? 1.0f : d > 11.0f ? 0.0f : (11.0f - d) * 0.25f;
+      if (e <= 0)
+        continue;
+      float n = 0.65f + 0.35f * Hash01(seed * 977 + (x + 2) * 31 + (y + 2));
+      MixPixel(&row[px], 48, 34, 22, s * e * n);
+    }
+  }
+}
+
+// Casella 8x8 degli sprite (prima tabella della memoria video) con la palette
+// pal degli sprite, letta da VRAM e CGRAM come la disegnerebbe la PPU
+static void DrawObjTile(uint8 *pixels, int pitch, int width, int height, int sx, int sy,
+                        int chr, int pal, bool hflip, bool behind_link) {
+  Ppu *ppu = g_zenv.ppu;
+  int adr = ppu->objTileAdr1 + chr * 16;
+  for (int r = 0; r < 8; r++) {
+    int py = sy + r;
+    if (py < 0 || py >= height)
+      continue;
+    uint32 *row = (uint32 *)(pixels + py * pitch);
+    uint16 p01 = ppu->vram[(adr + r) & 0x7fff], p23 = ppu->vram[(adr + r + 8) & 0x7fff];
+    for (int c = 0; c < 8; c++) {
+      int px = sx + c, bit = hflip ? c : 7 - c;
+      int v = (p01 >> bit & 1) | (p01 >> (8 + bit) & 1) << 1 | (p23 >> bit & 1) << 2 | (p23 >> (8 + bit) & 1) << 3;
+      if (v == 0 || px < 0 || px >= width || IsHud(row[px]))
+        continue;
+      // Link (e chi e' con lui) davanti al fuoco resta visibile
+      if (behind_link && IsSprite(row[px]))
+        continue;
+      uint16 col = ppu->cgram[0x80 + pal * 16 + v];
+      uint32 cr = col & 31, cg = col >> 5 & 31, cb = col >> 10 & 31;
+      row[px] = 4u << 24 | (cr << 3 | cr >> 2) << 16 | (cg << 3 | cg >> 2) << 8 | (cb << 3 | cb >> 2);
+    }
+  }
+}
+
+// Le fiamme del gioco: quelle dei nemici bruciati dalla Bacchetta del Fuoco
+// (SpriteModule_Burn e Flame_Draw), con la stessa sequenza di fotogrammi
+// e la palette 1 degli sprite, come se la tile fosse un nemico che brucia
+static void DrawFlamesTile(uint8 *pixels, int pitch, int width, int height, int sx, int sy,
+                           const HdBurnTile *b, bool behind_link) {
+  static const uint8 kFlame_Gfx[9] = { 5, 4, 3, 1, 2, 0, 3, 0, 1 };
+  static const uint8 kFlame_Char[5] = { 0x8e, 0xa0, 0x8e, 0xa0, 0xa2 };
+  int j = kHdBurnTime - 1 - b->age;
+  if (j < 0)
+    return;
+  int gfx = kFlame_Gfx[j >> 3 > 8 ? 8 : j >> 3];
+  sy -= 2;  // un poco sopra la tile, come la fiamma sopra i piedi del nemico
+  if (gfx == 5) {
+    DrawObjTile(pixels, pitch, width, height, sx, sy - 6, 0xa4, 1, false, behind_link);
+    DrawObjTile(pixels, pitch, width, height, sx + 8, sy - 6, 0xa5, 1, false, behind_link);
+    return;
+  }
+  int chr = kFlame_Char[gfx];
+  bool hflip = gfx == 2 || gfx == 3;
+  for (int t = 0; t < 4; t++) {
+    int tx = t & 1, ty = t >> 1;
+    DrawObjTile(pixels, pitch, width, height, sx + (hflip ? 1 - tx : tx) * 8, sy + ty * 8,
+                chr + tx + ty * 16, 1, hflip, behind_link);
+  }
+}
+
+static void ApplyBurning(uint8 *pixels, int pitch, int width, int height, int cam_x, int cam_y, int ext, bool step) {
+  const HdBurnTile *tiles;
+  int n = HdBurn_GetScorched(&tiles);
+  bool live = main_module_index == 9 && submodule_index == 0;
+  for (int i = 0; i < n; i++) {
+    const HdBurnTile *s = &tiles[i];
+    if (s->area != (uint8)overworld_area_index)
+      continue;
+    float k = (float)s->age / kHdScorchTime;
+    int sx = s->x - cam_x + ext, sy = s->y - cam_y;
+    if (sx > -20 && sy > -20 && sx < width + 4 && sy < height + 4)
+      DrawScorchTile(pixels, pitch, width, height, sx, sy, s->seed, 0.62f - 0.10f * k);
+    // fumo appena il fuoco si spegne
+    if (step && live && s->age == 1) {
+      for (int j = 0; j < 4; j++) {
+        Particle *p = NewParticle();
+        if (!p)
+          break;
+        p->kind = 3;
+        p->x = s->x + 3 + Rand01() * 10, p->y = s->y + 2 + Rand01() * 10;
+        p->vx = (Rand01() - 0.5f) * 0.25f, p->vy = -0.25f - Rand01() * 0.3f;
+        p->life = 50 + (int)(Rand01() * 40);
+      }
+    }
+  }
+  n = HdBurn_GetBurning(&tiles);
+  if (n == 0)
+    return;
+  // dall'alto in basso: le fiamme delle tile piu' in basso coprono quelle dietro
+  int order[96];
+  int m = 0;
+  for (int i = 0; i < n && m < 96; i++) {
+    int j = m++;
+    while (j > 0 && tiles[order[j - 1]].y > tiles[i].y)
+      order[j] = order[j - 1], j--;
+    order[j] = i;
+  }
+  int link_feet = link_y_coord + 20;
+  for (int o = 0; o < m; o++) {
+    const HdBurnTile *b = &tiles[order[o]];
+    int sx = b->x - cam_x + ext, sy = b->y - cam_y;
+    if (sx < -24 || sy < -16 || sx >= width + 8 || sy >= height + 16)
+      continue;
+    // la pianta si annerisce mentre brucia
+    DrawScorchTile(pixels, pitch, width, height, sx, sy, b->seed, 0.55f * b->age / kHdBurnTime);
+    DrawFlamesTile(pixels, pitch, width, height, sx, sy, b, b->y + 15 < link_feet);
+    if (step && live && Rand01() < 0.05f) {
+      Particle *p = NewParticle();
+      if (p) {
+        p->kind = 3;
+        p->x = b->x + 4 + Rand01() * 8, p->y = b->y - 2;
+        p->vx = (Rand01() - 0.5f) * 0.2f, p->vy = -0.35f - Rand01() * 0.25f;
+        p->life = 40 + (int)(Rand01() * 30);
+      }
+    }
+  }
+}
+
 void HdFx_AfterLight(uint8 *pixels, int pitch, int width, int height, int bias_x, int bias_y) {
   int mod;
   if (!InGameplay(&mod)) {
@@ -678,6 +858,8 @@ void HdFx_AfterLight(uint8 *pixels, int pitch, int width, int height, int bias_x
     ApplyWindowRays(pixels, pitch, width, height, cam_x, cam_y, ext, step);
   if (g_fx_item_glow)
     ApplyItemGlow(pixels, pitch, width, height, cam_x, cam_y, ext);
+  if (mod == 9)
+    ApplyBurning(pixels, pitch, width, height, cam_x, cam_y, ext, step);
   DrawParticles(pixels, pitch, width, height, cam_x, cam_y, ext);
   if (g_fx_rain && IsRaining(mod)) {
     ApplyRain(pixels, pitch, width, height, cam_x, cam_y, ext, step);

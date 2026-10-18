@@ -155,6 +155,8 @@ static const uint8 kBirdTravel_x_lo[8] = {0x80, 0xcf, 0x10, 0xb8, 0x30, 0x70, 0x
 static const uint8 kBirdTravel_x_hi[8] = {6, 0xc, 2, 8, 0xf, 0, 7, 0xe};
 static const uint8 kBirdTravel_y_lo[8] = {0x5b, 0x98, 0xc0, 0x20, 0x50, 0xb0, 0x30, 0x80};
 static const uint8 kBirdTravel_y_hi[8] = {3, 5, 7, 0xb, 0xb, 0xf, 0xf, 0xf};
+// Punto di volo 9 (kFeatures0_BirdTravel9): posizione sulla mappa
+static const uint16 kBirdTravel9_x = 0xf08, kBirdTravel9_y = 0x118;
 static const uint8 kPendantBitMask[3] = {4, 1, 2};
 static const uint8 kCrystalBitMask[7] = {2, 0x40, 8, 0x20, 1, 4, 0x10};
 static const uint16 kOwMapCrystal0_x[9] = {0x7ff, 0x2c0, 0xd00, 0xf31, 0x6d, 0x7e0, 0xf40, 0xf40, 0x8dc};
@@ -976,7 +978,10 @@ void FluteMenu_HandleSelection() {  // 8ab78b
     birdtravel_var1[0]++;
     sound_effect_2 = 32;
   }
-  birdtravel_var1[0] = birdtravel_var1[0] & 7;
+  if (enhanced_features0 & kFeatures0_BirdTravel9)
+    birdtravel_var1[0] = (birdtravel_var1[0] == 0xff) ? 8 : birdtravel_var1[0] % 9;
+  else
+    birdtravel_var1[0] = birdtravel_var1[0] & 7;
   if (frame_counter & 0x10 && WorldMap_CalculateOamCoordinates(&pt))
     WorldMap_AddSprite(16, 2, 0x3e, 0, pt.x - 4, pt.y - 4);
 
@@ -993,6 +998,13 @@ void FluteMenu_HandleSelection() {  // 8ab78b
 
     if (WorldMap_CalculateOamCoordinates(&pt))
       WorldMap_AddSprite(i, 0, (i == birdtravel_var1[0]) ? 0x30 + (frame_counter & 6) : 0x32, kBirdTravel_tab1[i], pt.x, pt.y);
+  }
+  // Il 9 non c'e' tra le cifre della mappa: e' il 6 capovolto
+  if (enhanced_features0 & kFeatures0_BirdTravel9) {
+    link_x_coord_spexit = kBirdTravel9_x;
+    link_y_coord_spexit = kBirdTravel9_y;
+    if (WorldMap_CalculateOamCoordinates(&pt))
+      WorldMap_AddSprite(8, 0, ((birdtravel_var1[0] == 8) ? 0x30 + (frame_counter & 6) : 0x32) | 0xc0, kBirdTravel_tab1[5], pt.x, pt.y);
   }
   link_x_coord_spexit = xbak;
   link_y_coord_spexit = ybak;

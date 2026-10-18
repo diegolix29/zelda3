@@ -2170,26 +2170,57 @@ void FluteMenu_LoadTransport() {  // 82ec39
   num_memorized_tiles = 0;
   int k = birdtravel_var1[0];
   WORD(birdtravel_var1[0]) <<= 1;
-  Overworld_LoadBirdTravelPos(k);
+  // 8 e' anche la Piramide del finale (che non passa dal menu del flauto)
+  if (k == 8 && main_module_index == 14 && (enhanced_features0 & kFeatures0_BirdTravel9))
+    Overworld_LoadBirdTravel9();
+  else
+    Overworld_LoadBirdTravelPos(k);
 }
 
+typedef struct BirdTravelPos {
+  uint16 screen, map16, scroll_x, scroll_y, link_x, link_y, camera_x, camera_y;
+  int8 unk1, unk3;
+} BirdTravelPos;
+
+static void LoadBirdTravelPosFrom(const BirdTravelPos *p);
+
 void Overworld_LoadBirdTravelPos(int k) {  // 82ec47
-  BG1VOFS_copy2 = BG2VOFS_copy2 = BG1VOFS_copy = BG2VOFS_copy = kBirdTravel_ScrollY[k];
-  BG1HOFS_copy2 = BG2HOFS_copy2 = BG1HOFS_copy = BG2HOFS_copy = kBirdTravel_ScrollX[k];
-  link_y_coord = kBirdTravel_LinkYCoord[k];
-  link_x_coord = kBirdTravel_LinkXCoord[k];
-  overworld_unk1 = kBirdTravel_Unk1[k];
-  overworld_unk3 = kBirdTravel_Unk3[k];
+  BirdTravelPos p = {
+    kBirdTravel_ScreenIndex[k], kBirdTravel_Map16LoadSrcOff[k], kBirdTravel_ScrollX[k], kBirdTravel_ScrollY[k],
+    kBirdTravel_LinkXCoord[k], kBirdTravel_LinkYCoord[k], kBirdTravel_CameraXScroll[k], kBirdTravel_CameraYScroll[k],
+    kBirdTravel_Unk1[k], kBirdTravel_Unk3[k],
+  };
+  LoadBirdTravelPosFrom(&p);
+}
+
+// Punto di volo 9 (kFeatures0_BirdTravel9): area 0x07, al centro della
+// piattaforma dei pioli, sopra la scala. Valori ricavati come quelli delle
+// tabelle originali: scroll = Link - (0x78, 0x5e), telecamera = Link + (7, 0xf),
+// unk = -(scroll & 0xf), map16 dalla posizione dello scroll nell'area.
+void Overworld_LoadBirdTravel9() {
+  static const BirdTravelPos kPos = {
+    0x07, 0x590, 0xe88, 0xb2, 0xf00, 0x110, 0xf07, 0x11f, -2, -8,
+  };
+  LoadBirdTravelPosFrom(&kPos);
+}
+
+static void LoadBirdTravelPosFrom(const BirdTravelPos *p) {
+  BG1VOFS_copy2 = BG2VOFS_copy2 = BG1VOFS_copy = BG2VOFS_copy = p->scroll_y;
+  BG1HOFS_copy2 = BG2HOFS_copy2 = BG1HOFS_copy = BG2HOFS_copy = p->scroll_x;
+  link_y_coord = p->link_y;
+  link_x_coord = p->link_x;
+  overworld_unk1 = p->unk1;
+  overworld_unk3 = p->unk3;
   overworld_unk1_neg = -overworld_unk1;
   overworld_unk3_neg = -overworld_unk3;
-  overworld_area_index = overworld_screen_index = kBirdTravel_ScreenIndex[k];
+  overworld_area_index = overworld_screen_index = p->screen;
 
-  map16_load_src_off = kBirdTravel_Map16LoadSrcOff[k];
+  map16_load_src_off = p->map16;
   map16_load_var2 = (map16_load_src_off - 0x400 & 0xf80) >> 7;
   map16_load_dst_off = (map16_load_src_off - 0x10 & 0x3e) >> 1;
-  camera_y_coord_scroll_low = kBirdTravel_CameraYScroll[k];
+  camera_y_coord_scroll_low = p->camera_y;
   camera_y_coord_scroll_hi = camera_y_coord_scroll_low - 2;
-  camera_x_coord_scroll_low = kBirdTravel_CameraXScroll[k];
+  camera_x_coord_scroll_low = p->camera_x;
   camera_x_coord_scroll_hi = camera_x_coord_scroll_low - 2;
   ow_entrance_value = 0;
   big_rock_starting_address = 0;
@@ -3485,6 +3516,43 @@ after:
   }
 }
 
+// Comportamenti degli oggetti piccoli che si possono rompere
+enum {
+  kSmash_Bush = 1 << (0x50 - 0x50),
+  kSmash_DarkBush = 1 << (0x51 - 0x50),
+  kSmash_LightRock = 1 << (0x52 - 0x50),  // 0x53 e' la roccia pesante: resta per i guanti
+  kSmash_Sign = 1 << (0x54 - 0x50),
+};
+
+// Rompe l'oggetto piccolo della tile colpita (una sola tile), se il suo
+// comportamento e' fra quelli permessi. -1 se non c'e' niente da rompere.
+static int Overworld_SmashSmallObj(uint16 x, uint16 y, uint16 pos, uint16 attr, uint8 allowed) {
+  static const uint8 kLiftBehavior[9] = { 0x54, 0x52, 0x50, 0xFF, 0x51, 0x53, 0x55, 0x56, 0x57 };
+  uint16 repl;
+  if (attr == 0x36)
+    repl = 0xdc7;  // cespuglio
+  else if (attr == 0x72a)
+    repl = 0xdc8;  // cespuglio del Mondo delle Tenebre
+  else if (attr == 0x20f || attr == 0x239)
+    repl = 0xdca;  // roccia piccola
+  else if (attr == 0x101)
+    repl = 0xdc6;  // cartello
+  else
+    return -1;
+  uint8 behavior = kMap8DataToTileAttr[GetMap16toMap8Table()[attr * 4] & 0x1ff];
+  if (behavior < 0x50 || behavior > 0x57 || !(allowed & (1 << (behavior - 0x50))))
+    return -1;
+  int what = 8;
+  while (what >= 0 && kLiftBehavior[what] != behavior)
+    what--;
+  Point16U pt = { (x & ~1) * 8, y & ~0xf };
+  uint8 rv = Overworld_LiftingSmallObj(attr, pos, repl, pt);
+  Sprite_SpawnImmediatelySmashedTerrain(what, pt.x, pt.y);
+  if (behavior == 0x50 || behavior == 0x51)
+    AncillaAdd_BushPoof(pt.x, pt.y);
+  return rv;
+}
+
 uint16 Overworld_ToolAndTileInteraction(uint16 x, uint16 y) {  // 9bbd82
   word_7E04B2 = 0;
   index_of_interacting_tile = 0;
@@ -3540,6 +3608,13 @@ memoize_getout:
       }
       return attr;
     }
+    // Dalla Spada Suprema (livello 2) in su la spada rompe i cartelli
+    if ((enhanced_features0 & kFeatures0_SwordAndItems) && link_item_in_hand == 0 && link_position_mode != 1 &&
+        link_sword_type >= 2 && link_sword_type <= 4) {
+      int smashed = Overworld_SmashSmallObj(x, y, pos, attr, kSmash_Sign);
+      if (smashed >= 0)
+        return smashed;
+    }
     return attr;
   } else {  // else_1
     if (attr == 0x21b) {
@@ -3548,6 +3623,11 @@ memoize_getout:
       yv = 0xdcb;
       goto memoize_getout;
     } else { // else_3
+      // Martello: cespugli e rocce piccole chiare
+      int smashed = !(enhanced_features0 & kFeatures0_SwordAndItems) ? -1 :
+          Overworld_SmashSmallObj(x, y, pos, attr, kSmash_Bush | kSmash_DarkBush | kSmash_LightRock);
+      if (smashed >= 0)
+        return smashed;
       Overworld_PickHammerSfx(attr);
       return attr;
     }

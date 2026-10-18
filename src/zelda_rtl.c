@@ -288,6 +288,8 @@ void ZeldaUpdateCamera() {
       if (g_cam_int_y < ly - kMaxDelta) g_cam_int_y = ly - kMaxDelta;
       if (g_cam_int_y > ly + kMaxDelta) g_cam_int_y = ly + kMaxDelta;
     }
+    // la telecamera fluida in ritardo non deve uscire dalla mappa del mondo
+    HdWorld_ClampView(&g_cam_int_x, &g_cam_int_y);
   }
   g_cam_last_x = link_x_coord, g_cam_last_y = link_y_coord;
   g_cam_dx = g_cam_int_x - gx;

@@ -81,14 +81,14 @@ static const FeatureOption kFeatureOptions[] = {
   { "HUD moderno", "ModernHud", kFeatures0_ModernHud },
   { "Oggetti X, L, R nell'HUD", "ShowXLRItemsInHud", kFeatures0_ShowXLRItemsInHud },
   { "Cambio oggetti con L e R", "ItemSwitchLR", kFeatures0_SwitchLR },
-  { "Raccogli oggetti con la spada", "CollectItemsWithSword", kFeatures0_CollectItemsWithSword },
-  { "Rompi vasi con la spada", "BreakPotsWithSword", kFeatures0_BreakPotsWithSword },
+  { "Spada e oggetti interazione ambiente", "SwordAndItemsInteraction", kFeatures0_SwordAndItems },
   { "Sterza durante lo scatto", "TurnWhileDashing", kFeatures0_TurnWhileDashing },
   { "Fino a 4 bombe insieme", "MoreActiveBombs", kFeatures0_MoreActiveBombs },
   { "Massimi in giallo nell'HUD", "ShowMaxItemsInYellow", kFeatures0_ShowMaxItemsInYellow },
   { "Disattiva bip vita bassa", "DisableLowHealthBeep", kFeatures0_DisableLowHealthBeep },
   { "Annulla il volo con X", "CancelBirdTravel", kFeatures0_CancelBirdTravel },
-  { "Specchio verso le Tenebre", "MirrorToDarkworld", kFeatures0_MirrorToDarkworld },
+  { "Punto di volo 9", "BirdTravelPoint9", kFeatures0_BirdTravel9 },
+  { "Specchio verso il Mondo delle Tenebre", "MirrorToDarkworld", kFeatures0_MirrorToDarkworld },
   { "Correzioni di bug", "MiscBugFixes", kFeatures0_MiscBugFixes },
 };
 
@@ -236,6 +236,18 @@ static int TextWidth(const char *s) {
     w += (g >= 0 && g < g_font_count && g_font_data) ? g_font_width[g] : 7;
   }
   return w;
+}
+
+// Forma breve delle voci piu' lunghe, per quando il pannello e' stretto (4:3)
+static const char *ShortLabel(const char *s) {
+  static const char *const kShort[][2] = {
+    { "Specchio verso il Mondo delle Tenebre", "Specchio verso M. delle Tenebre" },
+    { "Spada e oggetti interazione ambiente", "Spada e oggetti: ambiente" },
+  };
+  for (int i = 0; i < countof(kShort); i++)
+    if (strcmp(s, kShort[i][0]) == 0)
+      return kShort[i][1];
+  return s;
 }
 
 static int DrawText(Canvas *cv, int x, int y, const char *s, uint32 color) {
@@ -425,14 +437,14 @@ static const char *Tr(const char *it) {
     { "HUD moderno", "Modern HUD" },
     { "Oggetti X, L, R nell'HUD", "X, L, R items in the HUD" },
     { "Cambio oggetti con L e R", "Switch items with L and R" },
-    { "Raccogli oggetti con la spada", "Collect items with the sword" },
-    { "Rompi vasi con la spada", "Break pots with the sword" },
+    { "Spada e oggetti interazione ambiente", "Sword and items interaction" },
     { "Sterza durante lo scatto", "Turn while dashing" },
     { "Fino a 4 bombe insieme", "Up to 4 bombs at once" },
     { "Massimi in giallo nell'HUD", "Maximums in yellow in the HUD" },
     { "Disattiva bip vita bassa", "Disable low health beep" },
     { "Annulla il volo con X", "Cancel bird travel with X" },
-    { "Specchio verso le Tenebre", "Mirror to the Dark World" },
+    { "Punto di volo 9", "Bird travel point 9" },
+    { "Specchio verso il Mondo delle Tenebre", "Mirror to the Dark World" },
     { "Correzioni di bug", "Bug fixes" },
     { "Su", "Up" },
     { "Gi\xc3\xb9", "Down" },
@@ -1241,7 +1253,12 @@ void HdMenu_Draw(uint8 *pixels, int pitch, int width, int height, int scale) {
     if (sel)
       Canvas_Rect(&cv, panel_x, y - 1, panel_w, kRowHeight, 0x2050a0);
     uint32 color = sel ? 0xf8f8f8 : 0xc8c8d0;
-    DrawText(&cv, panel_x + 10, y - 2, it->label, color);
+    // Se la scritta non ci sta accanto al valore si usa la forma breve
+    const char *label = it->label;
+    int room = panel_w - 20 - (it->value[0] ? TextWidth(it->value) + 8 : 0);
+    if (TextWidth(label) > room)
+      label = ShortLabel(label);
+    DrawText(&cv, panel_x + 10, y - 2, label, color);
     if (it->value[0]) {
       int vw = TextWidth(it->value);
       DrawText(&cv, panel_x + panel_w - 10 - vw, y - 2, it->value, sel ? 0xf8e070 : 0x98c0f0);

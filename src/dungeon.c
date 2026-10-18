@@ -5567,8 +5567,8 @@ uint8 ThievesAttic_DrawLightenedHole(uint16 pos6, uint16 a, Point16U *pt) {  // 
 
 uint8 HandleItemTileAction_Dungeon(uint16 x, uint16 y) {  // 81dabb
   if (!(link_item_in_hand & 2)) {
-    if (!(enhanced_features0 & kFeatures0_BreakPotsWithSword) ||
-        button_b_frames == 0 || link_sword_type == 1)
+    // Con la spada solo la Spada d'Oro (livello 4) rompe i vasi
+    if (!(enhanced_features0 & kFeatures0_SwordAndItems) || button_b_frames == 0 || link_sword_type != 4)
       return 0;
   }
   uint16 pos = (y & 0x1f8) * 8 + x + (link_is_on_lower_level ? 0x1000 : 0);
@@ -5581,18 +5581,27 @@ uint8 HandleItemTileAction_Dungeon(uint16 x, uint16 y) {  // 81dabb
       dung_misc_objs_index = (tile & 0xf) * 2;
       RoomDraw_16x16Single(dung_misc_objs_index);
       sound_effect_1 = 0x11;
-    } else if ((tile2 & 0xf0f0) == 0x1010) {  // Pot
-      dung_misc_objs_index = (tile & 0xf) * 2;
-      RevealPotItem(pos, dung_object_tilemap_pos[tile & 0xf]);
-      RoomDraw_16x16Single(dung_misc_objs_index);
-      Point16U pt;
-      ManipBlock_Something(&pt);
-      BYTE(dung_secrets_unk1) |= 0x80;
-      Sprite_SpawnImmediatelySmashedTerrain(1, pt.x, pt.y);
-      AncillaAdd_BushPoof(pt.x, pt.y);  // return value wtf?
+    } else {
+      Dungeon_SmashPotAtPos(pos);
     }
   }
   return 0;
+}
+
+// Rompe il vaso nella tile pos, se c'e' (martello, frecce)
+bool Dungeon_SmashPotAtPos(uint16 pos) {
+  uint16 tile = dung_bg2_attr_table[pos];
+  if ((tile & 0xf0) != 0x70 || (dung_replacement_tile_state[tile & 0xf] & 0xf0f0) != 0x1010)
+    return false;
+  dung_misc_objs_index = (tile & 0xf) * 2;
+  RevealPotItem(pos, dung_object_tilemap_pos[tile & 0xf]);
+  RoomDraw_16x16Single(dung_misc_objs_index);
+  Point16U pt;
+  ManipBlock_Something(&pt);
+  BYTE(dung_secrets_unk1) |= 0x80;
+  Sprite_SpawnImmediatelySmashedTerrain(1, pt.x, pt.y);
+  AncillaAdd_BushPoof(pt.x, pt.y);  // return value wtf?
+  return true;
 }
 
 void ManipBlock_Something(Point16U *pt) {  // 81db41

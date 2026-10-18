@@ -2573,7 +2573,9 @@ bool Sprite_CheckDamageToLink_ignore_layer(int k) {  // 86f15c
     Link_SetupHitBox(&hitbox);
 
     // Set hitbox to the sword hitbox if the item type is an absorbable
-    if (sprite_type[k] >= 0xd8 && sprite_type[k] <= 0xe6 && (enhanced_features0 & kFeatures0_CollectItemsWithSword))
+    // (qualunque spada: cuori, rupie, bombe, magia, frecce...)
+    if (sprite_type[k] >= 0xd8 && sprite_type[k] <= 0xe6 && (enhanced_features0 & kFeatures0_SwordAndItems) &&
+        link_sword_type >= 1 && link_sword_type <= 4)
       Link_UpdateHitBoxWithSword(&hitbox);
 
     Sprite_SetupHitBox(k, &hitbox);

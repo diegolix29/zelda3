@@ -244,6 +244,7 @@ void PushBlock_CheckForPit(uint8 y);
 uint8 Dungeon_LiftAndReplaceLiftable(Point16U *pt);
 uint8 ThievesAttic_DrawLightenedHole(uint16 pos6, uint16 a, Point16U *pt);
 uint8 HandleItemTileAction_Dungeon(uint16 x, uint16 y);
+bool Dungeon_SmashPotAtPos(uint16 pos);
 void ManipBlock_Something(Point16U *pt);
 void RevealPotItem(uint16 pos6, uint16 pos4);
 void Dungeon_UpdateTileMapWithCommonTile(int x, int y, uint8 v);
