@@ -19,6 +19,7 @@
 
 const uint16 *Hud_GetItemIconTiles(int item);
 const uint16 *Hud_GetSwordIconTiles(void);
+bool Hud_HaveItem(int item);
 
 
 enum {
@@ -337,11 +338,11 @@ static void DrawMagicText(Canvas *cv, int x, int y) {
 
 #include "hd_hud_buttons.h"
 
-// I tre tasti, disposti come li ha disegnati l'utente (pulsanti.png)
-static void DrawButtons(Canvas *cv, int x, int y) {
-  for (int r = 0; r < HD_BUTTONS_H; r++)
-    for (int c = 0; c < HD_BUTTONS_W; c++) {
-      uint32 v = kHdButtons[r * HD_BUTTONS_W + c];
+// Un'immagine ARGB di hd_hud_buttons.h (tasti o dorsali)
+static void DrawImage(Canvas *cv, int x, int y, const uint32 *img, int w, int h) {
+  for (int r = 0; r < h; r++)
+    for (int c = 0; c < w; c++) {
+      uint32 v = img[r * w + c];
       if (v >> 24)
         Px(cv, x + c, y + r, v);
     }
@@ -361,7 +362,34 @@ static void TileFirstPixel(uint16 entry, int *row, int *col) {
   if (*row == 8) *row = 0, *col = 0;
 }
 
-static void DrawNumberTiles(Canvas *cv, int x, int y, int value, int digits) {
+// "Massimi in giallo nell'HUD": come nell'HUD normale (hud.c), i valori al
+// massimo usano la palette gialla
+static bool ShowMaxInYellow(int value, int max) {
+  return (enhanced_features0 & kFeatures0_ShowMaxItemsInYellow) && value == max;
+}
+
+// Oggetto dentro un tasto 18x18, con il numero se e' un consumabile; gli
+// oggetti di X, L e R solo se Link li ha ancora (come Hud_DrawXLRItems)
+static void DrawButtonItem(Canvas *cv, int x, int y, int item) {
+  const int S = HD_BUTTON_SIZE;
+  if (!item || !Hud_HaveItem(item))
+    return;
+  DrawIcon(cv, x + 1, y + 1, Hud_GetItemIconTiles(item));
+  int count = -1, max = -1;
+  if (item == 1 && link_item_bow)
+    count = link_num_arrows, max = kMaxArrowsForLevel[link_arrow_upgrades];
+  else if (item == kHudItem_Bombs)
+    count = link_item_bombs, max = kMaxBombsForLevel[link_bomb_upgrades];
+  if (count >= 0) {
+    char buf[4];
+    int n = count > 99 ? 99 : count;
+    buf[0] = '0' + n / 10, buf[1] = '0' + n % 10, buf[2] = 0;
+    const char *t = n < 10 ? buf + 1 : buf;
+    DrawSmallText(cv, x + S - SmallTextWidth(t), y + S - 5, t, ShowMaxInYellow(count, max) ? 0xf8d828 : 0xf8f8f8);
+  }
+}
+
+static void DrawNumberTiles(Canvas *cv, int x, int y, int value, int digits, bool yellow) {
   char buf[8];
   int n = 0;
   do {
@@ -371,7 +399,7 @@ static void DrawNumberTiles(Canvas *cv, int x, int y, int value, int digits) {
   while (n < digits)
     buf[n++] = 0;
   for (int i = n - 1; i >= 0; i--, x += 8)
-    DrawTile(cv, x, y, 0x2490 + buf[i]);
+    DrawTile(cv, x, y, (yellow ? 0x3490 : 0x2490) + buf[i]);
 }
 
 void HdHud_Draw(uint8 *pixels, int pitch, int width, int height, int scale) {
@@ -455,29 +483,33 @@ void HdHud_Draw(uint8 *pixels, int pitch, int width, int height, int scale) {
 
   // --- Tasti: il punto piu' alto a filo con i cuori, il piu' a destra con
   // lo stesso margine dei cuori a sinistra
+  // Solo i tre tasti Y, A e B; con "Oggetti X, L, R nell'HUD"
+  // (ShowXLRItemsInHud) i tasti sono quattro, a rombo con X blu, e a sinistra
+  // ci sono i dorsali L e R
   const int S = HD_BUTTON_SIZE;
-  int gx = W - margin - HD_BUTTONS_W, gy = top;
-  DrawButtons(&cv, gx, gy);
-  int yx = gx + HD_BUTTON_Y_X, yy = gy + HD_BUTTON_Y_Y;
-  int ax = gx + HD_BUTTON_A_X, ay = gy + HD_BUTTON_A_Y;
-  int bx = gx + HD_BUTTON_B_X, by = gy + HD_BUTTON_B_Y;
-
-  // Y: oggetto selezionato, con il numero se e' un consumabile
-  if (hud_cur_item) {
-    DrawIcon(&cv, yx + 1, yy + 1, Hud_GetItemIconTiles(hud_cur_item));
-    int count = -1;
-    if (hud_cur_item == 1 && link_item_bow)
-      count = link_num_arrows;
-    else if (hud_cur_item == kHudItem_Bombs)
-      count = link_item_bombs;
-    if (count >= 0) {
-      char buf[4];
-      int n = count > 99 ? 99 : count;
-      buf[0] = '0' + n / 10, buf[1] = '0' + n % 10, buf[2] = 0;
-      const char *t = n < 10 ? buf + 1 : buf;
-      DrawSmallText(&cv, yx + S - SmallTextWidth(t), yy + S - 5, t, 0xf8f8f8);
-    }
+  int yx, yy, ax, ay, bx, by;
+  if (enhanced_features0 & kFeatures0_ShowXLRItemsInHud) {
+    int gx = W - margin - HD_BUTTONS4_W, gy = top;
+    DrawImage(&cv, gx, gy, kHdButtons4, HD_BUTTONS4_W, HD_BUTTONS4_H);
+    yx = gx + HD_BUTTON4_Y_X, yy = gy + HD_BUTTON4_Y_Y;
+    ax = gx + HD_BUTTON4_A_X, ay = gy + HD_BUTTON4_A_Y;
+    bx = gx + HD_BUTTON4_B_X, by = gy + HD_BUTTON4_B_Y;
+    int sx = gx - 10 - HD_SHOULDERS_W, sy = gy;
+    DrawImage(&cv, sx, sy, kHdShoulders, HD_SHOULDERS_W, HD_SHOULDERS_H);
+    DrawButtonItem(&cv, gx + HD_BUTTON4_X_X, gy + HD_BUTTON4_X_Y, hud_cur_item_x);
+    DrawButtonItem(&cv, sx + HD_SHOULDER_L_X, sy + HD_SHOULDER_Y, hud_cur_item_l);
+    DrawButtonItem(&cv, sx + HD_SHOULDER_R_X, sy + HD_SHOULDER_Y, hud_cur_item_r);
+  } else {
+    int gx = W - margin - HD_BUTTONS_W, gy = top;
+    DrawImage(&cv, gx, gy, kHdButtons, HD_BUTTONS_W, HD_BUTTONS_H);
+    yx = gx + HD_BUTTON_Y_X, yy = gy + HD_BUTTON_Y_Y;
+    ax = gx + HD_BUTTON_A_X, ay = gy + HD_BUTTON_A_Y;
+    bx = gx + HD_BUTTON_B_X, by = gy + HD_BUTTON_B_Y;
   }
+
+  // Y: oggetto selezionato
+  if (hud_cur_item)
+    DrawButtonItem(&cv, yx, yy, hud_cur_item);
   // B: spada
   if (link_sword_type && link_sword_type != 0xff)
     DrawIcon(&cv, bx + 1, by + 1, Hud_GetSwordIconTiles());  // icona del menu, con il livello
@@ -492,10 +524,11 @@ void HdHud_Draw(uint8 *pixels, int pitch, int width, int height, int scale) {
   {
     int ry = H - margin - 8;
     DrawTile(&cvb, x0, ry, 0x3ca8);
-    DrawNumberTiles(&cvb, x0 + 10, ry, link_rupees_actual, 3);
+    int max_rupees = (enhanced_features0 & kFeatures0_CarryMoreRupees) ? 9999 : 999;  // come MaxRupees (hud.c)
+    DrawNumberTiles(&cvb, x0 + 10, ry, link_rupees_actual, 3, ShowMaxInYellow(link_rupees_actual, max_rupees));
     if (link_num_keys != 0xff) {
       DrawTile(&cvb, x0, ry - 10, 0x2871);
-      DrawNumberTiles(&cvb, x0 + 10, ry - 10, link_num_keys, 1);
+      DrawNumberTiles(&cvb, x0 + 10, ry - 10, link_num_keys, 1, false);
     }
   }
 }

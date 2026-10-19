@@ -440,6 +440,7 @@ void ZeldaDrawPpuFrame(uint8 *pixel_buffer, size_t pitch, uint32 render_flags) {
   HdLight_BeforeRender(g_zenv.ppu);
   HdHud_BeforeRender(g_zenv.ppu);
   HdFx_IrisBeforeRender(g_zenv.ppu);
+  HdFx_ShadowsBeforeRender(g_zenv.ppu, 256 + 2 * g_zenv.ppu->extraLeftRight, height);
 
   for (int i = 0; i <= height; i++) {
     if (i == 128 && irq_flag) {
@@ -458,6 +459,7 @@ void ZeldaDrawPpuFrame(uint8 *pixel_buffer, size_t pitch, uint32 render_flags) {
   }
   HdLight_AfterRender(g_zenv.ppu);
   HdFx_IrisAfterRender(g_zenv.ppu);
+  HdFx_ShadowsAfterRender(g_zenv.ppu);
   HdWorld_Composite(pixel_buffer, (int)pitch, 256 + 2 * g_zenv.ppu->extraLeftRight, height);
 
   // Illuminazione dinamica (non sulla mappa del mondo in Mode 7)

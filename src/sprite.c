@@ -1,5 +1,6 @@
 #include "hd_world.h"
 #include "hd_hud.h"
+#include "hd_menu.h"
 #include "sprite.h"
 #include "dungeon.h"
 #include "hud.h"
@@ -1154,6 +1155,11 @@ void Sprite_Main() {  // 868328
   Overlord_Main();
   archery_game_out_of_arrows = 0;
   memset(g_sprite_oam_owner, 0xff, sizeof(g_sprite_oam_owner));
+  // Nome del dungeon sullo schermo: nemici fermi (ma disegnati) con il blocco
+  // del gioco, finche' Link non si muove
+  uint8 saved_freeze = flag_unk1;
+  if (HdMenu_FreezeEnemies())
+    flag_unk1 = 1;
   for (int i = 15; i >= 0; i--) {
     cur_object_index = i;
     // Si segna quali voci OAM scrive ogni nemico (come per Link in
@@ -1170,6 +1176,7 @@ void Sprite_Main() {  // 868328
         WORD(oam_buf[j].charnum) = saved[j];
     }
   }
+  flag_unk1 = saved_freeze;
   Garnish_ExecuteLowerSlots();
   byte_7E069E[0] = byte_7E069E[1] = 0;
   ExecuteCachedSprites();

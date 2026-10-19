@@ -33,7 +33,15 @@ void HdFx_IrisAfterRender(Ppu *ppu);
 void HdFx_SoftIris(uint8 *pixels, int pitch, int width, int height);
 // Cielo e nuvole dietro la Piramide e sul Monte della Morte: lo shader non li dipinge
 void HdFx_MarkBackdrop(uint8 *pixels, int pitch, int width, int height);
-// Ombre morbide sotto personaggi, nemici e oggetti
+// Ombre morbide sotto Link e i nemici che camminano a terra
 void HdFx_SpriteShadows(uint8 *pixels, int pitch, int width, int height);
+// Prima e dopo il disegno della PPU: sceglie gli sprite che fanno ombra e
+// nasconde l'ombra del gioco dei nemici a terra
+void HdFx_ShadowsBeforeRender(Ppu *ppu, int width, int height);
+void HdFx_ShadowsAfterRender(Ppu *ppu);
+// Piove nell'area esterna attuale
+bool HdFx_IsRainingOutdoors(void);
+// Sulla Montagna della Morte: il colore v della palette pal e' nuvola
+bool HdFx_IsCloudColor(int pal, int v);
 
 #endif  // ZELDA3_HD_FX_H_

@@ -6,10 +6,14 @@
 #include "types.h"
 
 // Da' fuoco al cespuglio o all'erba nel punto (x, y) del mondo esterno, se
-// c'e'; poi il fuoco passa piano piano a quelli vicini. true se ha preso fuoco.
-bool HdBurn_Ignite(uint16 x, uint16 y);
+// c'e'; con spread il fuoco passa piano piano a quelli vicini (Bacchetta del
+// Fuoco e Lanterna), senza brucia solo quella tile. true se ha preso fuoco.
+bool HdBurn_Ignite(uint16 x, uint16 y, bool spread);
 // Fa avanzare l'incendio: una volta per frame
 void HdBurn_Update(void);
+// Spegne tutto e dimentica le tile annerite: entrando in una casa o
+// caricando un salvataggio il gioco fa ricrescere tutti i cespugli
+void HdBurn_Reset(void);
 
 // Per il disegno delle fiamme (hd_fx.c) e della loro luce (hd_light.c)
 enum {

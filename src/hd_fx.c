@@ -490,6 +490,12 @@ static bool IsRaining(int mod) {
   return sram_progress_indicator < 2 && si != 3 && si != 5 && si != 7;
 }
 
+// Piove nell'area esterna attuale (anche con l'effetto della pioggia spento):
+// sotto la pioggia il fuoco non attecchisce (hd_burn.c)
+bool HdFx_IsRainingOutdoors(void) {
+  return !player_is_indoors && IsRaining(9);
+}
+
 // Acqua: i pixel del fondale che cadono su caselle d'acqua (profonda 0x08,
 // bassa 0x09) vengono marcati con il layer 7, cosi' lo shader sa dove non
 // mettere le pennellate (in Four Swords l'acqua non le ha).
@@ -513,6 +519,37 @@ static bool IsBackdropScene(void) {
 static bool IsMountainScene(void) {
   int a = BYTE(overworld_screen_index), sc = a & 0x3f;
   return a < 0x80 && (sc == 0x03 || sc == 0x05 || sc == 0x07);
+}
+
+// Colore v della palette pal sulla montagna: le caselle con la palette 3
+// sono il bordo delle nuvole (tutta la casella); in quelle con la palette 7
+// l'interno delle nuvole sono solo i due rosa (colori 13 e 15), gli altri
+// colori sono ponti, pilastri e dirupi
+bool HdFx_IsCloudColor(int pal, int v) {
+  return pal == 3 || (pal == 7 && (v == 13 || v == 15));
+}
+
+// Pixel di nuvola nella riga row della casella e della mappa (bit 7 = primo
+// pixel a sinistra), letti dalla grafica in VRAM come fa la PPU
+static uint8 CloudRowMask(uint16 e, int row) {
+  int pal = e >> 10 & 7;
+  if (pal == 3)
+    return 0xff;
+  if (pal != 7)
+    return 0;
+  Ppu *ppu = g_zenv.ppu;
+  const uint16 *t = &ppu->vram[(ppu->bgLayer[1].tileAdr + (e & 0x3ff) * 16) & 0x7fff];
+  int rr = (e & 0x8000) ? 7 - row : row;
+  uint16 p01 = t[rr], p23 = t[rr + 8];
+  uint8 mask = 0;
+  for (int col = 0; col < 8; col++) {
+    int bit = (e & 0x4000) ? col : 7 - col;
+    int v = (p01 >> bit & 1) | (p01 >> (8 + bit) & 1) << 1 |
+            (p23 >> bit & 1) << 2 | (p23 >> (8 + bit) & 1) << 3;
+    if (HdFx_IsCloudColor(pal, v))
+      mask |= 0x80 >> col;
+  }
+  return mask;
 }
 
 int HdFx_SceneModule(void) {
@@ -547,8 +584,9 @@ int HdFx_SceneModule(void) {
 void HdFx_MarkWater(uint8 *pixels, int pitch, int width, int height, int bias_x, int bias_y) {
   // anche durante il cerchio di transizione e l'arrivo con l'Ocarina:
   // altrimenti lo shader dipingerebbe l'acqua per qualche fotogramma
+  // 11: aree speciali all'aperto (Dominio di Zora, bosco della Spada Suprema...)
   int mod = HdFx_SceneModule();
-  if (mod != 7 && mod != 9)
+  if (mod != 7 && mod != 9 && mod != 11)
     return;
   // sulla Montagna della Morte e alla Piramide il vuoto oltre i dirupi e'
   // "acqua profonda" per il gioco, ma sullo schermo e' il cielo: lo sfondo
@@ -566,7 +604,7 @@ void HdFx_MarkWater(uint8 *pixels, int pitch, int width, int height, int bias_x,
     for (int wy = y0; wy < cam_y + height; wy += 8) {
       for (int wx = x0; wx < cam_x - ext + width; wx += 8) {
         uint8 attr;
-        bool cloud = false;
+        uint16 cloud_e = 0;  // casella della mappa, se puo' contenere nuvole
         if (mod == 7)
           attr = dung_bg2_attr_table[((wy & 0x1f8) << 3) + ((wx & 0x1f8) >> 3) + (layer ? 0 : 0x1000)];
         else if (HdWorld_Active() && (HdWorld_BackgroundFromImages() || !HdWorld_InsideCurrentArea(wx, wy)))
@@ -574,16 +612,22 @@ void HdFx_MarkWater(uint8 *pixels, int pitch, int width, int height, int bias_x,
                      // passaggio la mappa del gioco e' ancora quella dell'area vecchia
         else {
           attr = Overworld_GetTileAttributeAtLocation((uint16)wx >> 3, (uint16)wy);
-          cloud = mountain && (Overworld_GetMap8AtLocation((uint16)wx >> 3, (uint16)wy) >> 10 & 7) == 3;
+          if (mountain) {
+            uint16 e = Overworld_GetMap8AtLocation((uint16)wx >> 3, (uint16)wy);
+            if ((e >> 10 & 7) == 3 || (e >> 10 & 7) == 7)
+              cloud_e = e;
+          }
         }
-        if (!IsWaterAttr(attr) && !cloud)
+        bool water = IsWaterAttr(attr);
+        if (!water && !cloud_e)
           continue;
         for (int y = wy - cam_y; y < wy - cam_y + 8; y++) {
           if (y < 0 || y >= height)
             continue;
           uint32 *row = (uint32 *)(pixels + y * pitch);
+          uint8 mask = water ? 0xff : CloudRowMask(cloud_e, (y + cam_y) & 7);
           for (int x = wx - cam_x + ext; x < wx - cam_x + ext + 8; x++) {
-            if (x < 0 || x >= width)
+            if (x < 0 || x >= width || !(mask & 0x80 >> ((x - ext + cam_x) & 7)))
               continue;
             uint32 l = row[x] >> 24;
             // solo il fondale del layer giusto: HUD (2) e personaggi (4, 6) restano
@@ -1015,7 +1059,10 @@ void HdFx_SoftIris(uint8 *pixels, int pitch, int width, int height) {
     return;
   const float kSoft = 8.0f;
   int ext = (width - 256) / 2;
-  float cx = g_hd_iris_x + ext + 0.5f, cy = g_hd_iris_y + 0.5f;
+  // con la vista spostata (mondo continuo) Link, e con lui il centro del
+  // cerchio, si disegna spostato come gli sprite
+  Ppu *ppu = g_zenv.ppu;
+  float cx = g_hd_iris_x - ppu->objBiasX + ext + 0.5f, cy = g_hd_iris_y - ppu->objBiasY + 0.5f;
   float far2 = 0;
   for (int k = 0; k < 4; k++) {
     float dx = (k & 1 ? width : 0) - cx, dy = (k & 2 ? height : 0) - cy;
@@ -1043,13 +1090,128 @@ void HdFx_SoftIris(uint8 *pixels, int pitch, int width, int height) {
 }
 
 // ---------------------------------------------------------------------------
-// Ombre di personaggi, nemici e oggetti: la sagoma di ogni sprite viene
+// Ombre di Link e dei nemici a terra: la sagoma di ogni sprite viene
 // "sdraiata" a terra partendo dai piedi (il pixel piu' basso di ogni colonna),
 // inclinata verso il basso a destra come le ombre dello shader, sfocata e
 // usata per scurire il fondale. Sprite e HUD non vengono scuriti.
+// Fanno ombra solo i pezzi di Link a terra e dei nemici a terra che nel gioco
+// hanno l'ombra: per questi l'ombra del gioco si nasconde. I nemici in volo
+// (o mentre saltano) tengono l'ombra del gioco; effetti, oggetti in volo e
+// resti non fanno ombra. La PPU segna pixel per pixel da quale voce OAM viene
+// lo sprite (objShadowOut).
 
 static float *g_shadow, *g_shadow_tmp;
 static int g_shadow_cap;
+static uint8 *g_shadow_src;   // 1 = lo sprite di questo pixel fa ombra
+static int g_shadow_src_cap;
+static bool g_shadow_src_valid;
+static uint16 g_hidden_oam[128];
+static uint8 g_hidden_idx[128];
+static int g_num_hidden;
+
+extern uint8 g_link_oam_mask[128], g_sprite_oam_owner[128];
+
+// Ombra del gioco (SpriteDraw_Shadow): casella 0x6c (grande) o 0x38 (piccola)
+// della prima tabella, palette 4
+static bool IsGameShadowTile(uint16 oam1) {
+  return (oam1 >> 9 & 7) == 4 && ((oam1 & 0x1ff) == 0x6c || (oam1 & 0x1ff) == 0x38);
+}
+
+// Nemici che non camminano: volano o fluttuano (corvi, avvoltoi, pipistrelli,
+// api, fate, Poe, Bari, Zirro...), stanno in acqua o sui muri, o sono oggetti
+// fissi (interruttori, statue, Beamos, trappole, barre di fuoco). Non fanno
+// l'ombra morbida: tengono quella del gioco, se ce l'hanno.
+static bool IsNotWalkingType(uint8 t) {
+  static const uint8 kTypes[] = {
+    0x00, 0x01, 0x02, 0x15, 0x19, 0x1c, 0x1e, 0x23, 0x24, 0x2d, 0x38, 0x3a, 0x52,
+    0x54, 0x55, 0x59, 0x5b, 0x5c, 0x61, 0x6f, 0x72, 0x79, 0x7d, 0x7e, 0x7f, 0x81,
+    0x82, 0x88, 0x8a, 0x8c, 0x90, 0x95, 0x96, 0x97, 0x98, 0x9a, 0xa0, 0xa2, 0xa3,
+    0xa4, 0xa8, 0xa9, 0xb2, 0xb3, 0xbe, 0xc5, 0xc6, 0xc8, 0xcf, 0xe3,
+  };
+  for (int i = 0; i < (int)sizeof(kTypes); i++)
+    if (kTypes[i] == t)
+      return true;
+  return false;
+}
+
+// Riga dello schermo della voce OAM i (come in ppu_evaluateSprites)
+static int OamScreenY(Ppu *ppu, int i, int bottom) {
+  int yy = ppu->oam[i * 2] >> 8;
+  int sy = ppu->objYValid ? ppu->objY[i] : yy >= bottom ? yy - 256 : yy;
+  return sy - ppu->objBiasY;
+}
+
+void HdFx_ShadowsBeforeRender(Ppu *ppu, int width, int height) {
+  int mod;
+  ppu->objShadowOut = NULL;
+  g_num_hidden = 0;
+  g_shadow_src_valid = false;
+  if (!g_fx_sprite_shadows || !InGameplay(&mod) || ppu->mode == 7)
+    return;
+  int n = width * height;
+  if (n > g_shadow_src_cap) {
+    free(g_shadow_src);
+    g_shadow_src = malloc(n);
+    g_shadow_src_cap = g_shadow_src ? n : 0;
+    if (!g_shadow_src)
+      return;
+  }
+  memset(g_shadow_src, 0, n);
+  bool link_on_ground = (int16)link_z_coord <= 0;
+  // Per ogni nemico: dov'e' la sua ombra del gioco e dove finisce il corpo.
+  // Un nemico che cammina e' a terra se non e' in aria (sprite_z) e, quando
+  // ha l'ombra del gioco, se questa tocca i piedi: in volo fra corpo e ombra
+  // c'e' spazio, anche per chi si alza senza usare sprite_z
+  int bottom = height > 224 ? 240 : 224;
+  int shadow_top[16], body_bottom[16];
+  for (int k = 0; k < 16; k++)
+    shadow_top[k] = 1 << 20, body_bottom[k] = -(1 << 20);
+  for (int i = 0; i < 128; i++) {
+    int o = g_sprite_oam_owner[i];
+    if (o >= 16 || g_link_oam_mask[i] || (ppu->oam[i * 2] >> 8) == 0xf0)
+      continue;
+    int y = OamScreenY(ppu, i, bottom);
+    int size = (ppu->oam[0x100 + (i >> 3)] >> ((i & 7) * 2) & 2) ? 16 : 8;
+    if (IsGameShadowTile(ppu->oam[i * 2 + 1])) {
+      if (y < shadow_top[o]) shadow_top[o] = y;
+    } else if (y + size > body_bottom[o]) {
+      body_bottom[o] = y + size;
+    }
+  }
+  bool ground[16];
+  for (int k = 0; k < 16; k++)
+    ground[k] = (sprite_state[k] == 9 || sprite_state[k] == 11) && sprite_type[k] < 0xd8 &&
+                !IsNotWalkingType(sprite_type[k]) && sprite_z[k] == 0 &&
+                (shadow_top[k] == (1 << 20) || shadow_top[k] <= body_bottom[k] + 2);
+  for (int i = 0; i < 128; i++) {
+    bool shadow = IsGameShadowTile(ppu->oam[i * 2 + 1]);
+    int o = g_sprite_oam_owner[i];
+    uint8 cast = 0;
+    if (g_link_oam_mask[i]) {
+      cast = !shadow && link_on_ground;
+    } else if (o < 16 && ground[o]) {
+      if (shadow) {
+        g_hidden_idx[g_num_hidden] = i;
+        g_hidden_oam[g_num_hidden++] = ppu->oam[i * 2];
+        ppu->oam[i * 2] = (ppu->oam[i * 2] & 0xff) | 0xf000;  // y = 0xF0: non si disegna
+        ppu->objShowF0[i] = 0;
+      } else {
+        cast = 1;
+      }
+    }
+    ppu->objCastShadow[i] = cast;
+  }
+  ppu->objShadowOut = g_shadow_src;
+  ppu->objShadowStride = width;
+}
+
+void HdFx_ShadowsAfterRender(Ppu *ppu) {
+  for (int j = 0; j < g_num_hidden; j++)
+    ppu->oam[g_hidden_idx[j] * 2] = g_hidden_oam[j];
+  g_num_hidden = 0;
+  g_shadow_src_valid = ppu->objShadowOut != NULL;
+  ppu->objShadowOut = NULL;
+}
 
 static void BoxBlurF(const float *src, float *dst, int w, int h, int dx, int dy) {
   for (int y = 0; y < h; y++)
@@ -1066,7 +1228,7 @@ static void BoxBlurF(const float *src, float *dst, int w, int h, int dx, int dy)
 
 void HdFx_SpriteShadows(uint8 *pixels, int pitch, int width, int height) {
   int mod;
-  if (!g_fx_sprite_shadows || !InGameplay(&mod))
+  if (!g_fx_sprite_shadows || !InGameplay(&mod) || !g_shadow_src_valid)
     return;
   int n = width * height;
   if (n > g_shadow_cap) {
@@ -1082,12 +1244,12 @@ void HdFx_SpriteShadows(uint8 *pixels, int pitch, int width, int height) {
   for (int x = 0; x < width; x++) {
     int y = 0;
     while (y < height) {
-      if (!IsSprite(*(uint32 *)(pixels + y * pitch + x * 4))) {
+      if (!IsSprite(*(uint32 *)(pixels + y * pitch + x * 4)) || !g_shadow_src[y * width + x]) {
         y++;
         continue;
       }
       int y0 = y;
-      while (y < height && IsSprite(*(uint32 *)(pixels + y * pitch + x * 4)))
+      while (y < height && IsSprite(*(uint32 *)(pixels + y * pitch + x * 4)) && g_shadow_src[y * width + x])
         y++;
       int foot = y - 1;
       // ogni pixel alto h sopra i piedi finisce spostato a destra e in basso

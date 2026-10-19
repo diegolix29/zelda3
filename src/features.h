@@ -71,6 +71,8 @@ enum {
   // Mondo continuo all'esterno: oltre il bordo dell'area si vedono le aree
   // vicine e la vista segue Link fino al bordo e durante il passaggio
   kFeatures0_ContinuousWorld = 1 << 21,
+  // Nome del dungeon al centro dello schermo entrando dal mondo esterno, come su GBA
+  kFeatures0_DungeonNames = 1 << 22,
 };
 
 #define enhanced_features0 (*(uint32*)(g_ram+0x64c))

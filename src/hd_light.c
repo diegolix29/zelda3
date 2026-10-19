@@ -39,6 +39,7 @@ static int g_num_lights;
 // leggibile anche senza Lanterna, le fiamme e la Lanterna fanno il resto
 static const float kDarkAmbient = 0.36f;
 static float g_ambient = 1.0f;        // luce ambiente attuale (si avvicina gradualmente all'obiettivo)
+static int g_ambient_place = -1;      // stanza (o -2 all'aperto) a cui si riferisce g_ambient
 static bool g_dark_override;          // buio originale sospeso durante il disegno
 static uint8 g_saved_fixed[3], g_saved_sub_enabled;
 static float *g_factor;               // fattori di luce per pixel (3 canali)
@@ -326,12 +327,25 @@ static bool IsLavaCell(const uint8 *pixels, int pitch, int width, int height, co
   int ch = tm[row * 64 + col] & 0x3ff;
   if (ch < 0x1b0 || ch > 0x1cf)
     return false;
-  int sx = ox + col * 8 + 4 - cam_x + ext, sy = oy + row * 8 + 4 - cam_y;
-  if (sx < 0 || sy < 0 || sx >= width || sy >= height)
-    return false;
-  uint32 c = ((const uint32 *)(pixels + sy * pitch))[sx];
-  int r = (c >> 16) & 0xff, g = (c >> 8) & 0xff, b = c & 0xff;
-  return r > 120 && r > g + 30 && b < r / 2;  // rosso-arancio: lava (non acqua o altro)
+  // Il colore si legge dallo schermo gia' disegnato: i pixel degli sprite (layer
+  // 4/6) e dell'HUD (layer 2) non dicono niente del fondale e si saltano,
+  // altrimenti una fata rosa o un nemico rosso sopra l'acqua sembrano lava.
+  // Si guardano cinque punti del tile e decide la maggioranza di quelli visibili.
+  static const int8 kPts[5][2] = { {4,4},{1,1},{6,1},{1,6},{6,6} };
+  int seen = 0, red = 0;
+  for (int i = 0; i < 5; i++) {
+    int sx = ox + col * 8 + kPts[i][0] - cam_x + ext, sy = oy + row * 8 + kPts[i][1] - cam_y;
+    if (sx < 0 || sy < 0 || sx >= width || sy >= height)
+      continue;
+    uint32 c = ((const uint32 *)(pixels + sy * pitch))[sx];
+    uint32 l = c >> 24;
+    if (l == 2 || l == 4 || l == 6)
+      continue;
+    int r = (c >> 16) & 0xff, g = (c >> 8) & 0xff, b = c & 0xff;
+    seen++;
+    red += r > 120 && r > g + 30 && b < r / 2;  // rosso-arancio: lava (non acqua o altro)
+  }
+  return seen && red * 2 > seen;
 }
 
 static void CollectLavaLights(const uint8 *pixels, int pitch, int width, int height,
@@ -407,6 +421,7 @@ void HdLight_Apply(uint8 *pixels, int pitch, int width, int height, int bias_x, 
   g_hd_num_fire = 0;
   if (!InGameplay(&mod) || (!g_dynamic_light && !g_fx_embers)) {
     g_ambient = 1.0f;
+    g_ambient_place = -1;
     return;
   }
   bool dark = IsDarkRoom(mod);
@@ -425,6 +440,13 @@ void HdLight_Apply(uint8 *pixels, int pitch, int width, int height, int bias_x, 
     target = 0.86f;  // labirinti: un po' piu' scuri
   }
   // Transizione morbida (circa un secondo per accendere tutta la stanza)
+  // solo dentro la stessa stanza, accendendo le torce: entrando in una stanza
+  // o in una grotta la luce e' subito quella giusta (una stanza buia parte buia)
+  int place = mod == 7 ? dungeon_room_index : -2;
+  if (place != g_ambient_place) {
+    g_ambient_place = place;
+    g_ambient = target;
+  }
   g_ambient += (target - g_ambient) * 0.06f;
   if (fabsf(target - g_ambient) < 0.003f)
     g_ambient = target;

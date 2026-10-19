@@ -2508,11 +2508,12 @@ void LinkItem_Lamp() {  // 87a24d
     AncillaAdd_MagicPowder(0x1a, 0);
     Dungeon_LightTorch();
     AncillaAdd_LampFlame(0x2f, 2);
-    // incendia il cespuglio o l'erba davanti a Link
+    // incendia il cespuglio o l'erba davanti a Link (una sola tile: poi il
+    // fuoco passa da solo a quelle vicine)
     if (!player_is_indoors) {
       Point16U pt;
       Overworld_GetLinkMap16Coords(&pt);
-      HdBurn_Ignite(pt.x, pt.y);
+      HdBurn_Ignite(pt.x, pt.y, true);
     }
   }
   link_item_in_hand = 0;
@@ -2521,6 +2522,26 @@ void LinkItem_Lamp() {  // 87a24d
   link_cant_change_direction = 0;
   if (button_b_frames == 9)
     link_speed_setting = 0;
+}
+
+// Polvere Magica ("Spada e oggetti interazione ambiente"): finita la nuvola
+// rompe il cespuglio o il vaso davanti a Link, uno solo, nel punto che usa la
+// spada (kDoSwordInteractionWithTiles) e con la stessa animazione: foglie e
+// vaso in pezzi, senza lo sbuffo di AncillaAdd_BushPoof, che compare solo con
+// la polvere in mano
+static void MagicPowder_SmashTile(void) {
+  static const int8 kSwordTile_X[4] = { 6, 8, -1, 22 }, kSwordTile_Y[4] = { 4, 28, 16, 16 };
+  if (!(enhanced_features0 & kFeatures0_SwordAndItems))
+    return;
+  int d = link_direction_facing >> 1 & 3;
+  uint16 x = link_x_coord + kSwordTile_X[d], y = link_y_coord + kSwordTile_Y[d];
+  uint8 in_hand = link_item_in_hand;
+  link_item_in_hand = 0;
+  if (player_is_indoors)
+    Dungeon_SmashPotAtPos((link_is_on_lower_level ? 0x1000 : 0) + ((x & 0x1f8) >> 3) + ((y & 0x1f8) << 3));
+  else
+    Overworld_PowderSmash(x, y);
+  link_item_in_hand = in_hand;
 }
 
 void LinkItem_Powder() {  // 87a293
@@ -2553,8 +2574,10 @@ void LinkItem_Powder() {  // 87a293
     AncillaAdd_MagicPowder(26, 0);
   if (player_handler_timer != 9)
     return;
-  if (submodule_index == 0)
+  if (submodule_index == 0) {
+    MagicPowder_SmashTile();
     TileDetect_MainHandler(1);
+  }
 out:
   link_item_in_hand = 0;
   player_handler_timer = 0;

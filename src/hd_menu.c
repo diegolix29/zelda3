@@ -45,6 +45,7 @@ typedef struct MenuItem {
 // Testi del menu: scritti in italiano, in inglese con le altre lingue
 static const char *Tr(const char *it);
 static bool IsItalian();
+static void UpdateDungeonName(void);
 
 static bool g_menu_open;
 static int g_page;
@@ -80,6 +81,7 @@ static const FeatureOption kFeatureOptions[] = {
   { "Mondo continuo all'esterno", "ContinuousWorld", kFeatures0_ContinuousWorld },
   { "HUD moderno", "ModernHud", kFeatures0_ModernHud },
   { "Oggetti X, L, R nell'HUD", "ShowXLRItemsInHud", kFeatures0_ShowXLRItemsInHud },
+  { "Nomi dei dungeon", "DungeonNames", kFeatures0_DungeonNames },
   { "Cambio oggetti con L e R", "ItemSwitchLR", kFeatures0_SwitchLR },
   { "Spada e oggetti interazione ambiente", "SwordAndItemsInteraction", kFeatures0_SwordAndItems },
   { "Sterza durante lo scatto", "TurnWhileDashing", kFeatures0_TurnWhileDashing },
@@ -345,6 +347,7 @@ static int g_autosave_last_key = -1;
 enum { kSaveIconFrames = 120 };
 
 void HdMenu_AfterFrame(bool is_replay) {
+  UpdateDungeonName();
   if (g_message_timer)
     g_message_timer--;
   if (g_save_icon_timer)
@@ -436,6 +439,7 @@ static const char *Tr(const char *it) {
     { "Mondo continuo all'esterno", "Continuous overworld" },
     { "HUD moderno", "Modern HUD" },
     { "Oggetti X, L, R nell'HUD", "X, L, R items in the HUD" },
+    { "Nomi dei dungeon", "Dungeon names" },
     { "Cambio oggetti con L e R", "Switch items with L and R" },
     { "Spada e oggetti interazione ambiente", "Sword and items interaction" },
     { "Sterza durante lo scatto", "Turn while dashing" },
@@ -476,7 +480,7 @@ static const char *Tr(const char *it) {
     { "Bagliore degli oggetti ricevuti", "Glow of received items" },
     { "Calore sopra la lava", "Heat haze over lava" },
     { "Pioggia e lampi migliorati", "Improved rain and lightning" },
-    { "Sfocatura dietro menu e dialoghi", "Blur behind menus and dialogues" },
+    { "Sfocatura dietro menu", "Blur behind menus" },
     { "Ombre di personaggi e nemici", "Shadows of characters and enemies" },
     { "Cerchio di transizione morbido", "Soft transition circle" },
     { "Suggerimenti dei tasti", "Button hints" },
@@ -672,7 +676,7 @@ static void BuildItems() {
     AddItem(9, "Bagliore degli oggetti ricevuti", YesNo(g_config.fx_item_glow));
     AddItem(10, "Calore sopra la lava", YesNo(g_config.fx_heat_haze));
     AddItem(11, "Pioggia e lampi migliorati", YesNo(g_config.fx_rain));
-    AddItem(12, "Sfocatura dietro menu e dialoghi", YesNo(g_config.fx_menu_blur));
+    AddItem(12, "Sfocatura dietro menu", YesNo(g_config.fx_menu_blur));
     AddItem(13, "Ombre di personaggi e nemici", YesNo(g_config.fx_sprite_shadows));
     AddItem(14, "Cerchio di transizione morbido", YesNo(g_config.fx_soft_iris));
     AddItem(15, "Suggerimenti dei tasti", YesNo(g_config.fx_button_hints));
@@ -1209,6 +1213,215 @@ static void DrawDungeonMapStatus(Canvas *cv) {
   DrawText(cv, x, cv->height - 20, name, 0xf8f8f8);
 }
 
+// Nome del dungeon al centro dello schermo appena Link ci entra dal mondo
+// esterno, come su GBA; sparisce appena Link si muove. Carattere ricavato
+// dalla versione GBA: maiuscole alte 10, minuscole 8, contorno nero.
+static const char *const kGbaFont[] = {
+  "A.##.|#..#|#..#|#..#|####|#..#|#..#|#..#|#..#|#..#",
+  "B###.|#..#|#..#|#..#|###.|#..#|#..#|#..#|#..#|###.",
+  "C.##.|#..#|#...|#...|#...|#...|#...|#...|#..#|.##.",
+  "D###.|#..#|#..#|#..#|#..#|#..#|#..#|#..#|#..#|###.",
+  "E####|#...|#...|#...|###.|#...|#...|#...|#...|####",
+  "F####|#...|#...|#...|###.|#...|#...|#...|#...|#...",
+  "G.##.|#..#|#...|#...|#...|#.##|#..#|#..#|#..#|.###",
+  "H#..#|#..#|#..#|#..#|####|#..#|#..#|#..#|#..#|#..#",
+  "I###|.#.|.#.|.#.|.#.|.#.|.#.|.#.|.#.|###",
+  "J..##|...#|...#|...#|...#|...#|...#|#..#|#..#|.##.",
+  "K#..#|#..#|#.#.|#.#.|##..|##..|#.#.|#.#.|#..#|#..#",
+  "L#...|#...|#...|#...|#...|#...|#...|#...|#...|####",
+  "M#...#|##.##|#.#.#|#.#.#|#...#|#...#|#...#|#...#|#...#|#...#",
+  "N#..#|##.#|##.#|##.#|#.##|#.##|#.##|#..#|#..#|#..#",
+  "O.##.|#..#|#..#|#..#|#..#|#..#|#..#|#..#|#..#|.##.",
+  "P###.|#..#|#..#|#..#|#..#|###.|#...|#...|#...|#...",
+  "Q.##.|#..#|#..#|#..#|#..#|#..#|#..#|#.##|#..#|.##.",
+  "R###.|#..#|#..#|#..#|###.|#.#.|#..#|#..#|#..#|#..#",
+  "S.##.|#..#|#...|#...|.##.|...#|...#|...#|#..#|.##.",
+  "T#####|..#..|..#..|..#..|..#..|..#..|..#..|..#..|..#..|..#..",
+  "U#..#|#..#|#..#|#..#|#..#|#..#|#..#|#..#|#..#|.##.",
+  "V#...#|#...#|#...#|#...#|.#.#.|.#.#.|.#.#.|.#.#.|..#..|..#..",
+  "W#...#|#...#|#...#|#...#|#.#.#|#.#.#|#.#.#|#.#.#|##.##|#...#",
+  "X#..#|#..#|#..#|.##.|.##.|.##.|.##.|#..#|#..#|#..#",
+  "Y#...#|#...#|.#.#.|.#.#.|..#..|..#..|..#..|..#..|..#..|..#..",
+  "Z####|...#|...#|..#.|..#.|.#..|.#..|#...|#...|####",
+  "a....|....|###.|...#|..##|.#.#|#..#|#..#|#.##|.#.#",
+  "b#...|#...|#.#.|##.#|#..#|#..#|#..#|#..#|##.#|#.#.",
+  "c....|....|.##.|#..#|#...|#...|#...|#...|#..#|.##.",
+  "d...#|...#|.#.#|#.##|#..#|#..#|#..#|#..#|#.##|.#.#",
+  "e....|....|.##.|#..#|#..#|####|#...|#...|#..#|.##.",
+  "f.##|.#.|###|.#.|.#.|.#.|.#.|.#.|.#.|.#.",
+  "g....|....|.###|#..#|#..#|#..#|#..#|#..#|.###|...#|...#|###.",
+  "h#...|#...|#.#.|##.#|#..#|#..#|#..#|#..#|#..#|#..#",
+  "i#|.|#|#|#|#|#|#|#|#",
+  "j.#|..|.#|.#|.#|.#|.#|.#|.#|.#|.#|#.",
+  "k#...|#...|#..#|#..#|#.#.|##..|##..|#.#.|#..#|#..#",
+  "l#|#|#|#|#|#|#|#|#|#",
+  "m.....|.....|##.#.|#.#.#|#.#.#|#.#.#|#.#.#|#.#.#|#.#.#|#.#.#",
+  "n....|....|#.#.|##.#|#..#|#..#|#..#|#..#|#..#|#..#",
+  "o....|....|.##.|#..#|#..#|#..#|#..#|#..#|#..#|.##.",
+  "p....|....|#.#.|##.#|#..#|#..#|#..#|#..#|##.#|#.#.|#...|#...",
+  "q....|....|.#.#|#.##|#..#|#..#|#..#|#..#|#.##|.#.#|...#|...#",
+  "r....|....|#.##|##..|#...|#...|#...|#...|#...|#...",
+  "s....|....|.##.|#..#|##..|.##.|..##|...#|#..#|.##.",
+  "t.#..|.#..|####|.#..|.#..|.#..|.#..|.#..|.#..|..##",
+  "u....|....|#..#|#..#|#..#|#..#|#..#|#..#|#.##|.#.#",
+  "v.....|.....|#...#|#...#|#...#|.#.#.|.#.#.|.#.#.|..#..|..#..",
+  "w.....|.....|#...#|#...#|#.#.#|#.#.#|#.#.#|#.#.#|#.#.#|.#.#.",
+  "x....|....|#..#|#..#|.##.|.##.|.##.|.##.|#..#|#..#",
+  "y....|....|#..#|#..#|#..#|#..#|#..#|#..#|.###|...#|...#|###.",
+  "z....|....|####|...#|...#|..#.|.#..|#...|#...|####",
+  "0.##.|#..#|#..#|#..#|#..#|#..#|#..#|#..#|#..#|.##.",
+  "1.#.|##.|.#.|.#.|.#.|.#.|.#.|.#.|.#.|###",
+  "2.##.|#..#|#..#|...#|..#.|.#..|#...|#...|#...|####",
+  "3.##.|#..#|#..#|...#|.##.|...#|...#|#..#|#..#|.##.",
+  "4..#.|.##.|.##.|#.#.|#.#.|#.#.|####|..#.|..#.|..#.",
+  "5####|#...|#...|###.|...#|...#|...#|#..#|#..#|.##.",
+  "6.##.|#..#|#...|#...|###.|#..#|#..#|#..#|#..#|.##.",
+  "7####|...#|...#|..#.|..#.|..#.|.#..|.#..|.#..|.#..",
+  "8.##.|#..#|#..#|#..#|.##.|#..#|#..#|#..#|#..#|.##.",
+  "9.##.|#..#|#..#|#..#|#..#|.###|...#|...#|#..#|.##.",
+  "'##|##|.#|#.",
+  " ....",
+};
+
+static const char *GbaGlyph(char c) {
+  for (int i = 0; i < (int)(sizeof(kGbaFont) / sizeof(kGbaFont[0])); i++)
+    if (kGbaFont[i][0] == c)
+      return kGbaFont[i] + 1;
+  return NULL;
+}
+
+static int GbaGlyphWidth(const char *g) {
+  int w = 0;
+  while (g[w] && g[w] != '|')
+    w++;
+  return w;
+}
+
+// pass 0 = contorno nero, pass 1 = lettere bianche
+static void GbaText(Canvas *cv, int x, int y, const char *s, int pass) {
+  for (; *s; s++) {
+    const char *g = GbaGlyph(*s);
+    if (!g)
+      continue;
+    int w = GbaGlyphWidth(g);
+    for (int r = 0, c = 0; *g; g++) {
+      if (*g == '|') {
+        r++, c = 0;
+        continue;
+      }
+      if (*g == '#') {
+        if (pass == 0) {
+          for (int dy = -1; dy <= 1; dy++)
+            for (int dx = -1; dx <= 1; dx++)
+              Canvas_Pixel(cv, x + c + dx, y + r + dy, 0x000000);
+        } else {
+          Canvas_Pixel(cv, x + c, y + r, 0xf8f8f8);
+        }
+      }
+      c++;
+    }
+    x += w + 2;
+  }
+}
+
+// Porte dei dungeon che mostrano il nome (indice di which_entrance), con il
+// livello dei dungeon del Mondo delle Tenebre (0 = senza livello). Castello di
+// Hyrule, torre di Agahnim, sala del boss del Deserto e cadute restano senza nome.
+typedef struct DungeonEntry {
+  uint8 entrance, level;
+  const char *name;
+} DungeonEntry;
+
+static const DungeonEntry kDungeonEntries[] = {
+  { 0x08, 0, "Palazzo dell'Est" },
+  { 0x09, 0, "Castello di Sabbia" },
+  { 0x0a, 0, "Castello di Sabbia" },
+  { 0x0b, 0, "Castello di Sabbia" },
+  { 0x33, 0, "Torre di Hera" },
+  { 0x26, 1, "Palazzo Cupo" },
+  { 0x25, 2, "Dedalo d'Acqua" },
+  { 0x28, 3, "Bosco d'Ossa" },
+  { 0x29, 3, "Bosco d'Ossa" },
+  { 0x2a, 3, "Bosco d'Ossa" },
+  { 0x2b, 3, "Bosco d'Ossa" },
+  { 0x34, 4, "Villaggio dei Ladroni" },
+  { 0x2d, 5, "Forte Ghiaccio" },
+  { 0x27, 6, "Malapalude" },
+  { 0x35, 7, "Rocca Tartaruga" },
+  { 0x15, 7, "Rocca Tartaruga" },
+  { 0x18, 7, "Rocca Tartaruga" },
+  { 0x19, 7, "Rocca Tartaruga" },
+  { 0x37, 8, "Torre di Ganon" },
+};
+
+static const DungeonEntry *g_dungeon_name;
+static bool g_dungeon_name_armed;
+static uint16 g_dungeon_name_x, g_dungeon_name_y;
+
+void HdMenu_ShowDungeonName(void) {
+  g_dungeon_name = NULL;
+  g_dungeon_name_armed = false;
+  for (int i = 0; i < countof(kDungeonEntries); i++)
+    if (kDungeonEntries[i].entrance == which_entrance)
+      g_dungeon_name = &kDungeonEntries[i];
+}
+
+static int GbaTextWidth(const char *s) {
+  int w = -2;
+  for (; *s; s++) {
+    const char *g = GbaGlyph(*s);
+    if (g)
+      w += GbaGlyphWidth(g) + 2;
+  }
+  return w;
+}
+
+// Riga di testo centrata, con il contorno
+static void GbaTextCentered(Canvas *cv, int y, const char *s) {
+  int x = (cv->width - GbaTextWidth(s)) / 2;
+  GbaText(cv, x, y, s, 0);
+  GbaText(cv, x, y, s, 1);
+}
+
+// Dopo ogni frame: la scritta resta finche' Link non si muove dal punto in cui
+// e' comparso nel dungeon
+static void UpdateDungeonName(void) {
+  if (!(enhanced_features0 & kFeatures0_DungeonNames))
+    g_dungeon_name = NULL;
+  if (!g_dungeon_name)
+    return;
+  int mod = main_module_index;
+  // Entrata e caricamento: si aspetta il dungeon
+  if (mod == 15 || mod == 6)
+    return;
+  if (mod != 7) {
+    g_dungeon_name = NULL;
+  } else if (!g_dungeon_name_armed) {
+    g_dungeon_name_armed = true;
+    g_dungeon_name_x = link_x_coord;
+    g_dungeon_name_y = link_y_coord;
+  } else if (link_x_coord != g_dungeon_name_x || link_y_coord != g_dungeon_name_y) {
+    g_dungeon_name = NULL;
+  }
+}
+
+bool HdMenu_FreezeEnemies(void) {
+  return g_dungeon_name && g_dungeon_name_armed && main_module_index == 7;
+}
+
+static void DrawDungeonEntryName(Canvas *cv) {
+  if (!HdMenu_FreezeEnemies() || submodule_index != 0 || (INIDISP_copy & 0x8f) != 0x0f)
+    return;  // ancora in dissolvenza o in un passaggio
+  // Come su GBA: il nome poco sopra il centro, il livello una riga sopra
+  int y = cv->height / 2 - 1;
+  GbaTextCentered(cv, y, Tr(g_dungeon_name->name));
+  if (g_dungeon_name->level) {
+    char buf[16];
+    snprintf(buf, sizeof(buf), "%s %d", IsItalian() ? "Livello" : "Level", g_dungeon_name->level);
+    GbaTextCentered(cv, y - 16, buf);
+  }
+}
+
 void HdMenu_Draw(uint8 *pixels, int pitch, int width, int height, int scale) {
   Canvas cv = { pixels, pitch, width / scale, height / scale, scale };
   if (!g_menu_open) {
@@ -1216,6 +1429,7 @@ void HdMenu_Draw(uint8 *pixels, int pitch, int width, int height, int scale) {
       Font_Load();
     HdHud_Draw(pixels, pitch, width, height, scale);
     DrawDungeonMapStatus(&cv);
+    DrawDungeonEntryName(&cv);
     DrawSaveIcon(&cv);
     DrawInventoryLetterOutlines(&cv);
     DrawButtonHints(&cv);

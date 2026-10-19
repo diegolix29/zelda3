@@ -832,8 +832,8 @@ static void FireRodShot_BurnAhead(int k) {
     return;
   int d = ancilla_dir[k] & 3;
   uint16 x = Ancilla_GetX(k), y = Ancilla_GetY(k);
-  HdBurn_Ignite(x + kProbe8_X[d], y + kProbe8_Y[d]);
-  HdBurn_Ignite(x + kProbe12_X[d], y + kProbe12_Y[d]);
+  HdBurn_Ignite(x + kProbe8_X[d], y + kProbe8_Y[d], true);
+  HdBurn_Ignite(x + kProbe12_X[d], y + kProbe12_Y[d], true);
 }
 
 void Ancilla02_FireRodShot(int k) {  // 8886d2
@@ -1272,6 +1272,14 @@ void Ancilla_MoveZ(int k) {  // 8890b7
   ancilla_z_subpixel[k] = t, ancilla_z[k] = t >> 8;
 }
 
+// Il Boomerang Magico (ancilla_G = 1) taglia cespugli ed erba alta che
+// attraversa (Overworld_BoomerangCut): -1 niente, 0 tagliato, 1 c'era qualcosa
+static int Boomerang_CutGrass(int k) {
+  if (!(enhanced_features0 & kFeatures0_SwordAndItems) || !ancilla_G[k] || player_is_indoors)
+    return -1;
+  return Overworld_BoomerangCut(Ancilla_GetX(k) + 8, Ancilla_GetY(k) + 8);
+}
+
 void Ancilla05_Boomerang(int k) {  // 8890fc
   int hit_spr;
   static const int8 kBoomerang_X0[8] = {0, 0, -8, 8, 8, 8, -8, -8};
@@ -1323,11 +1331,13 @@ void Ancilla05_Boomerang(int k) {  // 8890fc
     ancilla_x_vel[k] += ancilla_K[k];
   Ancilla_MoveX(k);
   hit_spr = Ancilla_CheckSpriteCollision(k);
+  int cut = Boomerang_CutGrass(k);
 
   if (!ancilla_item_to_link[k]) {
-    if (hit_spr >= 0) {
+    // dopo un cespuglio che nascondeva qualcosa torna indietro (e lo raccoglie)
+    if (hit_spr >= 0 || cut > 0) {
       ancilla_item_to_link[k] ^= 1;
-    } else if (Ancilla_CheckTileCollision(k)) {
+    } else if (cut < 0 && Ancilla_CheckTileCollision(k)) {
       AncillaAdd_BoomerangWallClink(k);
       Ancilla_Sfx2_Pan(k, (ancilla_tile_attr[k] == 0xf0) ? 6 : 5);
       ancilla_item_to_link[k] ^= 1;

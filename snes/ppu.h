@@ -64,6 +64,13 @@ struct Ppu {
   // Sprite sempre davanti agli strati (mentre il fondale arriva da altrove)
   bool objOnTop;
   int16_t objY[128], objX[128];
+  // Ombre morbide (hd_fx.c): per ogni voce OAM se fa ombra e, per ogni pixel
+  // del fotogramma (objShadowStride per riga), se lo sprite disegnato li'
+  // viene da una di quelle voci. objShadowOut = NULL: non serve
+  uint8_t objCastShadow[128];
+  uint8_t *objShadowOut;
+  int objShadowStride;
+  uint8_t objShadowLine[kPpuXPixels];
   float mode7PerspectiveLow, mode7PerspectiveHigh;
   // Spostamento visivo della telecamera fluida (non tocca la logica di gioco)
   int16_t bgBiasX, bgBiasY, objBiasX, objBiasY;

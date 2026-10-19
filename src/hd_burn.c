@@ -17,6 +17,7 @@
 #include "sprite.h"
 #include "misc.h"
 #include "ancilla.h"
+#include "hd_fx.h"
 
 enum {
   kMaxPending = 128,
@@ -45,7 +46,7 @@ typedef struct Pending {
 static Pending g_pending[kMaxPending];
 static int g_num_pending;
 static HdBurnTile g_burning[kMaxBurning];
-static uint8 g_spread_at[kMaxBurning];
+static uint8 g_spread_at[kMaxBurning];  // 0xff: non passa il fuoco ai vicini
 static int g_num_burning;
 static HdBurnTile g_scorched[kMaxScorched];
 static int g_num_scorched;
@@ -111,7 +112,7 @@ static void Queue(uint16 x, uint16 y, uint8 timer) {
 }
 
 // La tile (gia' allineata a 16) prende fuoco
-static bool StartBurning(uint16 x, uint16 y) {
+static bool StartBurning(uint16 x, uint16 y, bool spread) {
   if (!IsBurnable(x, y) || IsBurning(x, y) || g_num_burning >= kMaxBurning)
     return false;
   if (g_burn_area != overworld_area_index) {
@@ -120,7 +121,7 @@ static bool StartBurning(uint16 x, uint16 y) {
   }
   int i = g_num_burning++;
   g_burning[i] = (HdBurnTile){ x, y, 0, (uint8)Rand(256), (uint8)overworld_area_index };
-  g_spread_at[i] = kSpreadAt + Rand(kSpreadAtRand);
+  g_spread_at[i] = spread ? kSpreadAt + Rand(kSpreadAtRand) : 0xff;
   if (g_sfx_timer == 0) {
     sound_effect_1 = CalculateSfxPan(x) | 0x2a;
     g_sfx_timer = 12;
@@ -203,15 +204,21 @@ static void BurnOut(uint16 x, uint16 y) {
   g_scorched[g_num_scorched++] = (HdBurnTile){ x, y, 0, (uint8)Rand(256), (uint8)overworld_area_index };
 }
 
-bool HdBurn_Ignite(uint16 x, uint16 y) {
-  if (player_is_indoors || !(enhanced_features0 & kFeatures0_SwordAndItems))
+bool HdBurn_Ignite(uint16 x, uint16 y, bool spread) {
+  // sotto la pioggia il fuoco non attecchisce
+  if (player_is_indoors || !(enhanced_features0 & kFeatures0_SwordAndItems) || HdFx_IsRainingOutdoors())
     return false;
-  return StartBurning(x & ~0xf, y & ~0xf);
+  return StartBurning(x & ~0xf, y & ~0xf, spread);
+}
+
+void HdBurn_Reset(void) {
+  ClearAll();
+  g_num_scorched = 0;
 }
 
 void HdBurn_Update(void) {
   if (player_is_indoors) {
-    ClearAll();
+    HdBurn_Reset();
     return;
   }
   // Il fuoco si ferma durante menu e transizioni
@@ -256,7 +263,7 @@ void HdBurn_Update(void) {
   }
   g_num_pending = n;
   for (int i = 0; i < num_ready; i++)
-    StartBurning(ready[i].x, ready[i].y);
+    StartBurning(ready[i].x, ready[i].y, true);
 
   // Tile in fiamme: passano il fuoco ai vicini, poi si spengono
   n = 0;

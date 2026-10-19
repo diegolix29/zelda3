@@ -3,6 +3,7 @@
 
 #include "variables.h"
 #include "messaging.h"
+#include "hud_it.h"
 
 enum {
   kNewStyleInventory = 1,
@@ -927,6 +928,10 @@ const uint16 *Hud_GetItemIconTiles(int item) {
   return Hud_GetIconForItem(item)->v;
 }
 
+bool Hud_HaveItem(int item) {
+  return Hud_DoWeHaveThisItem(item);
+}
+
 const uint16 *Hud_GetSwordIconTiles(void) {
   return kHudItemSword[link_sword_type == 0xff || link_sword_type > 4 ? 0 : link_sword_type].v;
 }
@@ -1024,8 +1029,12 @@ void Hud_DrawYButtonItems() {  // 8de3d9
   int lx = kNewStyleInventory ? 0 : 2;
   dst[HUDXY(lx, 6)] = kEquipmentLetterTiles[btn_index][0];
   dst[HUDXY(lx, 7)] = kEquipmentLetterTiles[btn_index][1];
-  dst[HUDXY(x + 2, 5)] = 0x246E;
-  dst[HUDXY(x + 3, 5)] = 0x246F;
+  if (HudIt_Active()) {
+    HudIt_DrawLabel(dst + HUDXY(x + 2, 5), kHudItLabel_Item);
+  } else {
+    dst[HUDXY(x + 2, 5)] = 0x246E;
+    dst[HUDXY(x + 3, 5)] = 0x246F;
+  }
 
   for (int i = 0; i < kHudItemCount; i++) {
     Hud_DrawItem(dst + kHudItemInVramPtr[i], Hud_GetIconForItem(Hud_SlotItem(i)));
@@ -1050,28 +1059,39 @@ void Hud_DrawAbilityBox() {  // 8de6b6
   uint16 *dst = uvram_screen.row[0].col;
   int x = kNewStyleInventory ? 0 : 1;
 
-  Hud_DrawBox(dst, x, 21, 19, 29, 1);
+  // largo come il riquadro degli oggetti sopra (Hud_DrawYButtonItems)
+  Hud_DrawBox(dst, x, 21, 20 - x, 29, 1);
 
   uint8 flags = link_ability_flags;
   for (int i = 0; i < 2; i++, flags <<= 1) {
     for (int j = 0; j < 3; j++, flags <<= 1) {
-      if (flags & 0x80)
+      if (flags & 0x80) {
         Hud_DrawNxN(dst + HUDXY(4 + j * 5, 22 + i * 2), kHudAbilityText + i * 40 + j * 10, 5, 2);
+        if (HudIt_Active())
+          HudIt_DrawAbility(dst + HUDXY(4 + j * 5, 23 + i * 2), i * 3 + j, 1);
+      }
     }
   }
   // A (rossa): nel riquadro a 6 colonne sta sul bordo sinistro
   dst[HUDXY(kNewStyleInventory ? 0 : 2, 22)] = 0xA4F0;
   dst[HUDXY(kNewStyleInventory ? 0 : 2, 23)] = 0x24F2;
   // DO text
-  dst[HUDXY(x + 2, 21)] = 0x2482;
-  dst[HUDXY(x + 3, 21)] = 0x2483;
+  if (HudIt_Active()) {
+    HudIt_DrawLabel(dst + HUDXY(x + 2, 21), kHudItLabel_Do);
+  } else {
+    dst[HUDXY(x + 2, 21)] = 0x2482;
+    dst[HUDXY(x + 3, 21)] = 0x2483;
+  }
 
   Hud_DrawItem(dst + HUDXY(8, 27), &kHudItemGloves[link_item_gloves]);
   Hud_DrawItem(dst + HUDXY(4, 27), &kHudItemBoots[link_item_boots]);
   Hud_DrawItem(dst + HUDXY(12, 27), &kHudItemFlippers[link_item_flippers]);
   Hud_DrawItem(dst + HUDXY(16, 27), &kHudItemMoonPearl[link_item_moon_pearl]);
-  if (link_item_gloves)
+  if (link_item_gloves) {
     Hud_DrawNxN(dst + HUDXY(4, 22), kHudGlovesText + (link_item_gloves != 1) * 10, 5, 2);
+    if (HudIt_Active())
+      HudIt_DrawAbility(dst + HUDXY(4, 23), 0, link_item_gloves != 1 ? 3 : 2);
+  }
 }
 
 void Hud_DrawProgressIcons() {  // 8de9c8
@@ -1107,6 +1127,8 @@ void Hud_DrawProgressIcons_Pendants() {  // 8de9d3
   };
   uint16 *dst = uvram_screen.row[0].col + (kNewStyleInventory ? HUDXY(22, 11) : HUDXY(21, 11));
   Hud_DrawNxN(dst, kProgressIconPendantsBg, 10, 9);
+  if (HudIt_Active())
+    HudIt_DrawLabel(dst + HUDXY(1, 1), kHudItLabel_Pendants);
   Hud_DrawItem(dst + HUDXY(4, 3), &kHudPendants0[(link_which_pendants >> 0) & 1]);
   Hud_DrawItem(dst + HUDXY(2, 6), &kHudPendants1[(link_which_pendants >> 1) & 1]);
   Hud_DrawItem(dst + HUDXY(6, 6), &kHudPendants2[(link_which_pendants >> 2) & 1]);
@@ -1127,6 +1149,8 @@ void Hud_DrawProgressIcons_Crystals() {  // 8dea62
 
   uint16 *dst = uvram_screen.row[0].col + (kNewStyleInventory ? HUDXY(22, 11) : HUDXY(21, 11));
   Hud_DrawNxN(dst, kProgressIconCrystalsBg, 10, 9);
+  if (HudIt_Active())
+    HudIt_DrawLabel(dst + HUDXY(1, 1), kHudItLabel_Crystals);
 
   uint8 f = link_has_crystals;
   if (f & 1) {
@@ -1254,7 +1278,10 @@ void Hud_DrawSelectedYButtonItem() {  // 8deb3a
   } else {
     src_p = &kHudItemText[(item - 1) * 16];
   }
-  Hud_DrawNxN(dst_box + HUDXY(22, 8), src_p, 8, 2);
+  if (HudIt_Active())
+    HudIt_DrawItemName(dst_box + HUDXY(22, 8), item, btn_index);
+  else
+    Hud_DrawNxN(dst_box + HUDXY(22, 8), src_p, 8, 2);
 }
 
 void Hud_DrawEquipmentBox() {  // 8ded29
@@ -1272,6 +1299,12 @@ void Hud_DrawEquipmentBox() {  // 8ded29
   };
   memcpy(dst + HUDXY(22, 22), &kHudEquipmentDungeonItemText[0], 8 * sizeof(uint16));
   memcpy(dst + HUDXY(22, 26), &kHudEquipmentDungeonItemText[8], 8 * sizeof(uint16));
+  if (HudIt_Active()) {
+    for (int i = 0; i < 8; i++)
+      dst[HUDXY(22 + i, 22)] = dst[HUDXY(22 + i, 26)] = 0x24F5;
+    HudIt_DrawLabel(dst + HUDXY(22, 22), kHudItLabel_Equipment);
+    HudIt_DrawLabel(dst + HUDXY(22, 26), kHudItLabel_Dungeon);
+  }
 
   static const ItemBoxGfx kHudItemHeartPieces[4] = {
     {{0x2484, 0x6484, 0x2485, 0x6485}},

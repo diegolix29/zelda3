@@ -31,6 +31,11 @@ void HdMenu_Draw(uint8 *pixels, int pitch, int width, int height, int scale);
 
 // Mostra un breve messaggio in basso sullo schermo
 void HdMenu_ShowMessage(const char *msg);
+// Link entra da una porta del mondo esterno: se e' la porta principale di un
+// dungeon ne mostra il nome al centro
+void HdMenu_ShowDungeonName(void);
+// Scritta del dungeon visibile: i nemici restano fermi finche' Link non si muove
+bool HdMenu_FreezeEnemies(void);
 
 // Da chiamare dopo ogni frame di gioco (con l'audio bloccato)
 void HdMenu_AfterFrame(bool is_replay);

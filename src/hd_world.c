@@ -22,6 +22,8 @@
 #include "overworld.h"
 #include "load_gfx.h"
 #include "snes/ppu.h"
+#include "hd_fx.h"
+#include "hd_burn.h"
 
 uint8 Overworld_AreaHead(int square);
 
@@ -46,6 +48,15 @@ static bool InFluteArrival(void) {
   return main_module_index == 14 && submodule_index == 10 && overworld_map_state >= 7;
 }
 
+// Cerchio che si chiude entrando in una casa (15) o si apre uscendone (16).
+// Con il cerchio morbido (hd_fx.c), disegnato sopra a tutto, il mondo resta
+// continuo anche li': la vista e' gia' al suo posto quando il cerchio si apre
+// e resta dov'era quando si chiude, invece di scivolare o saltare.
+static bool InSoftIris(void) {
+  return g_fx_soft_iris && (main_module_index == 15 || main_module_index == 16) &&
+         !player_is_indoors;
+}
+
 // Ritorno dalla mappa del mondo: il gioco ricarica le sovrapposizioni e
 // schiarisce lo schermo (sottomoduli 32-34) prima di ridare il controllo
 static bool InMapReturn(void) {
@@ -55,7 +66,7 @@ static bool InMapReturn(void) {
 bool HdWorld_Active(void) {
   if (!FeatureOn() || overworld_screen_index >= 0x80)
     return false;
-  if (main_module_index != 9 && !InMenuOverWorld() && !InFluteArrival())
+  if (main_module_index != 9 && !InMenuOverWorld() && !InFluteArrival() && !InSoftIris())
     return false;
   return g_zenv.ppu->mode != 7;
 }
@@ -180,6 +191,8 @@ static void ForgetEnemies(int i) {
 }
 
 void HdWorld_ResetStates(void) {
+  // anche i cespugli bruciati ricrescono: niente macchie all'uscita
+  HdBurn_Reset();
   if (!g_any_state)
     return;
   memset(g_states, 0, sizeof(g_states));
@@ -500,7 +513,7 @@ void HdWorld_UpdateCamera(int *cam_x, int *cam_y) {
   int prev_module = g_prev_module;
   g_prev_module = main_module_index;
   // fase 10: Link esce dalla porta dopo il cerchio che si apre
-  int mode = !HdWorld_Active() ? 0 : InFluteArrival() ? 1 : main_module_index != 9 ? 0 :
+  int mode = !HdWorld_Active() ? 0 : InFluteArrival() || InSoftIris() ? 1 : main_module_index != 9 ? 0 :
              submodule_index == 0 || submodule_index == 10 || InMapReturn() ? 1 : InTransition() ? 2 :
              InMosaicTransition() ? 3 : 0;
   int prev_mode = g_prev_mode;
@@ -674,7 +687,8 @@ static void DrawLoadedArea(AreaImage *img) {
   int n16 = img->size / 16;
   int a = BYTE(overworld_screen_index), sc = a & 0x3f;
   bool backdrop_scene = sc == 0x03 || sc == 0x05 || sc == 0x07 || a == 0x5b;
-  // sulla montagna le nuvole (palette 3) non hanno pennellate, come l'acqua (hd_fx.c)
+  // sulla montagna le nuvole non hanno pennellate, come l'acqua (hd_fx.c,
+  // HdFx_IsCloudColor)
   bool mountain = sc == 0x03 || sc == 0x05 || sc == 0x07;
   uint32 backdrop = Bgr15ToPixel(main_palette_buffer[0], backdrop_scene ? 3 : 5);
   for (int r = 0; r < n16; r++) {
@@ -688,7 +702,7 @@ static void DrawLoadedArea(AreaImage *img) {
         const uint16 *t = &ppu->vram[(chr_base + tile * 16) & 0x7fff];
         uint8 at = attr8[e & 0x1ff];
         bool water = (at == 0x08 || at == 0x09);
-        bool smooth = water || (mountain && pal == 3);
+        bool cloud_tile = mountain && (pal == 3 || pal == 7);
         if (tile >= kAnimTileFirst && tile < kAnimTileEnd) {
           if (img->n_anim == img->cap_anim) {
             int cap = img->cap_anim ? img->cap_anim * 2 : 256;
@@ -701,7 +715,8 @@ static void DrawLoadedArea(AreaImage *img) {
             ac->x = ox, ac->y = oy, ac->entry = e;
             ac->color[0] = water && !backdrop_scene ? (backdrop & 0xffffff) | 7u << 24 : backdrop;
             for (int v = 1; v < 16; v++)
-              ac->color[v] = Bgr15ToPixel(main_palette_buffer[pal * 16 + v], smooth ? 7 : 1);
+              ac->color[v] = Bgr15ToPixel(main_palette_buffer[pal * 16 + v],
+                                          water || (cloud_tile && HdFx_IsCloudColor(pal, v)) ? 7 : 1);
           }
         }
         for (int row = 0; row < 8; row++) {
@@ -714,7 +729,8 @@ static void DrawLoadedArea(AreaImage *img) {
                     (p23 >> bit & 1) << 2 | (p23 >> (8 + bit) & 1) << 3;
             // sulla montagna lo sfondo e' il cielo anche nelle caselle che per
             // il gioco sono acqua profonda (il vuoto oltre i dirupi)
-            dst[col] = v ? Bgr15ToPixel(main_palette_buffer[pal * 16 + v], smooth ? 7 : 1) :
+            dst[col] = v ? Bgr15ToPixel(main_palette_buffer[pal * 16 + v],
+                                        water || (cloud_tile && HdFx_IsCloudColor(pal, v)) ? 7 : 1) :
                        water && !backdrop_scene ? (backdrop & 0xffffff) | 7u << 24 : backdrop;
           }
         }
