@@ -71,6 +71,10 @@ struct Ppu {
   uint8_t *objShadowOut;
   int objShadowStride;
   uint8_t objShadowLine[kPpuXPixels];
+  // Ghiaccio (hd_fx.c): le voci OAM con objIce si disegnano con i blu dei
+  // nemici congelati (palette 2), ogni colore v sostituito da iceRemap[v]
+  uint8_t objIce[128];
+  uint8_t iceRemap[16];
   float mode7PerspectiveLow, mode7PerspectiveHigh;
   // Spostamento visivo della telecamera fluida (non tocca la logica di gioco)
   int16_t bgBiasX, bgBiasY, objBiasX, objBiasY;

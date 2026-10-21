@@ -429,7 +429,7 @@ static void ApplyWindowRays(uint8 *pixels, int pitch, int width, int height, int
 // 5. Bagliore a raggi quando Link solleva un oggetto ricevuto
 
 static void ApplyItemGlow(uint8 *pixels, int pitch, int width, int height, int cam_x, int cam_y, int ext) {
-  for (int k = 0; k < 10; k++) {
+  for (int k = 0; k < kAncilla_Slots; k++) {
     int type = ancilla_type[k];
     if (type != 0x22 && type != 0x29 && type != 0x35)
       continue;  // oggetto ricevuto, Amuleto/Cristallo, Spada Suprema
@@ -825,13 +825,90 @@ static void DrawFlamesTile(uint8 *pixels, int pitch, int width, int height, int 
   }
 }
 
+// Colori del ghiaccio: i colori 1-7 della palette 2 degli sprite, con cui il
+// gioco disegna i nemici congelati dalla Bacchetta del Ghiaccio
+// (Sprite_DrawMultiple; gli altri sono bianco, rosa e arancio), ordinati dal
+// piu' scuro al piu' chiaro
+static int IceRamp(uint32 *ramp) {
+  Ppu *ppu = g_zenv.ppu;
+  int lum[15], n = 0;
+  for (int i = 1; i < 8; i++) {
+    uint16 col = ppu->cgram[0x80 + 2 * 16 + i];
+    uint32 cr = col & 31, cg = col >> 5 & 31, cb = col >> 10 & 31;
+    uint32 c = (cr << 3 | cr >> 2) << 16 | (cg << 3 | cg >> 2) << 8 | (cb << 3 | cb >> 2);
+    int l = (int)(cr * 3 + cg * 6 + cb);
+    int j = n++;
+    while (j > 0 && lum[j - 1] > l)
+      lum[j] = lum[j - 1], ramp[j] = ramp[j - 1], j--;
+    lum[j] = l, ramp[j] = c;
+  }
+  return n;
+}
+
+// Congela la tile: i colori diventano quelli del ghiaccio secondo la loro
+// luminosita' (piu' chiari), con un bordo morbido; ogni tanto un luccichio
+static void DrawFrozenTile(uint8 *pixels, int pitch, int width, int height, int sx, int sy,
+                           const HdBurnTile *f, const uint32 *ramp, int nramp) {
+  float grow = f->age < 8 ? (f->age + 1) / 8.0f : 1.0f;
+  for (int y = -1; y < 17; y++) {
+    int py = sy + y;
+    if (py < 0 || py >= height)
+      continue;
+    uint32 *row = (uint32 *)(pixels + py * pitch);
+    for (int x = -1; x < 17; x++) {
+      int px = sx + x;
+      if (px < 0 || px >= width || IsHud(row[px]) || IsSprite(row[px]))
+        continue;
+      float dx = x - 7.5f, dy = y - 7.5f;
+      float d = sqrtf(dx * dx + dy * dy);
+      float e = d < 8.0f ? 1.0f : d > 10.5f ? 0.0f : (10.5f - d) * 0.4f;
+      if (e <= 0)
+        continue;
+      uint32 c = row[px];
+      int l = (int)(((c >> 16) & 0xff) * 3 + ((c >> 8) & 0xff) * 6 + (c & 0xff)) / 10;
+      float t = 0.30f + 0.70f * l / 255.0f;
+      int idx = (int)(t * (nramp - 1) + 0.5f);
+      uint32 ic = ramp[idx < 0 ? 0 : idx >= nramp ? nramp - 1 : idx];
+      MixPixel(&row[px], (ic >> 16) & 0xff, (ic >> 8) & 0xff, ic & 0xff, 0.85f * e * grow);
+    }
+  }
+  // luccichio: un punto bianco a forma di croce che si accende e si spegne
+  int ph = (int)((g_fx_frames + f->seed * 7) % 96);
+  if (ph < 12) {
+    float a = (ph < 6 ? ph : 12 - ph) / 6.0f;
+    int gx = sx + 3 + f->seed % 10, gy = sy + 3 + (f->seed >> 4) % 10;
+    static const int8 kCross[5][2] = { {0, 0}, {-1, 0}, {1, 0}, {0, -1}, {0, 1} };
+    for (int i = 0; i < 5; i++) {
+      int px = gx + kCross[i][0], py = gy + kCross[i][1];
+      if (px < 0 || py < 0 || px >= width || py >= height)
+        continue;
+      uint32 *p = (uint32 *)(pixels + py * pitch) + px;
+      if (!IsHud(*p) && !IsSprite(*p))
+        MixPixel(p, 255, 255, 255, a * (i == 0 ? 0.95f : 0.6f));
+    }
+  }
+}
+
 static void ApplyBurning(uint8 *pixels, int pitch, int width, int height, int cam_x, int cam_y, int ext, bool step) {
   const HdBurnTile *tiles;
-  int n = HdBurn_GetScorched(&tiles);
+  int n = HdBurn_GetFrozen(&tiles);
+  if (n) {
+    uint32 ramp[15];
+    int nramp = IceRamp(ramp);
+    for (int i = 0; i < n; i++) {
+      const HdBurnTile *f = &tiles[i];
+      if (!HdBurn_TileShown(f))
+        continue;
+      int sx = f->x - cam_x + ext, sy = f->y - cam_y;
+      if (sx > -20 && sy > -20 && sx < width + 4 && sy < height + 4)
+        DrawFrozenTile(pixels, pitch, width, height, sx, sy, f, ramp, nramp);
+    }
+  }
+  n = HdBurn_GetScorched(&tiles);
   bool live = main_module_index == 9 && submodule_index == 0;
   for (int i = 0; i < n; i++) {
     const HdBurnTile *s = &tiles[i];
-    if (s->area != (uint8)overworld_area_index)
+    if (!HdBurn_TileShown(s))
       continue;
     float k = (float)s->age / kHdScorchTime;
     int sx = s->x - cam_x + ext, sy = s->y - cam_y;
@@ -854,9 +931,9 @@ static void ApplyBurning(uint8 *pixels, int pitch, int width, int height, int ca
   if (n == 0)
     return;
   // dall'alto in basso: le fiamme delle tile piu' in basso coprono quelle dietro
-  int order[96];
+  static int order[kHdMaxBurning];
   int m = 0;
-  for (int i = 0; i < n && m < 96; i++) {
+  for (int i = 0; i < n && m < kHdMaxBurning; i++) {
     int j = m++;
     while (j > 0 && tiles[order[j - 1]].y > tiles[i].y)
       order[j] = order[j - 1], j--;
@@ -1203,6 +1280,45 @@ void HdFx_ShadowsBeforeRender(Ppu *ppu, int width, int height) {
   }
   ppu->objShadowOut = g_shadow_src;
   ppu->objShadowStride = width;
+}
+
+// Pezzi di ghiaccio: il cespuglio congelato portato o lanciato (sprite 0xEC con
+// sprite_unk5) e i suoi pezzi (resti 0x48/0x58 della prima tabella con la
+// palette 2, che il gioco non usa cosi'). I loro colori sono quelli della
+// palette 6 (vasi, rocce e cespugli): ognuno diventa il blu dei nemici
+// congelati (colori 1-7 della palette 2) con la luminosita' piu' vicina
+void HdFx_IceBeforeRender(Ppu *ppu) {
+  int mod;
+  memset(ppu->objIce, 0, sizeof(ppu->objIce));
+  if (!(enhanced_features0 & kFeatures0_BurnAndFreeze) || player_is_indoors || !InGameplay(&mod))
+    return;
+  static const int8 kBlue[7] = { 1, 2, 3, 4, 5, 6, 7 };
+  int blue_lum[7];
+  for (int i = 0; i < 7; i++) {
+    uint16 c = ppu->cgram[0x80 + 2 * 16 + kBlue[i]];
+    blue_lum[i] = (c & 31) * 3 + (c >> 5 & 31) * 6 + (c >> 10 & 31);
+  }
+  ppu->iceRemap[0] = 0;
+  for (int v = 1; v < 16; v++) {
+    uint16 c = ppu->cgram[0x80 + 6 * 16 + v];
+    int l = (c & 31) * 3 + (c >> 5 & 31) * 6 + (c >> 10 & 31);
+    l = l < 40 ? l : 40 + (l - 40) * 11 / 10;  // il ghiaccio e' un po' piu' chiaro
+    int best = 0;
+    for (int i = 1; i < 7; i++)
+      if (abs(blue_lum[i] - l) < abs(blue_lum[best] - l))
+        best = i;
+    ppu->iceRemap[v] = kBlue[best];
+  }
+  for (int i = 0; i < 128; i++) {
+    uint16 oam1 = ppu->oam[i * 2 + 1];
+    if ((oam1 >> 9 & 7) != 2 || g_link_oam_mask[i])
+      continue;
+    int o = g_sprite_oam_owner[i];
+    if (o < 16)
+      ppu->objIce[i] = sprite_type[o] == 0xec && sprite_unk5[o] != 0;
+    else
+      ppu->objIce[i] = (oam1 & 0x1ff) == 0x48 || (oam1 & 0x1ff) == 0x58;
+  }
 }
 
 void HdFx_ShadowsAfterRender(Ppu *ppu) {

@@ -777,7 +777,7 @@ void AncillaAdd_ItemReceipt(uint8 ain, uint8 yin, int chest_pos) {  // 8985e8
       link_picking_throw_state = 2;
   } else if (j == 0x20) {
     overworld_map_state++;
-    for (int i = 4; i >= 0; i--) {
+    for (int i = kAncilla_LinkSlots - 1; i >= 0; i--) {
       if (ancilla_type[i] == 7 || ancilla_type[i] == 0x2c) {
         ancilla_type[i] = 0;
         link_state_bits = 0;

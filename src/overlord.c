@@ -2,6 +2,7 @@
 #include "sprite.h"
 #include "misc.h"
 #include "sprite_main.h"
+#include "hd_world.h"
 
 uint16 Overlord_GetX(int k) { return (overlord_x_lo[k] | overlord_x_hi[k] << 8); }
 uint16 Overlord_GetY(int k) { return (overlord_y_lo[k] | overlord_y_hi[k] << 8); }
@@ -68,12 +69,23 @@ void Overlord_SpawnBoulder() {  // 89b714
 
   if (sign8((BG2VOFS_copy2 >> 8) - (sprcoll_y_base >> 8) - 2))
     return;
+  // nella copia di un'area vicina la telecamera e' la vista di Link, che puo'
+  // stare quasi tutta nell'area di Link: i sassi cadono solo se lo schermo
+  // starebbe dentro quest'area, come nel gioco
+  if (g_hd_neighbor_tick && (uint16)(BG2VOFS_copy2 + 224) > sprcoll_y_base + sprcoll_y_size)
+    return;
 
+  // mondo continuo: la vista puo' scendere oltre il bordo dell'area (si vede
+  // anche l'area sotto) mentre la telecamera del gioco si ferma; il sasso nasce
+  // sopra la vista, altrimenti sarebbe subito fuori schermo e sparirebbe
+  int cx = BG2HOFS_copy2, cy = BG2VOFS_copy2;
+  if (!g_hd_neighbor_tick && g_view_valid && HdWorld_Active())
+    cx = g_view_wx, cy = g_view_wy;
   SpriteSpawnInfo info;
   int j = Sprite_SpawnDynamically(0, 0xc2, &info);
   if (j >= 0) {
-    Sprite_SetX(j, BG2HOFS_copy2 + (GetRandomNumber() & 127) + 64);
-    Sprite_SetY(j, BG2VOFS_copy2 - 0x30);
+    Sprite_SetX(j, cx + (GetRandomNumber() & 127) + 64);
+    Sprite_SetY(j, cy - 0x30);
     sprite_floor[j] = 0;
     sprite_D[j] = 0;
     sprite_z[j] = 0;

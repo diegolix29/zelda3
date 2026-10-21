@@ -1,6 +1,8 @@
 #include "hd_world.h"
+#include "snes/ppu.h"
 #include "hd_hud.h"
 #include "hd_menu.h"
+#include "hd_burn.h"
 #include "sprite.h"
 #include "dungeon.h"
 #include "hud.h"
@@ -580,7 +582,8 @@ static int Overworld_AllocSprite(uint8 type) {
           (type == 0xd0) ? 5 :
           (type == 0xeb || type == 0x53 || type  == 0xf3) ? 14 : 13;
   for (; i >= 0; i--) {
-    if (sprite_state[i] == 0 || sprite_type[i] == 0x41 && sprite_C[i] != 0)
+    // (mondo continuo: non al posto di un soldato che segue Link)
+    if (sprite_state[i] == 0 || sprite_type[i] == 0x41 && sprite_C[i] != 0 && !HdWorld_Carried(i))
       break;
   }
   return i;
@@ -1057,6 +1060,11 @@ int Sprite_SpawnThrowableTerrain_silently(uint8 what, uint16 x, uint16 y) {  // 
       sprite_oam_flags[k] = 0x80, flags = 0x50;  // wtf
   }
   sprite_oam_flags[k] = flags;
+  // Cespuglio o erba congelati (hd_burn.c): blu come i nemici congelati
+  // (palette 2 degli sprite, Sprite_DrawMultiple) e in pezzi come un vaso
+  sprite_unk5[k] = what >= 2 && what <= 4 && HdBurn_TakeFrozen(x, y);
+  if (sprite_unk5[k])
+    sprite_oam_flags[k] = flags & 0xf1 | 4;
   sprite_unk4[k] = 9;
   flag_is_sprite_to_pick_up = 2;
   byte_7E0FB2 = 2;
@@ -1122,14 +1130,12 @@ void Sprite_SpawnSecret(int k) {  // 868264
 
 // Nemico (0-15) che ha scritto ogni voce OAM nell'ultimo frame, 0xff = nessuno
 uint8 g_sprite_oam_owner[128];
+uint8 g_oam_real_f0[128];
 
 void Sprite_Main() {  // 868328
   if (!player_is_indoors) {
-    ancilla_floor[0] = 0;
-    ancilla_floor[1] = 0;
-    ancilla_floor[2] = 0;
-    ancilla_floor[3] = 0;
-    ancilla_floor[4] = 0;
+    for (int i = 0; i < kAncilla_LinkSlots; i++)
+      ancilla_floor[i] = 0;
     Sprite_ProximityActivation();
   }
   is_in_dark_world = (savegame_is_darkworld != 0);
@@ -1246,6 +1252,13 @@ void Sprite_Get16BitCoords(int k) {  // 8684c1
 
 void Sprite_ExecuteSingle(int k) {  // 8684e2
   uint8 st = sprite_state[k];
+  // mondo vivo: un nemico fermo fuori dalla vista riparte appena rientra,
+  // anche se controlla la pausa prima di ricalcolare la sua posizione sullo
+  // schermo (Sprite_PrepOamCoordOrDoubleRet)
+  if (st != 0 && g_view_valid && HdWorld_Active())
+    sprite_pause[k] = 0;
+  if (st != 0)
+    HdWorld_SpriteFrame(k);  // chi non guarda il terreno passa da un'area all'altra
   if (st != 0)
     Sprite_TimersAndOam(k);
   kSprite_ExecuteSingle[st](k);
@@ -1769,6 +1782,9 @@ void ThrowableScenery_TransmuteToDebris(int k) {  // 86e239
     Sprite_SpawnSecret(k);
     BYTE(dung_secrets_unk1) = 0;
   }
+  // il cespuglio o l'erba congelati vanno in pezzi come un vaso (in blu)
+  if (sprite_unk5[k] && sprite_C[k] >= 2 && sprite_C[k] <= 4)
+    sprite_C[k] = 1;
   a = player_is_indoors ? 0 : sprite_C[k];
   sound_effect_1 = 0;
   SpriteSfx_QueueSfx2WithPan(k, kSprite_Func21_Sfx[a]);
@@ -1877,12 +1893,25 @@ bool Sprite_PrepOamCoordOrDoubleRet(int k, PrepOamCoordsRet *ret) {  // 86e41e
   ret->flags = sprite_oam_flags[k] ^ sprite_obj_prio[k];
   ret->r4 = 0;
   int xt = (enhanced_features0 & kFeatures0_ExtendScreen64) ? 0x40 : 0;
+  // Mondo continuo: il nemico sparisce quando esce dalla vista (piu' larga
+  // della telecamera del gioco, che inoltre al cambio d'area salta di colpo
+  // mentre la vista resta dov'e'), non dalla telecamera del gioco
+  uint16 kx = x, ky = y;
+  bool live = g_view_valid && HdWorld_Active();
+  if (live) {
+    xt = g_zenv.ppu->extraLeftRight;
+    kx = cur_sprite_x - g_view_wx, ky = cur_sprite_y - g_view_wy;
+  }
 
-  if ((uint16)(x + 0x40 + xt) >= (0x170 + xt * 2) ||
-      (uint16)(y + 0x40) >= 0x170 && !(sprite_flags4[k] & 0x20)) {
+  if ((uint16)(kx + 0x40 + xt) >= (0x170 + xt * 2) ||
+      (uint16)(ky + 0x40) >= 0x170 && !(sprite_flags4[k] & 0x20)) {
     sprite_pause[k]++;
-    if (!(sprite_defl_bits[k] & 0x80))
+    // mondo vivo: i nemici dell'area restano fermi fuori dalla vista
+    if (!(sprite_defl_bits[k] & 0x80) && !(live && HdWorld_KeepOffscreen(k))) {
+      if (live)
+        HdWorld_CarriedLost(k);
       Sprite_KillSelf(k);
+    }
     out_of_bounds = true;
   }
   ret->x = R0;
@@ -1998,6 +2027,7 @@ bool Sprite_CheckTileProperty(int k, int j) {  // 86e73c
   uint16 x, y;
   bool in_bounds;
   j >>= 1;
+  HdWorld_SpriteTouchedTiles(k);
 
   if (player_is_indoors) {
     x = (cur_sprite_x + 8 & 0x1ff) + kSprite_Func5_X[j] - 8;
@@ -2008,6 +2038,13 @@ bool Sprite_CheckTileProperty(int k, int j) {  // 86e73c
     y = cur_sprite_y + kSprite_Func5_Y[j];
     in_bounds = (uint16)(x - sprcoll_x_base) < sprcoll_x_size &&
                 (uint16)(y - sprcoll_y_base) < sprcoll_y_size;
+    // mondo unico: oltre l'area c'e' il terreno delle aree vicine, non un
+    // muro; ma i nemici dell'area di Link non escono dalla loro area
+    if (!in_bounds && HdWorld_SeamlessOn()) {
+      if (x < 4096 && y < 4096 && HdWorld_ConfinedToArea(k))
+        return true;
+      in_bounds = x < 4096 && y < 4096;
+    }
   }
   if (!in_bounds) {
     if (sprite_flags2[k] & 0x40) {
@@ -3211,7 +3248,7 @@ bool Sprite_ReturnIfRecoiling(int k) {  // 86ff78
 bool Sprite_CheckIfLinkIsBusy() {  // 87f4d0
   if (link_auxiliary_state | link_pose_for_item | (link_state_bits & 0x80))
     return true;
-  for (int i = 4; i >= 0; i--) {
+  for (int i = kAncilla_LinkSlots - 1; i >= 0; i--) {
     if (ancilla_type[i] == 0x27)
       return true;
   }
@@ -3545,6 +3582,26 @@ bool Garnish_ReturnIfPrepFails(int k, Point16U *pt) {  // 89b5de
   return false;
 }
 
+// Frammenti degli oggetti lanciati: col mondo continuo la telecamera del gioco
+// si ferma al bordo dell'area mentre la vista va oltre (si vede l'area
+// accanto); un sasso che atterra oltre il bordo si rompe dove lo si vede,
+// quindi conta la vista. Le coordinate restano rispetto alla telecamera del
+// gioco: SetOamHelper1 tiene il nono bit della x e la y vera si ricostruisce
+// al disegno (ResolveSpritePositions)
+static bool Garnish_ReturnIfPrepFailsInView(int k, Point16U *pt) {
+  if (!g_view_valid || g_hd_neighbor_tick || !HdWorld_Active())
+    return Garnish_ReturnIfPrepFails(k, pt);
+  int ext = g_zenv.ppu->extraLeftRight;
+  uint16 gx = Garnish_GetX(k), gy = Garnish_GetY(k);
+  if ((uint16)(gx - g_view_wx + ext + 16) >= 256 + 2 * ext + 32 || (uint16)(gy - g_view_wy) >= 256) {
+    garnish_type[k] = 0;
+    return true;
+  }
+  pt->x = gx - BG2HOFS_copy2;
+  pt->y = gy - BG2VOFS_copy2 - 16;
+  return false;
+}
+
 void Garnish03_FallingTile(int k) {  // 89b627
   static const uint8 kCrumbleTile_XY[5] = {4, 0, 0, 0, 0};
   static const uint8 kCrumbleTile_Char[5] = {0x80, 0xcc, 0xcc, 0xea, 0xca};
@@ -3634,7 +3691,7 @@ void Sprite_DisableAll() {  // 89c22f
     if (sprite_state[k] && (player_is_indoors || sprite_type[k] != 0x6c))
       sprite_state[k] = 0;
   }
-  for (int k = 9; k >= 0; k--)
+  for (int k = kAncilla_Slots - 1; k >= 0; k--)
     ancilla_type[k] = 0;
   flag_is_ancilla_to_pick_up = 0;
   sprite_limit_instance = 0;
@@ -3941,7 +3998,7 @@ void Garnish16_ThrownItemDebris(int k) {  // 89f0cb
     0x40,    0, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40,    0,    0, 0x40,    0,    0,    0,
   };
   Point16U pt;
-  if (Garnish_ReturnIfPrepFails(k, &pt))
+  if (Garnish_ReturnIfPrepFailsInView(k, &pt))
     return;
   uint8 r5 = garnish_oam_flags[k];
   if (byte_7E0FC6 >= 3)
@@ -4106,7 +4163,7 @@ uint8 Oam_GetBufferPosition(uint8 num, uint8 y) {  // 8dbb0a
 }
 
 void Sprite_NullifyHookshotDrag() {  // 8ff540
-  for (int i = 4; i >= 0; i--) {
+  for (int i = kAncilla_LinkSlots - 1; i >= 0; i--) {
     if (!(ancilla_type[i] & 0x1f) && related_to_hookshot) {
       related_to_hookshot = 0;
       break;

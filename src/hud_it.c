@@ -143,6 +143,25 @@ static void DrawText(int tile, int ntiles, const Glyph *font, int n, int height,
   }
 }
 
+// Lettere larghe del gioco (8 pixel, come nei nomi inglesi): A-Z dalla
+// casella 0x150, lo spazio e' 0xf5. Scrive in dst le caselle di s allineato
+// a destra (right) o a sinistra in n caselle; falso se non ci sta o ha
+// lettere che il gioco non ha
+static bool DrawWide(uint16 *dst, int n, const char *s, uint16 attr, bool right) {
+  int len = (int)strlen(s);
+  if (len > n)
+    return false;
+  for (int i = 0; i < len; i++)
+    if (s[i] != ' ' && (s[i] < 'A' || s[i] > 'Z'))
+      return false;
+  int x = right ? n - len : 0;
+  for (int i = 0; i < n; i++) {
+    int c = i - x;
+    dst[i] = attr | (c >= 0 && c < len && s[c] != ' ' ? 0x150 + s[c] - 'A' : 0xf5);
+  }
+  return true;
+}
+
 static void ClearTiles(int tile, int ntiles) {
   uint16 fill = (kColorBg & 1 ? 0xff : 0) | (kColorBg & 2 ? 0xff00 : 0);
   for (int i = 0; i < ntiles * 8; i++)
@@ -218,7 +237,15 @@ void HudIt_DrawItemName(uint16 *dst, int item, int btn_index) {
     second = nl + 1;
   }
   // Due righe di 8 caselle: come nel gioco, un nome corto sta sulla seconda
-  // riga a sinistra; con due righe la prima e' a sinistra e la seconda a destra
+  // riga a sinistra; con due righe la prima e' a sinistra e la seconda a destra.
+  // Se ogni riga ci sta in 8 lettere si usano le lettere larghe del gioco
+  // (FIAMMA, POZIONE VITA), altrimenti il carattere stretto
+  uint16 row1[8], row2[8];
+  if (DrawWide(row1, 8, first, kTileAttr, false) && DrawWide(row2, 8, second, kTileAttr, nl != NULL)) {
+    memcpy(dst, row1, sizeof(row1));
+    memcpy(dst + 32, row2, sizeof(row2));
+    return;
+  }
   int n = (int)countof(kNarrow);
   ClearTiles(kTileItemName, 16);
   DrawText(kTileItemName, 8, kNarrow, n, 6, first, 0, 1);
@@ -234,6 +261,8 @@ void HudIt_DrawAbility(uint16 *dst, int ability, int level) {
   static const char *const kAbilities[6] = { "ALZA", "LEGGI", "PARLA", "TIRA", "CORRI", "NUOTA" };
   char buf[8];
   const char *s = kAbilities[ability];
+  // qui restano strette: con le lettere larghe le parole di 5 lettere
+  // riempiono le 5 caselle e si attaccano a quelle accanto
   if (ability == 0) {
     // ALZA.1, ALZA.2, ALZA.3 come LIFT.1-3: il livello dei guanti
     memcpy(buf, "ALZA.1", 7);

@@ -39,6 +39,9 @@ void HdFx_SpriteShadows(uint8 *pixels, int pitch, int width, int height);
 // nasconde l'ombra del gioco dei nemici a terra
 void HdFx_ShadowsBeforeRender(Ppu *ppu, int width, int height);
 void HdFx_ShadowsAfterRender(Ppu *ppu);
+// Cespugli congelati sollevati o lanciati e i loro pezzi (hd_burn.c): la PPU
+// li disegna con i blu dei nemici congelati
+void HdFx_IceBeforeRender(Ppu *ppu);
 // Piove nell'area esterna attuale
 bool HdFx_IsRainingOutdoors(void);
 // Sulla Montagna della Morte: il colore v della palette pal e' nuvola

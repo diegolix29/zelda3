@@ -183,8 +183,26 @@ static bool IsFireAncilla(int type, float *radius) {
   return false;
 }
 
+// Vero se intorno al punto dello schermo (x, y) e' tutto nero: la mappa della
+// stanza (64x64 tile) va oltre i muri, e nella parte non disegnata restano
+// tile vecchi che possono sembrare torce (braci nel nero accanto alla stanza)
+static bool BlackAround(const uint8 *pixels, int pitch, int width, int height, float fx, float fy) {
+  static const int8 kPts[5][2] = { {0,0},{-3,-3},{3,-3},{-3,3},{3,3} };
+  int seen = 0;
+  for (int i = 0; i < 5; i++) {
+    int x = (int)fx + kPts[i][0], y = (int)fy + kPts[i][1];
+    if (x < 0 || y < 0 || x >= width || y >= height)
+      continue;
+    if (((const uint32 *)(pixels + y * pitch))[x] & 0xffffff)
+      return false;
+    seen++;
+  }
+  return seen > 0;
+}
+
 // Raccoglie le luci del frame in coordinate dello schermo
-static void CollectLights(int mod, bool dark, int frame_w, int bias_x, int bias_y) {
+static void CollectLights(const uint8 *pixels, int pitch, int height, int mod, bool dark, int frame_w,
+                          int bias_x, int bias_y) {
   g_num_lights = 0;
   g_hd_num_fire = 0;
   int ext = (frame_w - 256) / 2;
@@ -224,6 +242,8 @@ static void CollectLights(int mod, bool dark, int frame_w, int bias_x, int bias_
     for (int i = 0; i < g_num_decor; i++) {
       DecorLight *d = &g_decor[i];
       float x = ox + d->x - cam_x + ext, y = oy + d->y - cam_y;
+      if (BlackAround(pixels, pitch, frame_w, height, x, y))
+        continue;
       float ph = d->phase * 0.1f;
       float pulse = 0.82f + 0.12f * sinf(tf * 1.6f + ph) + 0.06f * sinf(tf * 4.1f + ph * 2.0f);
       if (dark)
@@ -241,7 +261,7 @@ static void CollectLights(int mod, bool dark, int frame_w, int bias_x, int bias_
     }
   }
   // Fuoco: fiamme, colpi di fuoco ed esplosioni
-  for (int k = 0; k < 10; k++) {
+  for (int k = 0; k < kAncilla_Slots; k++) {
     float radius;
     // Bomba: fa luce solo mentre esplode (fase 1-10), con un lampo che si spegne
     if (ancilla_type[k] == 0x07) {
@@ -273,12 +293,15 @@ static void CollectLights(int mod, bool dark, int frame_w, int bias_x, int bias_
   if (mod == 9) {
     const HdBurnTile *tiles;
     int n = HdBurn_GetBurning(&tiles);
-    for (int i = 0; i < n; i++) {
+    // con il Medaglione della Fiamma le tile sono centinaia: una luce ogni
+    // tanto basta
+    int stride = n > 48 ? (n + 47) / 48 : 1;
+    for (int i = 0; i < n; i += stride) {
       float age = tiles[i].age;
       float inten = (age < 10 ? age / 10.0f : 1.0f) * (age > kHdBurnTime - 20 ? (kHdBurnTime - age) / 20.0f : 1.0f);
       float x = tiles[i].x + 8 - cam_x + ext, y = tiles[i].y + 4 - cam_y;
       float flicker = 1.0f + 0.10f * sinf(t * 2.3f + tiles[i].seed);
-      AddFireLight(x, y, 34 * inten * flicker, 0.40f * inten, 0.22f * inten, 0.06f * inten, 0.7f * inten);
+      AddFireLight(x, y, 34 * sqrtf((float)stride) * inten * flicker, 0.40f * inten, 0.22f * inten, 0.06f * inten, 0.7f * inten);
     }
   }
 }
@@ -451,7 +474,7 @@ void HdLight_Apply(uint8 *pixels, int pitch, int width, int height, int bias_x, 
   if (fabsf(target - g_ambient) < 0.003f)
     g_ambient = target;
 
-  CollectLights(mod, dark, width, bias_x, bias_y);
+  CollectLights(pixels, pitch, height, mod, dark, width, bias_x, bias_y);
   {
     int ext = (width - 256) / 2;
     int cam_x = BG2HOFS_copy2 + bias_x, cam_y = BG2VOFS_copy2 + bias_y;
@@ -512,7 +535,7 @@ void HdLight_Apply(uint8 *pixels, int pitch, int width, int height, int bias_x, 
   {
     int ext = (width - 256) / 2;
     int cam_x = BG2HOFS_copy2 + bias_x, cam_y = BG2VOFS_copy2 + bias_y;
-    for (int k = 0; k < 10 && n_items < 4; k++) {
+    for (int k = 0; k < kAncilla_Slots && n_items < 4; k++) {
       int type = ancilla_type[k];
       if (type != 0x22 && type != 0x29 && type != 0x35)
         continue;

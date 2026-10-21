@@ -8593,7 +8593,7 @@ void Sprite_Dungeon_DrawAllPushBlocks() {  // 87f0ac
 }
 
 void UsedForStraightInterRoomStaircase() {  // 87f25a
-  int i = 9;
+  int i = kAncilla_Slots - 1;
   do {
     if (ancilla_type[i] == 13)
       ancilla_type[i] = 0;

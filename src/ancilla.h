@@ -20,6 +20,7 @@ typedef struct AncillaRadialProjection {
 
 uint16 Ancilla_GetX(int k);
 uint16 Ancilla_GetY(int k);
+int Arrow_StuckPieces(int k, uint8 *chr, uint8 *flags, int8 *dx, int8 *dy);
 void Ancilla_SetX(int k, uint16 x);
 void Ancilla_SetY(int k, uint16 y);
 int Ancilla_AllocHigh();

@@ -10,7 +10,10 @@
 //   colori, mappa delle caselle), si disegna il terreno e si ripristina tutto;
 // - nel frame disegnato, il fondale fuori dall'area corrente viene preso da
 //   quelle immagini. Durante il passaggio fra due aree, quando la memoria
-//   video contiene un misto delle due, tutto il fondale viene dalle immagini.
+//   video contiene un misto delle due, tutto il fondale viene dalle immagini;
+// - i nemici delle aree vicine visibili si muovono dal vivo, ognuno in una
+//   copia dello stato del gioco preparata per la sua area (piu' sotto).
+// I labirinti e le case restano a schermate, come nel gioco.
 #include <stdlib.h>
 #include <math.h>
 #include <string.h>
@@ -24,8 +27,14 @@
 #include "snes/ppu.h"
 #include "hd_fx.h"
 #include "hd_burn.h"
+#include "sprite.h"
+#include "ancilla.h"
+#include "misc.h"
+#include "nmi.h"
 
 uint8 Overworld_AreaHead(int square);
+extern int g_cam_dx, g_cam_dy;          // vista rispetto alla telecamera del gioco (zelda_rtl.c)
+extern uint8 g_sprite_oam_owner[128];   // sprite.c
 
 static bool FeatureOn(void) {
   return (enhanced_features0 & kFeatures0_ContinuousWorld) != 0;
@@ -125,12 +134,18 @@ bool HdWorld_InsideCurrentArea(int wx, int wy) {
 //   erano, con la loro vita e il loro stato (tutti i dati del loro posto nelle
 //   tabelle del gioco). Si dimenticano quando Link si allontana di 3 aree.
 // - l'aspetto dei nemici vivi l'ultima volta che erano sullo schermo: cosi'
-//   si vedono, fermi, anche oltre il bordo dell'area.
+//   si vedono, fermi, oltre il bordo dell'area quando la loro area non si
+//   muove dal vivo;
+// - le frecce rimaste piantate nei muri (Ancilla0A_ArrowInTheWall): restano
+//   come le caselle e si disegnano qui.
 // Entrando in una casa o in un labirinto, e caricando un salvataggio, tutto
 // il mondo esterno torna com'era.
 
-enum { kMaxExtra = 1024 };  // erba tagliata e buche della pala
-enum { kMaxTiles = 256, kMaxKilled = 128, kMaxAlive = 16, kEnemyResetGap = 2 };  // 2 quadrati in mezzo = 3 aree
+// Tutte le caselle cambiate (la lista del gioco ha posto solo per 256): erba
+// tagliata, buche della pala, cespugli, sassi...
+enum { kMaxExtra = 2048 };
+enum { kMaxTiles = 256, kMaxKilled = 256, kMaxAlive = 16, kEnemyResetGap = 3 };  // 3 quadrati in mezzo = 4 aree
+enum { kMaxArrows = 64 };  // per area; oltre, la piu' vecchia sparisce
 enum { kPatchW = 64, kPatchH = 72 };
 
 // Tabelle del gioco con un valore per ogni nemico (indirizzo in g_ram, byte)
@@ -151,20 +166,31 @@ enum { kRecSize = 64 };
 typedef struct EnemyRec {
   uint16 blk;
   int x, y, z;
+  bool hidden;  // non si vede (Zora sott'acqua): niente aspetto da fermo
   uint8 data[kRecSize];
 } EnemyRec;
+
+// Freccia piantata: i pezzi del suo disegno (sprite 8x8 della prima tabella
+// OBJ), rispetto alla sua posizione nel mondo
+typedef struct ArrowRec {
+  uint16 x, y;
+  uint8 n, chr[2], flags[2];
+  int8 dx[2], dy[2];
+} ArrowRec;
 
 typedef struct AreaState {
   bool used;
   uint32 version;  // cambia solo con le caselle (l'immagine va ridisegnata)
   int n_tiles, n_killed, n_alive;
   uint16 tile_pos[kMaxTiles], tile_val[kMaxTiles];
-  // erba alta tagliata e buche della pala: il gioco non le mette nella sua
-  // lista (ha posto per 256 caselle), quindi si ricordano a parte
+  // tutte le caselle cambiate, anche quelle che il gioco non mette nella sua
+  // lista (erba alta tagliata, buche della pala) o che non ci stanno piu'
   int n_extra;
   uint16 extra_pos[kMaxExtra], extra_val[kMaxExtra];
   uint16 killed[kMaxKilled];
   EnemyRec alive[kMaxAlive];
+  int n_arrows;
+  ArrowRec arrows[kMaxArrows];
 } AreaState;
 
 // Aspetto di un nemico, catturato dallo schermo
@@ -180,6 +206,68 @@ static EnemyPatch g_patches[128][kMaxAlive];
 static uint32 g_state_epoch = 1;
 static bool g_any_state;
 
+// Nemici che seguono Link fuori dalla loro area (vedi "Nemici che seguono
+// Link"): area d'origine e posto nella sua tabella. Stanno nella RAM libera
+// dopo le tabelle degli oggetti in volo, cosi' finiscono anche nei
+// salvataggi: caricandone uno, o quando l'area d'origine dimentica i suoi
+// nemici (Link lontano), l'area non deve rimetterli al loro posto, altrimenti
+// ce ne sarebbero due.
+#define carried_area ((uint8*)(g_ram+0x1F520))   // 0x80 | area, 0 = nessuna
+#define carried_type ((uint8*)(g_ram+0x1F530))
+#define carried_blk ((uint16*)(g_ram+0x1F540))
+
+// Frame da cui ogni sprite non guarda il terreno (Sprite_CheckTileProperty),
+// nella RAM libera cosi' ogni copia delle aree vicine ha i suoi. Chi non lo
+// guarda (corvi, api, pietre degli Octorok...) va dove vuole e passa da
+// un'area all'altra; chi cammina resta nella sua area
+#define untouched_frames ((uint8*)(g_ram+0x1F560))
+enum { kFreeMoverFrames = 16 };
+
+void HdWorld_SpriteFrame(int k) {
+  if (untouched_frames[k] < 255)
+    untouched_frames[k]++;
+}
+
+void HdWorld_SpriteTouchedTiles(int k) {
+  untouched_frames[k] = 0;
+}
+
+static bool FreeMover(int k) {
+  return untouched_frames[k] >= kFreeMoverFrames;
+}
+
+static void MarkCarried(int k, int area, uint16 blk) {
+  carried_area[k] = 0x80 | (area & 0x7f);
+  carried_type[k] = sprite_type[k];
+  carried_blk[k] = blk;
+}
+
+static bool IsMarkedCarried(int k) {
+  return (carried_area[k] & 0x80) && sprite_state[k] && sprite_type[k] == carried_type[k] &&
+         sprite_N_word[k] == 0xffff;
+}
+
+// L'area a conta come sconfitti i suoi nemici che ora seguono Link
+static void KeepCarriedKilled(int a) {
+  AreaState *st = &g_states[a];
+  for (int k = 0; k < 16; k++) {
+    if (!IsMarkedCarried(k) || (carried_area[k] & 0x7f) != a)
+      continue;
+    int i = 0;
+    while (i < st->n_killed && st->killed[i] != carried_blk[k])
+      i++;
+    if (i == st->n_killed && st->n_killed < kMaxKilled)
+      st->killed[st->n_killed++] = carried_blk[k];
+    st->used = true;
+    g_any_state = true;
+  }
+}
+
+// Zora sott'acqua: invisibile, e intanto prova punti a caso (anche a terra)
+static bool IsSubmerged(int k) {
+  return sprite_type[k] == 0x55 && !sprite_E[k] && sprite_ai_state[k] == 0;
+}
+
 static bool PersistOn(void) {
   return FeatureOn() && BYTE(overworld_screen_index) < 0x80;
 }
@@ -190,9 +278,12 @@ static void ForgetEnemies(int i) {
     g_patches[i][j].valid = false;
 }
 
+static void LiveDropAll(void);
+
 void HdWorld_ResetStates(void) {
   // anche i cespugli bruciati ricrescono: niente macchie all'uscita
   HdBurn_Reset();
+  LiveDropAll();
   if (!g_any_state)
     return;
   memset(g_states, 0, sizeof(g_states));
@@ -233,20 +324,57 @@ static bool IsAreaEnemy(int k) {
   return t && t < 0xf4 && (uint8)(t - 1) == sprite_type[k];
 }
 
-// Copia lo stato dell'area corrente (una volta per frame di gioco)
-static void SnapshotArea(void) {
+// Mondo vivo: un nemico dell'area che esce dalla vista resta fermo dov'e'
+// (sprite_pause) invece di sparire e ricomparire al punto di partenza
+bool HdWorld_KeepOffscreen(int k) {
+  return PersistOn() && !player_is_indoors && IsAreaEnemy(k);
+}
+
+// I nemici dell'area di Link restano nella loro area: il bordo fa da muro
+// come nel gioco originale (chi segue Link ha sprite_N_word 0xffff). Nelle
+// copie delle aree vicine ci pensa LiveTick
+bool HdWorld_ConfinedToArea(int k) {
+  return PersistOn() && !player_is_indoors && !g_hd_neighbor_tick && IsAreaEnemy(k) && !FreeMover(k);
+}
+
+// Riporta dentro la sua area un nemico che ne e' uscito: dov'era prima, o
+// (se anche li' era fuori, per esempio in un salvataggio) appena dentro il bordo
+static void KeepInArea(int k, int ox, int oy, bool old_valid, int ax, int ay, int as) {
+  int x = SpriteWorldX(k), y = SpriteWorldY(k);
+  if (x + 8 >= ax && x + 8 < ax + as && y + 8 >= ay && y + 8 < ay + as)
+    return;
+  if (old_valid && ox + 8 >= ax && ox + 8 < ax + as && oy + 8 >= ay && oy + 8 < ay + as) {
+    x = ox, y = oy;
+  } else {
+    x = x < ax ? ax : x > ax + as - 16 ? ax + as - 16 : x;
+    y = y < ay ? ay : y > ay + as - 16 ? ay + as - 16 : y;
+  }
+  Sprite_SetX(k, x);
+  Sprite_SetY(k, y);
+}
+
+// Tutti i dati di un nemico (le tabelle di kSpriteFields), da e verso un record
+static void SaveFields(int k, uint8 *d) {
+  for (int f = 0; f < countof(kSpriteFields); f++) {
+    const SpriteField *sf = &kSpriteFields[f];
+    memcpy(d, g_ram + sf->addr + k * sf->size, sf->size);
+    d += sf->size;
+  }
+}
+
+static void LoadFields(int k, const uint8 *d) {
+  for (int f = 0; f < countof(kSpriteFields); f++) {
+    const SpriteField *sf = &kSpriteFields[f];
+    memcpy(g_ram + sf->addr + k * sf->size, d, sf->size);
+    d += sf->size;
+  }
+}
+
+// Copia i nemici dell'area caricata in questo momento (quella corrente, o
+// un'area vicina nella sua copia dello stato del gioco)
+static void SnapshotEnemies(void) {
   int a = BYTE(overworld_screen_index) & 0x7f;
   AreaState *st = &g_states[a];
-  bool changed = !st->used;
-  int n = num_memorized_tiles >> 1;
-  if (n > kMaxTiles) n = kMaxTiles;
-  if (n != st->n_tiles ||
-      memcmp(st->tile_pos, memorized_tile_addr, n * 2) || memcmp(st->tile_val, memorized_tile_value, n * 2)) {
-    st->n_tiles = n;
-    memcpy(st->tile_pos, memorized_tile_addr, n * 2);
-    memcpy(st->tile_val, memorized_tile_value, n * 2);
-    changed = true;
-  }
   // nemici vivi
   st->n_alive = 0;
   for (int k = 0; k < 16 && st->n_alive < kMaxAlive; k++) {
@@ -255,12 +383,8 @@ static void SnapshotArea(void) {
     EnemyRec *r = &st->alive[st->n_alive++];
     r->blk = sprite_N_word[k];
     r->x = SpriteWorldX(k), r->y = SpriteWorldY(k), r->z = sprite_z[k];
-    uint8 *d = r->data;
-    for (int f = 0; f < countof(kSpriteFields); f++) {
-      const SpriteField *sf = &kSpriteFields[f];
-      memcpy(d, g_ram + sf->addr + k * sf->size, sf->size);
-      d += sf->size;
-    }
+    r->hidden = IsSubmerged(k);
+    SaveFields(k, r->data);
   }
   // nemici sconfitti: gia' comparsi (il gioco lo segna) e non piu' attivi.
   // Quelli usciti dallo schermo il gioco li segna di nuovo come da caricare.
@@ -282,25 +406,69 @@ static void SnapshotArea(void) {
   }
   st->used = true;
   g_any_state = true;
+}
+
+// Copia lo stato dell'area corrente (una volta per frame di gioco)
+static void SnapshotArea(void) {
+  int a = BYTE(overworld_screen_index) & 0x7f;
+  AreaState *st = &g_states[a];
+  bool changed = !st->used;
+  int n = num_memorized_tiles >> 1;
+  if (n > kMaxTiles) n = kMaxTiles;
+  if (n != st->n_tiles ||
+      memcmp(st->tile_pos, memorized_tile_addr, n * 2) || memcmp(st->tile_val, memorized_tile_value, n * 2)) {
+    st->n_tiles = n;
+    memcpy(st->tile_pos, memorized_tile_addr, n * 2);
+    memcpy(st->tile_val, memorized_tile_value, n * 2);
+    changed = true;
+  }
+  SnapshotEnemies();
   if (changed)
     st->version++;
 }
 
+static bool RememberExtraIn(AreaState *st, uint16 pos, uint16 value);
+
 void HdWorld_RememberExtraTile(uint16 pos, uint16 value) {
-  if (!PersistOn())
+  if (!PersistOn() || player_is_indoors)
     return;
-  AreaState *st = &g_states[BYTE(overworld_screen_index) & 0x7f];
+  RememberExtraIn(&g_states[BYTE(overworld_screen_index) & 0x7f], pos, value);
+}
+
+// Vero se la casella e' cambiata
+static bool RememberExtraIn(AreaState *st, uint16 pos, uint16 value) {
   int i = 0;
   while (i < st->n_extra && st->extra_pos[i] != pos)
     i++;
-  if (i == kMaxExtra)
-    return;
+  if (i == kMaxExtra || (i < st->n_extra && st->extra_val[i] == value))
+    return false;  // lista piena, o casella gia' ricordata cosi'
   if (i == st->n_extra)
     st->n_extra++;
   st->extra_pos[i] = pos, st->extra_val[i] = value;
   st->used = true;
   st->version++;
   g_any_state = true;
+  return true;
+}
+
+bool HdWorld_KeepArrow(int k) {
+  if (!PersistOn() || player_is_indoors || g_hd_neighbor_tick)
+    return false;
+  AreaState *st = &g_states[BYTE(overworld_screen_index) & 0x7f];
+  if (st->n_arrows == kMaxArrows) {
+    // la freccia piu' vecchia lascia il posto
+    memmove(st->arrows, st->arrows + 1, (kMaxArrows - 1) * sizeof(ArrowRec));
+    st->n_arrows--;
+  }
+  ArrowRec *r = &st->arrows[st->n_arrows];
+  r->n = Arrow_StuckPieces(k, r->chr, r->flags, r->dx, r->dy);
+  if (!r->n)
+    return false;
+  r->x = Ancilla_GetX(k), r->y = Ancilla_GetY(k);
+  st->n_arrows++;
+  st->used = true;
+  g_any_state = true;
+  return true;
 }
 
 static void ApplyTiles(int head, bool memorize) {
@@ -322,8 +490,10 @@ void HdWorld_EnterAreaTiles(bool memorize) {
   int a = BYTE(overworld_screen_index);
   // i nemici delle aree lontane tornano quelli di partenza
   for (int i = 0; i < 128; i++)
-    if (g_states[i].used && i != (a & 0x7f) && AreaGap(i, a) >= kEnemyResetGap)
+    if (g_states[i].used && i != (a & 0x7f) && AreaGap(i, a) >= kEnemyResetGap) {
       ForgetEnemies(i);
+      KeepCarriedKilled(i);  // chi segue Link non torna a casa
+    }
   ApplyTiles(a, memorize);
 }
 
@@ -354,12 +524,7 @@ void HdWorld_RestoreKilled(void) {
       k--;
     if (k < 0)
       break;  // niente posto: ricomparira' come nuovo
-    const uint8 *d = r->data;
-    for (int f = 0; f < countof(kSpriteFields); f++) {
-      const SpriteField *sf = &kSpriteFields[f];
-      memcpy(g_ram + sf->addr + k * sf->size, d, sf->size);
-      d += sf->size;
-    }
+    LoadFields(k, r->data);
     overworld_sprite_was_loaded[r->blk >> 3] |= 0x80 >> (r->blk & 7);
   }
 }
@@ -371,9 +536,10 @@ static void CaptureEnemies(uint8 *pixels, int pitch, int width, int height) {
   int ext = (width - 256) / 2;
   // +1 come per il fondale: la riga 0 dello schermo e' la riga 1 della PPU
   int cam_x = BG2HOFS_copy2 + ppu->objBiasX - ext, cam_y = BG2VOFS_copy2 + ppu->objBiasY + 1;
-  int lx = link_x_coord, ly = link_y_coord;
+  // Link colpito salta: il suo disegno sale di link_z_coord
+  int lx = link_x_coord, ly = link_y_coord, lz = (int16)link_z_coord > 0 ? (int16)link_z_coord : 0;
   for (int k = 0; k < 16; k++) {
-    if (!IsAreaEnemy(k))
+    if (!IsAreaEnemy(k) || IsSubmerged(k))
       continue;
     int wx = SpriteWorldX(k), wy = SpriteWorldY(k), z = sprite_z[k];
     // riquadro largo: lance, elmi, scudi e la spada abbassata dei soldati
@@ -399,8 +565,8 @@ static void CaptureEnemies(uint8 *pixels, int pitch, int width, int height) {
         uint32 c = row[x], l = c >> 24;
         int px = wx + ox + x, py = wy - z + oy + y;
         bool mine = (l == 4 || l == 6);
-        // niente Link ne' altri nemici che passano davanti
-        if (mine && px >= lx - 4 && px < lx + 20 && py >= ly - 8 && py < ly + 24)
+        // niente Link (con spada e scudo) ne' altri nemici che passano davanti
+        if (mine && px >= lx - 12 && px < lx + 28 && py >= ly - lz - 16 && py < ly + 24)
           mine = false;
         for (int j = 0; j < 16 && mine; j++)
           if (j != k && sprite_state[j]) {
@@ -415,7 +581,10 @@ static void CaptureEnemies(uint8 *pixels, int pitch, int width, int height) {
   }
 }
 
+static bool LiveShown(int a);
+
 // Nemici delle aree vicine, fermi come l'ultima volta che si sono visti
+// (quelle che non si muovono dal vivo)
 static void DrawFrozenEnemies(uint8 *pixels, int pitch, int width, int height, int cam_x, int cam_y) {
   int cur = BYTE(overworld_screen_index) & 0x7f;
   for (int a = 0; a < 128; a++) {
@@ -423,10 +592,12 @@ static void DrawFrozenEnemies(uint8 *pixels, int pitch, int width, int height, i
     // l'area appena raggiunta si salta, tranne nel primo frame del passaggio,
     // quando il gioco non ha ancora caricato i suoi nemici (sparivano per un
     // frame)
-    if (!st->used || (a == cur && !InTransition()) || ((a ^ cur) & 0x40) || !st->n_alive)
+    if (!st->used || (a == cur && !InTransition()) || ((a ^ cur) & 0x40) || !st->n_alive || LiveShown(a))
       continue;
     for (int i = 0; i < st->n_alive; i++) {
       EnemyRec *r = &st->alive[i];
+      if (r->hidden)
+        continue;
       if (a == cur) {
         bool loaded = false;
         for (int k = 0; k < 16 && !loaded; k++)
@@ -492,9 +663,10 @@ void HdWorld_UpdateCamera(int *cam_x, int *cam_y) {
   int gx = BG2HOFS_copy2, gy = BG2VOFS_copy2;
   // titolo, selezione file, caricamento, e dentro case e labirinti (6, 7):
   // il mondo esterno torna com'era
-  if (main_module_index <= 7)
+  if (main_module_index <= 7) {
     HdWorld_ResetStates();
-  else if (main_module_index == 9 && submodule_index == 0 && PersistOn())
+    memset(carried_area, 0, 16);  // nessuno segue piu' Link
+  } else if (main_module_index == 9 && submodule_index == 0 && PersistOn())
     SnapshotArea();
   // Mappa del mondo aperta: la vista si conserva per il ritorno, cosi' alla
   // chiusura l'inquadratura e' la stessa di prima
@@ -739,6 +911,117 @@ static void DrawLoadedArea(AreaImage *img) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Mappa unica del mondo
+//
+// Il gioco ha in memoria le caselle (map16) della sola area corrente, e fuori
+// dai suoi bordi la mappa "ricomincia" dal lato opposto. Qui si tengono le
+// caselle di tutte le aree del mondo, con le modifiche del mondo persistente:
+// fuori dall'area corrente Link, i nemici e gli oggetti in volo leggono il
+// terreno da qui. Cosi' si puo' stare a cavallo del bordo, e al cambio d'area
+// Link non si ferma e non cammina da solo (overworld.c).
+
+typedef struct AreaMap {
+  uint32 key, version;  // AreaKey e StateVersion di quando e' stata letta
+  uint16 tiles[64 * 64];  // come dung_bg2: 64 caselle per riga
+} AreaMap;
+
+static AreaMap g_maps[128];
+static uint8 g_map_saved_ram[0x20000];
+static uint16 g_map_saved_vram[0x8000];
+static bool g_map_building;
+
+static int HeadAt(int wx, int wy);
+
+// Caselle dell'area caricata in questo momento (dopo le modifiche ricordate)
+static void StoreMap(int head) {
+  AreaMap *m = &g_maps[head & 0x7f];
+  memcpy(m->tiles, dung_bg2, sizeof(m->tiles));
+  m->key = AreaKey(head), m->version = StateVersion(head);
+}
+
+static bool MapReady(int head) {
+  AreaMap *m = &g_maps[head & 0x7f];
+  return m->key == AreaKey(head) && m->version == StateVersion(head);
+}
+
+// Le caselle di un'area: se mancano si leggono subito, come fa il gioco
+// entrando nell'area, salvando e ripristinando tutto (anche a meta' della
+// logica del gioco, o nella copia di un'area vicina)
+static AreaMap *GetMap(int head) {
+  if (MapReady(head))
+    return &g_maps[head & 0x7f];
+  if (g_map_building)
+    return NULL;
+  g_map_building = true;
+  Ppu *ppu = g_zenv.ppu;
+  memcpy(g_map_saved_ram, g_ram, sizeof(g_map_saved_ram));
+  memcpy(g_map_saved_vram, ppu->vram, sizeof(g_map_saved_vram));
+  overworld_screen_index = head;
+  overworld_area_index = head;
+  Overworld_LoadGFXAndScreenSize();
+  Overworld_DecompressAndDrawAllQuadrants();
+  Overworld_HandleOverlaysAndBombDoors();
+  ApplyTiles(head, false);
+  StoreMap(head);
+  memcpy(g_ram, g_map_saved_ram, sizeof(g_map_saved_ram));
+  memcpy(ppu->vram, g_map_saved_vram, sizeof(g_map_saved_vram));
+  g_map_building = false;
+  return &g_maps[head & 0x7f];
+}
+
+static bool WorldMapOn(void) {
+  return FeatureOn() && !player_is_indoors && overworld_screen_index < 0x80 && main_module_index == 9;
+}
+
+int HdWorld_WorldTile(int px, int py) {
+  if (!WorldMapOn() || px < 0 || py < 0 || px >= 4096 || py >= 4096)
+    return -1;
+  int ax, ay, as;
+  AreaRect(overworld_screen_index, &ax, &ay, &as);
+  if (px >= ax && px < ax + as && py >= ay && py < ay + as)
+    return -1;  // area corrente: vale la mappa del gioco
+  int head = HeadAt(px, py);
+  if (head < 0)
+    return -1;
+  AreaMap *m = GetMap(head);
+  if (!m)
+    return -1;
+  AreaRect(head, &ax, &ay, &as);
+  return m->tiles[((py - ay) >> 4) * 64 + ((px - ax) >> 4)];
+}
+
+bool HdWorld_SeamlessOn(void) {
+  return WorldMapOn();
+}
+
+bool HdWorld_OutsideArea(int px, int py) {
+  if (!WorldMapOn())
+    return false;
+  int ax, ay, as;
+  AreaRect(overworld_screen_index, &ax, &ay, &as);
+  return px < ax || px >= ax + as || py < ay || py >= ay + as;
+}
+
+void HdWorld_LeaveArea(void) {
+  if (WorldMapOn())
+    StoreMap(overworld_screen_index);
+}
+
+// Una volta per frame di gioco: l'area corrente (con le ultime modifiche) e
+// una delle aree del mondo non ancora lette, finche' ci sono tutte
+static void UpdateWorldMap(void) {
+  StoreMap(overworld_screen_index);
+  int world = overworld_screen_index & 0x40;
+  for (int sq = 0; sq < 64; sq++) {
+    int head = Overworld_AreaHead(sq) | world;
+    if (!MapReady(head)) {
+      GetMap(head);
+      return;
+    }
+  }
+}
+
 static uint8 g_saved_ram[0x20000];
 static uint16 g_saved_vram[0x8000];
 
@@ -758,6 +1041,7 @@ static void RenderArea(AreaImage *img, int head) {
   Overworld_DecompressAndDrawAllQuadrants();
   Overworld_HandleOverlaysAndBombDoors();
   ApplyTiles(head, false);  // cespugli tagliati e simili (mondo persistente)
+  StoreMap(head);
   DrawLoadedArea(img);
 
   memcpy(g_ram, g_saved_ram, sizeof(g_saved_ram));
@@ -1080,10 +1364,939 @@ static void FadeLikeGame(uint8 *pixels, int pitch, int width, int height) {
 }
 
 // ---------------------------------------------------------------------------
+// Nemici che seguono Link da un'area all'altra
+//
+// Un nemico che insegue Link non si ferma al bordo della sua area. Quando
+// Link passa in un'altra area, o quando il nemico di un'area vicina entra in
+// quella di Link, diventa un nemico del gioco vero (puo' ferire ed essere
+// colpito) che non appartiene piu' a nessuna area: la sua area lo conta come
+// sconfitto finche' il mondo non torna com'era. Se la grafica o i colori dei
+// nemici dell'area di Link sono diversi da quelli della sua area, lo si
+// disegna a parte con i suoi, in una copia della PPU.
+
+enum { kMaxGuests = 16, kMaxPending = 8 };
+// Inseguimento: cresce mentre il nemico si avvicina a Link e cala se si
+// allontana; da kChaseFollow in su (e non troppo lontano) il nemico lo segue
+enum { kChaseMax = 120, kChaseFollow = 16, kChaseNear = 48, kFollowDist = 192 };
+// al cambio d'area segue Link anche chi gli e' cosi' vicino, inseguendolo o no
+enum { kNearFollow = 128 };
+
+// Grafica dei nemici: seconda tabella degli sprite e loro colori
+typedef struct GuestGfx {
+  uint16 vram[0x1000];
+  uint16 cgram[0x80];
+} GuestGfx;
+
+typedef struct Guest {
+  bool used;
+  uint8 k, type;
+  GuestGfx gfx;
+} Guest;
+
+// Nemico che lascia la sua area vicina per entrare in quella di Link
+typedef struct Pending {
+  EnemyRec rec;
+  uint8 area;  // area d'origine, 0xff = colpo o altro oggetto senza area
+  GuestGfx gfx;
+} Pending;
+
+static Guest g_guests[kMaxGuests];
+static Pending g_pending[kMaxPending];
+static int g_n_pending, g_pending_room;
+static GuestGfx g_area_gfx;  // grafica dell'area corrente all'ultimo frame di gioco
+static bool g_area_gfx_valid;
+static int g_last_head = -1;
+static uint8 g_chase[16], g_chase_type[16];
+static bool g_carried[16];  // nemico che segue Link fuori dalla sua area
+static uint16 g_chase_x[16], g_chase_y[16];
+static Ppu *g_guest_ppu;
+static uint32 *g_guest_pix, *g_guest_tmp;
+static int g_guest_w, g_guest_h;
+static bool g_guest_drawn;
+// Voci OAM del gioco nascoste per questo disegno (si rimettono dopo: con
+// piu' disegni per frame di gioco servono ancora)
+static uint16 g_hidden_oam[128];
+static int16 g_hidden_y[128];
+static uint8 g_hidden_f0[128];
+static bool g_hidden[128];
+
+static void UnhideObj(Ppu *p, int i) {
+  p->oam[i * 2] = g_hidden_oam[i], p->objY[i] = g_hidden_y[i], p->objShowF0[i] = g_hidden_f0[i];
+  g_hidden[i] = false;
+}
+
+static void SaveGfx(GuestGfx *g, const Ppu *p) {
+  for (int i = 0; i < 0x1000; i++)
+    g->vram[i] = p->vram[(p->objTileAdr2 + i) & 0x7fff];
+  memcpy(g->cgram, p->cgram + 0x80, sizeof(g->cgram));
+}
+
+static bool SameGfx(const GuestGfx *g, const Ppu *p) {
+  if (memcmp(g->cgram, p->cgram + 0x80, sizeof(g->cgram)))
+    return false;
+  for (int i = 0; i < 0x1000; i++)
+    if (g->vram[i] != p->vram[(p->objTileAdr2 + i) & 0x7fff])
+      return false;
+  return true;
+}
+
+static void LoadGfx(Ppu *p, const GuestGfx *g) {
+  for (int i = 0; i < 0x1000; i++)
+    p->vram[(p->objTileAdr2 + i) & 0x7fff] = g->vram[i];
+  memcpy(p->cgram + 0x80, g->cgram, sizeof(g->cgram));
+}
+
+static Guest *GuestFind(int k) {
+  for (int i = 0; i < kMaxGuests; i++)
+    if (g_guests[i].used && g_guests[i].k == k)
+      return &g_guests[i];
+  return NULL;
+}
+
+static void GuestAdd(int k, const GuestGfx *gfx) {
+  Guest *g = GuestFind(k);
+  for (int i = 0; i < kMaxGuests && !g; i++)
+    if (!g_guests[i].used)
+      g = &g_guests[i];
+  if (!g)
+    return;  // si disegna con la grafica dell'area di Link
+  g->used = true, g->k = k, g->type = sprite_type[k];
+  memcpy(&g->gfx, gfx, sizeof(GuestGfx));
+}
+
+// Via quelli sconfitti, o il cui posto e' passato a un altro nemico
+static void GuestsCheck(void) {
+  for (int i = 0; i < kMaxGuests; i++) {
+    Guest *g = &g_guests[i];
+    if (g->used && (!sprite_state[g->k] || sprite_type[g->k] != g->type || sprite_N_word[g->k] != 0xffff))
+      g->used = false;
+  }
+}
+
+static void ChaseStep(uint8 *chase, int ox, int oy, int nx, int ny, int lx, int ly) {
+  if (ox == nx && oy == ny)
+    return;
+  int d0 = abs(ox - lx) + abs(oy - ly), d1 = abs(nx - lx) + abs(ny - ly);
+  if (d1 < d0)
+    *chase = *chase + 1 > kChaseMax ? kChaseMax : *chase + 1;
+  else if (d1 > d0 && d1 >= kChaseNear)  // vicino a Link (colpi, rimbalzi) non cala
+    *chase = *chase > 2 ? *chase - 2 : 0;
+}
+
+static int LinkDist(int k) {
+  return abs(SpriteWorldX(k) - link_x_coord) + abs(SpriteWorldY(k) - link_y_coord);
+}
+
+static bool IsFollower(int k, uint8 chase) {
+  if (sprite_type[k] == 0x55 && !sprite_E[k])
+    return false;  // lo Zora resta nella sua acqua (sprite_E: la sua palla di fuoco)
+  int d = LinkDist(k);
+  return sprite_state[k] == 9 && d < kFollowDist && (chase >= kChaseFollow || d < kNearFollow);
+}
+
+// Una volta per frame di gioco, nell'area corrente
+static void TrackMain(void) {
+  GuestsCheck();
+  int ax, ay, as;
+  AreaRect(BYTE(overworld_screen_index), &ax, &ay, &as);
+  for (int k = 0; k < 16; k++) {
+    // i nemici dell'area che camminano (non chi segue Link) non ne escono,
+    // neanche quando vengono respinti; chi vola va dove vuole
+    if (IsAreaEnemy(k) && !g_carried[k] && !FreeMover(k))
+      KeepInArea(k, g_chase_x[k], g_chase_y[k], sprite_type[k] == g_chase_type[k], ax, ay, as);
+    int x = SpriteWorldX(k), y = SpriteWorldY(k);
+    if (!sprite_state[k] || sprite_type[k] != g_chase_type[k])
+      g_chase[k] = 0, g_chase_type[k] = sprite_state[k] ? sprite_type[k] : 0xff, g_carried[k] = false;
+    else
+      ChaseStep(&g_chase[k], g_chase_x[k], g_chase_y[k], x, y, link_x_coord, link_y_coord);
+    g_chase_x[k] = x, g_chase_y[k] = y;
+    if (!IsMarkedCarried(k))
+      carried_area[k] = 0;
+  }
+  SaveGfx(&g_area_gfx, g_zenv.ppu);
+  g_area_gfx_valid = true;
+  g_last_head = BYTE(overworld_screen_index);
+  UpdateWorldMap();
+}
+
+void HdWorld_BeforeNewSprites(void) {
+  if (!PersistOn() || g_last_head < 0 || g_last_head == BYTE(overworld_screen_index))
+    return;
+  AreaState *st = &g_states[g_last_head & 0x7f];
+  int ax, ay, as;
+  AreaRect(BYTE(overworld_screen_index), &ax, &ay, &as);
+  for (int k = 0; k < 16; k++) {
+    if (!sprite_state[k])
+      continue;
+    bool area = IsAreaEnemy(k), guest = sprite_N_word[k] == 0xffff && GuestFind(k);
+    if (!area && !guest && !(sprite_N_word[k] == 0xffff && IsFollower(k, g_chase[k]))) {
+      // colpi, resti e altri oggetti senza area (pietre degli Octorok...)
+      // continuano il loro volo: alla fine del passaggio il gioco li
+      // toglierebbe (Sprite_InitializeSlots)
+      sprite_room[k] = BYTE(overworld_area_index);
+      continue;
+    }
+    // chi vola (corvi...) ed e' gia' nell'area nuova resta con Link
+    int cx = SpriteWorldX(k) + 8, cy = SpriteWorldY(k) + 8;
+    bool flies_in = FreeMover(k) && cx >= ax && cx < ax + as && cy >= ay && cy < ay + as;
+    if (!IsFollower(k, g_chase[k]) && !flies_in) {
+      if (!area)
+        sprite_room[k] = BYTE(overworld_area_index);
+      // resta nella sua area (mondo persistente): li' lo muove la sua copia
+      if (area)
+        sprite_state[k] = 0;
+      continue;
+    }
+    if (area) {
+      uint16 blk = sprite_N_word[k];
+      int j = 0;
+      for (int i = 0; i < st->n_alive; i++)
+        if (st->alive[i].blk != blk)
+          st->alive[j++] = st->alive[i];
+      st->n_alive = j;
+      if (st->n_killed < kMaxKilled)
+        st->killed[st->n_killed++] = blk;
+      sprite_N_word[k] = 0xffff;
+      MarkCarried(k, g_last_head, blk);
+      if (g_area_gfx_valid)
+        GuestAdd(k, &g_area_gfx);
+    }
+    g_chase[k] = kChaseMax;
+    g_carried[k] = true;
+    // alla fine del passaggio il gioco toglie i nemici nati in un'altra area
+    // (Sprite_InitializeSlots): questo ora e' dell'area nuova
+    sprite_room[k] = BYTE(overworld_area_index);
+  }
+}
+
+// I nemici arrivati dalle aree vicine entrano nel gioco vero
+static void InsertPending(void) {
+  for (int i = 0; i < g_n_pending; i++) {
+    int k = 15;
+    while (k >= 0 && sprite_state[k])
+      k--;
+    if (k < 0)
+      break;
+    LoadFields(k, g_pending[i].rec.data);
+    sprite_N_word[k] = 0xffff;
+    if (g_pending[i].area != 0xff)
+      MarkCarried(k, g_pending[i].area, g_pending[i].rec.blk);
+    else
+      carried_area[k] = 0;
+    g_chase[k] = kChaseMax, g_chase_type[k] = sprite_type[k];
+    g_chase_x[k] = SpriteWorldX(k), g_chase_y[k] = SpriteWorldY(k);
+    g_carried[k] = true;
+    sprite_room[k] = BYTE(overworld_area_index);
+    GuestAdd(k, &g_pending[i].gfx);
+  }
+  g_n_pending = 0;
+}
+
+// Dopo il caricamento di un salvataggio (il mondo persistente e' ripartito
+// da zero): chi seguiva Link resta sconfitto nella sua area
+void HdWorld_AfterLoad(void) {
+  memset(g_guests, 0, sizeof(g_guests));
+  memset(g_carried, 0, sizeof(g_carried));
+  g_n_pending = 0;
+  g_area_gfx_valid = false;
+  g_last_head = BYTE(overworld_screen_index);
+  for (int k = 0; k < 16; k++) {
+    g_chase[k] = 0, g_chase_type[k] = sprite_state[k] ? sprite_type[k] : 0xff;
+    g_chase_x[k] = SpriteWorldX(k), g_chase_y[k] = SpriteWorldY(k);
+  }
+  if (!PersistOn() || player_is_indoors)
+    return;
+  for (int k = 0; k < 16; k++) {
+    if (!IsMarkedCarried(k))
+      continue;
+    KeepCarriedKilled(carried_area[k] & 0x7f);
+    g_carried[k] = true;
+    g_chase[k] = kChaseMax;
+  }
+}
+
+bool HdWorld_Carried(int k) {
+  return g_carried[k] && sprite_state[k] && sprite_type[k] == g_chase_type[k] && PersistOn();
+}
+
+static void HideObj(Ppu *p, int i) {
+  p->oam[i * 2] = (p->oam[i * 2] & 0xff) | 0xf000;
+  p->objShowF0[i] = 0;
+  p->objY[i] = -1000;
+}
+
+// Disegna a parte (sopra al fondale, dietro all'HUD: DrawGuests) le voci OAM
+// scelte, con la grafica gfx (NULL: quella del gioco); nel gioco spariscono
+static void RenderApart(const bool *sel, const GuestGfx *gfx, int width, int height) {
+  Ppu *mp = g_zenv.ppu;
+  if (!g_guest_ppu && !(g_guest_ppu = malloc(sizeof(Ppu))))
+    return;
+  if (!g_guest_pix || g_guest_w != width || g_guest_h != height) {
+    free(g_guest_pix), free(g_guest_tmp);
+    g_guest_pix = malloc((size_t)width * height * 4);
+    g_guest_tmp = malloc((size_t)width * height * 4);
+    g_guest_w = width, g_guest_h = height;
+    if (!g_guest_pix || !g_guest_tmp) {
+      free(g_guest_pix), free(g_guest_tmp);
+      g_guest_pix = g_guest_tmp = NULL;
+      return;
+    }
+  }
+  if (!g_guest_drawn)
+    memset(g_guest_pix, 0, (size_t)width * height * 4);
+  // nella copia solo i pezzi scelti; nel gioco spariscono
+  Ppu *p = g_guest_ppu;
+  memcpy(p, mp, sizeof(Ppu));
+  for (int i = 0; i < 128; i++)
+    if (sel[i]) {
+      g_hidden_oam[i] = mp->oam[i * 2], g_hidden_y[i] = mp->objY[i], g_hidden_f0[i] = mp->objShowF0[i];
+      g_hidden[i] = true;
+      HideObj(mp, i);
+    }
+    else
+      HideObj(p, i);
+  if (gfx) {
+    LoadGfx(p, gfx);
+    memset(p->objIce, 0, sizeof(p->objIce));
+  }
+  p->brightness = 15;  // la luminosita' del gioco si applica dopo (Dim)
+  p->forcedBlank = false;
+  PpuBeginDrawing(p, (uint8 *)g_guest_tmp, width * 4, mp->renderFlags);
+  p->screenEnabled[0] = 0x10, p->screenEnabled[1] = 0;  // solo gli sprite
+  p->screenWindowed[0] = p->screenWindowed[1] = 0;
+  p->mathEnabled = 0, p->addSubscreen = p->subtractColor = p->halfColor = false;
+  p->clipMode = p->preventMathMode = 0;
+  p->mosaicEnabled = 0, p->mosaicSize = 1;
+  // l'ombra morbida dei suoi pezzi va nella stessa mappa delle ombre del
+  // gioco (objShadowOut e objCastShadow copiati da HdFx_ShadowsBeforeRender,
+  // che ha gia' nascosto la sua ombra del gioco)
+  for (int i = 0; i <= height; i++)
+    ppu_runLine(p, i);
+  int n = 0;
+  for (int i = 0; i < width * height; i++) {
+    uint32 c = g_guest_tmp[i], l = c >> 24;
+    if ((l == 4 || l == 6) && !g_guest_pix[i])
+      g_guest_pix[i] = c, n++;
+  }
+  if (!n) {
+    // niente disegnato (fuori dallo schermo o altro): lo disegna il gioco,
+    // anche con la grafica sbagliata, piuttosto che sparire
+    for (int i = 0; i < 128; i++)
+      if (sel[i])
+        UnhideObj(mp, i);
+    return;
+  }
+  g_guest_drawn = true;
+}
+
+void HdWorld_BeforeRender(int width, int height) {
+  g_guest_drawn = false;
+  if (!HdWorld_Active() || !(main_module_index == 9 || InMenuOverWorld()))
+    return;
+  Ppu *mp = g_zenv.ppu;
+  bool sel[128];
+  if (PersistOn()) {
+    GuestsCheck();
+    for (int gi = 0; gi < kMaxGuests; gi++) {
+      Guest *g = &g_guests[gi];
+      if (!g->used || SameGfx(&g->gfx, mp))
+        continue;
+      bool any = false;
+      for (int i = 0; i < 128; i++)
+        any |= sel[i] = g_sprite_oam_owner[i] == g->k;
+      if (any)
+        RenderApart(sel, &g->gfx, width, height);
+    }
+  }
+  // Oltre il bordo dell'area il fondale viene dalle immagini delle aree
+  // (HdWorld_Composite), ma la PPU ha li' caselle che non c'entrano: uno
+  // sprite poteva finire dietro a quelle con la priorita' alta e sparire (il
+  // soldato che segue Link, respinto da una freccia oltre il bordo). I pezzi
+  // che sporgono oltre il bordo si disegnano a parte, sopra alle immagini.
+  // (non nel menu: i suoi sprite vanno sopra all'HUD)
+  if (main_module_index != 9 || InTransition() || InMosaicTransition() || !mp->objXValid || !mp->objYValid ||
+      (g_world_dx == 0 && g_world_dy == 0 && mp->extraLeftRight == 0))
+    return;
+  int ext = (width - 256) / 2;
+  int cam_x = (int16)BG2HOFS_copy + mp->bgBiasX - ext;  // come HdWorld_Composite
+  int cam_y = (int16)BG2VOFS_copy + mp->bgBiasY + 1;
+  int ax, ay, as;
+  AreaRect(overworld_screen_index, &ax, &ay, &as);
+  int in_x0 = (int16)BG2HOFS_copy - ext, in_x1 = (int16)BG2HOFS_copy + 256 + ext;
+  if (in_x0 < ax) in_x0 = ax;
+  if (in_x1 > ax + as) in_x1 = ax + as;
+  int in_y1 = ay + as - kHiddenRows;
+  bool any = false;
+  for (int i = 0; i < 128; i++) {
+    sel[i] = false;
+    if (g_hidden[i])
+      continue;
+    int yy = mp->oam[i * 2] >> 8;
+    if (yy == 0xf0 && !mp->objShowF0[i])
+      continue;
+    int size = (mp->oam[0x100 + (i >> 3)] >> ((i & 7) * 2) & 2) ? 16 : 8;
+    int sx = mp->objX[i] - mp->objBiasX + ext, sy = mp->objY[i] - mp->objBiasY - 1;
+    if (sx + size <= 0 || sx >= width || sy + size <= 0 || sy >= height)
+      continue;
+    int wx = cam_x + sx, wy = cam_y + sy;
+    any |= sel[i] = wx < in_x0 || wx + size > in_x1 || wy < ay || wy + size > in_y1;
+  }
+  if (any)
+    RenderApart(sel, NULL, width, height);
+}
+
+static void GuestRestoreOam(void) {
+  for (int i = 0; i < 128; i++)
+    if (g_hidden[i])
+      UnhideObj(g_zenv.ppu, i);
+}
+
+// I nemici disegnati a parte, sopra al fondale e dietro all'HUD
+static void DrawGuests(uint8 *pixels, int pitch, int width, int height, const OverlayCtx *ov) {
+  if (!g_guest_drawn || g_guest_w != width || g_guest_h != height)
+    return;
+  for (int y = 0; y < height; y++) {
+    uint32 *row = (uint32 *)(pixels + y * pitch);
+    const uint32 *src = g_guest_pix + y * width;
+    for (int x = 0; x < width; x++) {
+      uint32 c = src[x], dl = row[x] >> 24;
+      if (!c || dl == 2 || dl == 4 || dl == 6)
+        continue;
+      row[x] = OverlayBlend(ov, Dim(c), x, y);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Aree vicine dal vivo
+//
+// Ogni area vicina che tocca la vista ha una copia tutta sua dello stato del
+// gioco (RAM e PPU), preparata come quando Link ci arriva: grafica e colori
+// dei suoi nemici, mappa delle caselle, nemici letti dalla sua tabella con
+// quelli sconfitti o spostati del mondo persistente. A ogni frame di gioco,
+// in quella copia, i nemici fanno un passo (Sprite_Main) con la telecamera
+// messa sulla vista: si attivano e spariscono come quelli dell'area corrente
+// e vedono Link, che li' pero' non puo' essere ferito ne' colpire. Non
+// escono dalla loro area (un muro invisibile sul bordo), tranne chi insegue
+// Link e entra nella sua area: passa al gioco vero. Il loro stato va nel
+// mondo persistente: quando Link entra nell'area il gioco li ritrova dove
+// erano. La PPU della copia disegna solo i suoi sprite, che si mettono sul
+// fotogramma oltre il bordo.
+
+enum { kMaxLive = 6, kLiveMargin = 96, kLiveKeepFrames = 30 };
+
+typedef struct LiveArea {
+  bool used;
+  int head;            // area (con il bit del mondo)
+  uint32 key;          // AreaKey quando e' stata preparata
+  uint32 wanted_at;    // ultimo frame in cui toccava la vista
+  bool fresh;          // ha fatto un passo: gli sprite vanno ridisegnati
+  bool drawn;          // pix contiene gli sprite dell'ultimo passo
+  uint8 *ram;          // copia di g_ram
+  Ppu *ppu;            // copia della PPU
+  uint32 *pix;         // sprite disegnati dalla sua PPU
+  int pix_w, pix_h;
+  uint8 chase[16], chase_type[16];  // inseguimento di Link (vedi ChaseStep)
+} LiveArea;
+
+// Posizione e stato di Link (quello vero) da dare alle copie
+typedef struct LiveLink {
+  uint16 x, y, z;
+  uint8 lower, facing, frame, freeze;
+  uint8 cur;  // area di Link
+} LiveLink;
+
+static LiveArea g_live[kMaxLive];
+static uint32 g_live_frame;
+static Ppu *g_saved_ppu;
+bool g_hd_neighbor_tick;
+
+static void LiveDropAll(void) {
+  for (int i = 0; i < kMaxLive; i++)
+    g_live[i].used = false;
+}
+
+// Un nemico che seguiva Link e lo ha perso di vista (il gioco lo toglie)
+// torna alla sua area: li' non conta piu' come sconfitto e ricompare al
+// punto di partenza, invece di sparire per sempre
+void HdWorld_CarriedLost(int k) {
+  if (!PersistOn() || g_hd_neighbor_tick || !IsMarkedCarried(k))
+    return;
+  int a = carried_area[k] & 0x7f;
+  uint16 blk = carried_blk[k];
+  carried_area[k] = 0;
+  g_carried[k] = false;
+  AreaState *st = &g_states[a];
+  int j = 0;
+  for (int i = 0; i < st->n_killed; i++)
+    if (st->killed[i] != blk)
+      st->killed[j++] = st->killed[i];
+  st->n_killed = j;
+  uint8 bit = 0x80 >> (blk & 7);
+  size_t off = (uint8 *)&overworld_sprite_was_loaded[blk >> 3] - g_ram;
+  if (a == (BYTE(overworld_screen_index) & 0x7f))
+    g_ram[off] &= ~bit;
+  for (int i = 0; i < kMaxLive; i++)
+    if (g_live[i].used && (g_live[i].head & 0x7f) == a)
+      g_live[i].ram[off] &= ~bit;
+}
+
+int HdWorld_AreaAt(int px, int py) {
+  return WorldMapOn() ? HeadAt(px, py) : -1;
+}
+
+// Vero se nell'area i sassi cadono dall'alto (Overlord_SpawnBoulder)
+static bool AreaHasBoulders(int head) {
+  for (const uint8 *src = GetOverworldSpritePtr(head); src[0] != 0xff; src += 3)
+    if (src[2] == 0xf4)
+      return true;
+  return false;
+}
+
+// Solo nelle copie delle aree vicine: un sasso dell'area di Link che scende
+// nell'area sotto (visibile col mondo continuo) cade finche' esce dalla vista
+bool HdWorld_BoulderGone(int k) {
+  if (!g_hd_neighbor_tick)
+    return false;
+  int head = HdWorld_AreaAt(SpriteWorldX(k) + 8, SpriteWorldY(k) + 8);
+  return head >= 0 && !AreaHasBoulders(head);
+}
+
+// Una casella di un'area vicina cambia (fuoco che passa il bordo, hd_burn.c):
+// la ricorda il mondo persistente (l'area la ritrova entrando), e si
+// aggiornano subito la mappa del mondo e la copia dal vivo dell'area;
+// l'immagine dell'area si ridisegna da sola (StateVersion)
+bool HdWorld_SetWorldTile(int px, int py, uint16 value) {
+  if (!PersistOn() || !WorldMapOn() || HdWorld_WorldTile(px, py) < 0)
+    return false;
+  int head = HeadAt(px, py), ax, ay, as;
+  AreaRect(head, &ax, &ay, &as);
+  int idx = ((py - ay) >> 4) * 64 + ((px - ax) >> 4);
+  bool ready = MapReady(head);
+  if (!RememberExtraIn(&g_states[head & 0x7f], idx * 2, value))
+    return false;
+  if (ready) {
+    AreaMap *m = &g_maps[head & 0x7f];
+    m->tiles[idx] = value;
+    m->version = StateVersion(head);
+  }
+  size_t off = (uint8 *)&dung_bg2[idx] - g_ram;
+  for (int i = 0; i < kMaxLive; i++)
+    if (g_live[i].used && g_live[i].head == head)
+      memcpy(g_live[i].ram + off, &value, 2);
+  return true;
+}
+
+// Gli sprite delle copie si vedono solo mentre si gioca all'aperto o con un
+// menu aperto sopra il mondo (fermi)
+static bool LiveVisibleNow(void) {
+  return (main_module_index == 9 && submodule_index == 0) || InMenuOverWorld();
+}
+
+static bool LiveShown(int a) {
+  if (!LiveVisibleNow())
+    return false;
+  for (int i = 0; i < kMaxLive; i++)
+    if (g_live[i].used && g_live[i].drawn && (g_live[i].head & 0x7f) == a)
+      return true;
+  return false;
+}
+
+static bool SaveMain(void) {
+  if (!g_saved_ppu && !(g_saved_ppu = malloc(sizeof(Ppu))))
+    return false;
+  memcpy(g_saved_ram, g_ram, sizeof(g_saved_ram));
+  memcpy(g_saved_ppu, g_zenv.ppu, sizeof(Ppu));
+  return true;
+}
+
+static void RestoreMain(void) {
+  memcpy(g_ram, g_saved_ram, sizeof(g_saved_ram));
+  memcpy(g_zenv.ppu, g_saved_ppu, sizeof(Ppu));
+}
+
+// Telecamera della copia sulla vista. Una riga piu' su, e la PPU della copia
+// sposta gli sprite di una riga in giu' (objBiasY = 1): con lo spostamento la
+// PPU legge le posizioni verticali senza "fare il giro" in fondo allo schermo
+static void SetLiveCamera(int vx, int vy) {
+  BG2HOFS_copy2 = BG2HOFS_copy = vx;
+  BG2VOFS_copy2 = BG2VOFS_copy = vy - 1;
+}
+
+// Prepara la copia di un'area partendo dallo stato del gioco (chi chiama
+// salva e ripristina lo stato vero)
+static bool LiveBuild(LiveArea *la, int head, int vx, int vy) {
+  if (!la->ram && !(la->ram = malloc(sizeof(g_saved_ram))))
+    return false;
+  if (!la->ppu && !(la->ppu = malloc(sizeof(Ppu))))
+    return false;
+  // come all'uscita da una casa (RenderArea), con in piu' i nemici
+  overworld_screen_index = head;
+  overworld_area_index = head;
+  Overworld_LoadGFXAndScreenSize();
+  InitializeTilesets();
+  OverworldLoadScreensPaletteSet();
+  Overworld_LoadPalettes(kOverworldBgPalettes[head], overworld_sprite_palettes[head]);
+  Palette_SetOwBgColor();
+  Overworld_CopyPalettesToCache();
+  Overworld_DecompressAndDrawAllQuadrants();
+  Overworld_HandleOverlaysAndBombDoors();
+  ApplyTiles(head, false);
+  StoreMap(head);
+  num_memorized_tiles = 0;
+  follower_indicator = 0;  // il compagno di Link resta con Link
+  SetLiveCamera(vx, vy);
+  Sprite_DisableAll();  // nemici, oggetti in volo e scintille dell'area corrente
+  for (int k = 0; k < 16; k++)
+    sprite_state[k] = 0;
+  Sprite_OverworldReloadAll_justLoad();
+  memcpy(g_zenv.ppu->cgram, main_palette_buffer, 0x200);
+  la->used = true;
+  la->head = head;
+  la->key = AreaKey(head);
+  la->fresh = la->drawn = false;
+  la->wanted_at = g_live_frame;
+  memset(la->chase, 0, sizeof(la->chase));
+  memset(la->chase_type, 0xff, sizeof(la->chase_type));
+  memcpy(la->ram, g_ram, sizeof(g_saved_ram));
+  memcpy(la->ppu, g_zenv.ppu, sizeof(Ppu));
+  return true;
+}
+
+// Un passo dei nemici nella copia
+static void LiveTick(LiveArea *la, int vx, int vy, const LiveLink *m) {
+  memcpy(g_ram, la->ram, sizeof(g_saved_ram));
+  memcpy(g_zenv.ppu, la->ppu, sizeof(Ppu));
+  main_module_index = 9, submodule_index = 0;
+  flag_unk1 = m->freeze;
+  frame_counter = m->frame;
+  link_x_coord = m->x, link_y_coord = m->y, link_z_coord = m->z;
+  link_is_on_lower_level = m->lower;
+  link_direction_facing = m->facing;
+  // qui Link non puo' essere ferito ne' colpire, e non parla
+  link_disable_sprite_damage = 1;
+  player_oam_y_offset = 0x80;
+  filtered_joypad_L = filtered_joypad_H = joypad1L_last = joypad1H_last = 0;
+  SetLiveCamera(vx, vy);
+  Sprite_ActivateAllProxima();
+  uint8 was[16];
+  uint16 px[16], py[16];
+  for (int k = 0; k < 16; k++)
+    was[k] = sprite_state[k], px[k] = SpriteWorldX(k), py[k] = SpriteWorldY(k);
+  for (int i = 0; i < 128; i++)
+    oam_buf[i].y = 0xf0;
+  g_hd_neighbor_tick = true;
+  Sprite_Main();
+  NMI_PrepareSprites();
+  g_hd_neighbor_tick = false;
+  for (int k = 0; k < 16; k++) {
+    if (!was[k] || !sprite_state[k] || sprite_type[k] != la->chase_type[k])
+      la->chase[k] = 0, la->chase_type[k] = sprite_state[k] ? sprite_type[k] : 0xff;
+    else
+      ChaseStep(&la->chase[k], px[k], py[k], SpriteWorldX(k), SpriteWorldY(k), m->x, m->y);
+  }
+  // muro invisibile sul bordo dell'area per chi cammina: chi esce torna
+  // dov'era. Chi insegue Link ed entra nella sua area passa al gioco vero (la
+  // sua area lo conta come sconfitto). I colpi e gli altri oggetti nati
+  // durante il gioco (pietre degli Octorok, palle di fuoco degli Zora...) e
+  // i nemici che volano (FreeMover) passano il bordo: nell'area di Link
+  // entrano nel gioco vero (possono colpirlo), altrove continuano qui
+  int ax, ay, as, bx, by, bs;
+  AreaRect(la->head, &ax, &ay, &as);
+  AreaRect(m->cur, &bx, &by, &bs);
+  for (int k = 0; k < 16; k++) {
+    if (!sprite_state[k])
+      continue;
+    int cx = SpriteWorldX(k) + 8, cy = SpriteWorldY(k) + 8;
+    if (cx >= ax && cx < ax + as && cy >= ay && cy < ay + as)
+      continue;
+    bool enemy = IsAreaEnemy(k);
+    bool in_link = cx >= bx && cx < bx + bs && cy >= by && cy < by + bs;
+    // sonda invisibile con cui un soldato cerca Link (Sprite_SpawnProbeAlways):
+    // si riferisce al posto del suo soldato, quindi resta in questa copia
+    if (!enemy && sprite_type[k] == 0x41) {
+      sprite_state[k] = 0;
+      continue;
+    }
+    bool free = FreeMover(k);
+    if (in_link && (!enemy || free || (was[k] && IsFollower(k, la->chase[k]))) && g_n_pending < g_pending_room) {
+      Pending *pe = &g_pending[g_n_pending++];
+      SaveFields(k, pe->rec.data);
+      SaveGfx(&pe->gfx, g_zenv.ppu);
+      pe->rec.blk = sprite_N_word[k];
+      pe->area = enemy ? la->head : 0xff;
+      sprite_state[k] = 0;
+      continue;
+    }
+    // colpi e nemici che volano continuano qui (anche nell'area di Link se
+    // nel gioco vero non c'e' posto: riprovano al frame dopo)
+    if (!enemy || free)
+      continue;
+    if (was[k]) {
+      // (se era gia' fuori, per esempio uscito quando era nell'area di Link,
+      // torna appena dentro il bordo invece di restare bloccato fuori)
+      KeepInArea(k, px[k], py[k], true, ax, ay, as);
+      // Zora che ha scelto dove riemergere oltre il bordo: riprova, altrimenti
+      // riemergerebbe nel punto di prima, che puo' essere sulla riva
+      if (sprite_type[k] == 0x55 && !sprite_E[k] && sprite_ai_state[k] == 1) {
+        sprite_ai_state[k] = 0;
+        sprite_delay_main[k] = 0;
+        sprite_flags3[k] &= ~0x40;
+      }
+    } else {
+      sprite_state[k] = 0;
+    }
+  }
+  NMI_DoUpdates();  // sprite, colori e grafica nella PPU della copia
+  SnapshotEnemies();
+  memcpy(la->ram, g_ram, sizeof(g_saved_ram));
+  memcpy(la->ppu, g_zenv.ppu, sizeof(Ppu));
+  la->fresh = true;
+}
+
+static void GuestsFromCopies(void);
+
+void HdWorld_TickNeighbors(void) {
+  g_live_frame++;
+  // fuori dal mondo esterno le copie non servono piu'; nei menu restano ferme
+  if (!PersistOn() || (main_module_index != 9 && main_module_index != 14)) {
+    LiveDropAll();
+    return;
+  }
+  if (main_module_index != 9 || submodule_index != 0 || !HdWorld_Active())
+    return;
+  TrackMain();
+  GuestsFromCopies();
+  int cur = BYTE(overworld_screen_index);
+  int vx = BG2HOFS_copy2 + g_cam_dx, vy = BG2VOFS_copy2 + g_cam_dy;
+  int ext = g_zenv.ppu->extraLeftRight;
+  // aree che toccano la vista, con un margine: i nemici si attivano poco
+  // prima di entrare nello schermo
+  int x0 = vx - ext - kLiveMargin, x1 = vx + 256 + ext + kLiveMargin;
+  int y0 = vy - kLiveMargin, y1 = vy + 240 + kLiveMargin;
+  int sx0 = x0 < 0 ? 0 : x0 >> 9, sx1 = x1 >= 4096 ? 7 : x1 >> 9;
+  int sy0 = y0 < 0 ? 0 : y0 >> 9, sy1 = y1 >= 4096 ? 7 : y1 >> 9;
+  int want[16], nw = 0;
+  for (int sy = sy0; sy <= sy1; sy++)
+    for (int sx = sx0; sx <= sx1; sx++) {
+      int head = HeadAt(sx * 512, sy * 512), i = 0;
+      if (head < 0 || head == cur)
+        continue;
+      while (i < nw && want[i] != head)
+        i++;
+      if (i == nw && nw < 16)
+        want[nw++] = head;
+    }
+  // via le copie che non servono piu': l'area in cui e' entrato Link (ora la
+  // muove il gioco), l'altro mondo, un evento che ha cambiato l'area, o
+  // lontane dalla vista da un po'
+  for (int i = 0; i < kMaxLive; i++) {
+    LiveArea *la = &g_live[i];
+    if (!la->used)
+      continue;
+    bool wanted = false;
+    for (int j = 0; j < nw && !wanted; j++)
+      wanted = want[j] == la->head;
+    if (la->head == cur || ((la->head ^ cur) & 0x40) || la->key != AreaKey(la->head))
+      la->used = false;
+    else if (wanted)
+      la->wanted_at = g_live_frame;
+    else if (g_live_frame - la->wanted_at > kLiveKeepFrames)
+      la->used = false;
+  }
+  if (!nw)
+    return;
+  LiveLink m = { link_x_coord, link_y_coord, link_z_coord, link_is_on_lower_level,
+                 link_direction_facing, frame_counter, flag_unk1, (uint8)cur };
+  // posti liberi per i nemici che entrano nell'area di Link
+  g_n_pending = g_pending_room = 0;
+  for (int k = 0; k < 16; k++)
+    g_pending_room += !sprite_state[k];
+  if (g_pending_room > kMaxPending)
+    g_pending_room = kMaxPending;
+  uint8 owner[128];
+  memcpy(owner, g_sprite_oam_owner, sizeof(owner));
+  if (!SaveMain())
+    return;
+  // al massimo un'area nuova per frame, per non rallentare
+  for (int j = 0; j < nw; j++) {
+    LiveArea *slot = NULL;
+    bool present = false;
+    for (int i = 0; i < kMaxLive && !present; i++)
+      present = g_live[i].used && g_live[i].head == want[j];
+    if (present)
+      continue;
+    for (int i = 0; i < kMaxLive && !slot; i++)
+      if (!g_live[i].used)
+        slot = &g_live[i];
+    for (int i = 0; i < kMaxLive && !slot; i++)
+      if (g_live[i].wanted_at != g_live_frame)
+        slot = &g_live[i];
+    if (!slot)
+      break;
+    slot->used = false;
+    LiveBuild(slot, want[j], vx, vy);
+    RestoreMain();
+    break;
+  }
+  for (int i = 0; i < kMaxLive; i++) {
+    LiveArea *la = &g_live[i];
+    if (la->used && la->wanted_at == g_live_frame)
+      LiveTick(la, vx, vy, &m);
+  }
+  RestoreMain();
+  memcpy(g_sprite_oam_owner, owner, sizeof(owner));
+  InsertPending();
+}
+
+// Chi segue Link prende la grafica della sua area dalla copia dal vivo di
+// quell'area, di solito accanto: dopo il caricamento di un salvataggio i
+// disegni a parte ripartono da zero, e quella presa dal gioco al passaggio
+// d'area puo' non essere completa (il soldato restava senza corpo). Senza
+// si disegnerebbe con le tile dell'area di Link, anche pezzi di Link
+static void GuestsFromCopies(void) {
+  static GuestGfx gfx;
+  for (int k = 0; k < 16; k++) {
+    if (!IsMarkedCarried(k))
+      continue;
+    int a = carried_area[k] & 0x7f;
+    for (int i = 0; i < kMaxLive; i++) {
+      LiveArea *la = &g_live[i];
+      if (la->used && (la->head & 0x7f) == a) {
+        SaveGfx(&gfx, la->ppu);
+        GuestAdd(k, &gfx);
+        break;
+      }
+    }
+  }
+}
+
+// La PPU della copia disegna solo i suoi sprite, nella vista del frame
+static void LiveRender(LiveArea *la, int width, int height) {
+  Ppu *p = la->ppu, *mp = g_zenv.ppu;
+  if (!la->pix || la->pix_w != width || la->pix_h != height) {
+    free(la->pix);
+    la->pix = malloc((size_t)width * height * 4);
+    la->pix_w = width, la->pix_h = height;
+    if (!la->pix) {
+      la->drawn = false;
+      return;
+    }
+  }
+  p->brightness = 15;  // la luminosita' del gioco si applica dopo (Dim)
+  p->forcedBlank = false;
+  PpuBeginDrawing(p, (uint8 *)la->pix, width * 4, mp->renderFlags);
+  p->extraLeftRight = mp->extraLeftRight;
+  p->extraLeftCur = p->extraRightCur = mp->extraLeftRight;
+  p->extraBottomCur = mp->extraBottomCur;
+  p->screenEnabled[0] = 0x10, p->screenEnabled[1] = 0;  // solo gli sprite
+  p->screenWindowed[0] = p->screenWindowed[1] = 0;
+  p->mathEnabled = 0, p->addSubscreen = p->subtractColor = p->halfColor = false;
+  p->clipMode = p->preventMathMode = 0;
+  p->mosaicEnabled = 0, p->mosaicSize = 1;
+  p->objBiasX = 0, p->objBiasY = 1;  // vedi SetLiveCamera
+  p->bgBiasX = p->bgBiasY = 0;
+  p->objYValid = p->objXValid = p->objOnTop = p->windowFullSides = false;
+  p->objShadowOut = NULL;
+  memset(p->objCastShadow, 0, sizeof(p->objCastShadow));
+  memset(p->objIce, 0, sizeof(p->objIce));
+  for (int i = 0; i <= height; i++)
+    ppu_runLine(p, i);
+  la->fresh = false;
+  la->drawn = true;
+}
+
+// Sprite delle aree vicine sul fotogramma, dietro all'HUD e agli sprite veri
+static void DrawLive(uint8 *pixels, int pitch, int width, int height, const OverlayCtx *ov) {
+  if (!LiveVisibleNow())
+    return;
+  int cur = BYTE(overworld_screen_index);
+  for (int i = 0; i < kMaxLive; i++) {
+    LiveArea *la = &g_live[i];
+    if (!la->used || la->head == cur || ((la->head ^ cur) & 0x40) || (!la->fresh && !la->drawn))
+      continue;
+    if (la->fresh || la->pix_w != width || la->pix_h != height)
+      LiveRender(la, width, height);
+    if (!la->drawn)
+      continue;
+    for (int y = 0; y < height; y++) {
+      uint32 *row = (uint32 *)(pixels + y * pitch);
+      const uint32 *src = la->pix + y * width;
+      for (int x = 0; x < width; x++) {
+        uint32 c = src[x], l = c >> 24, dl = row[x] >> 24;
+        if ((l != 4 && l != 6) || dl == 2 || dl == 4 || dl == 6)
+          continue;
+        row[x] = OverlayBlend(ov, Dim(c), x, y);
+      }
+    }
+  }
+}
+
+// Frecce piantate nei muri (mondo persistente), dietro all'HUD e agli sprite.
+// Seguono il fondale (anche la sua posizione interpolata), come i muri.
+static void DrawArrows(uint8 *pixels, int pitch, int width, int height, int cam_x, int cam_y) {
+  Ppu *ppu = g_zenv.ppu;
+  int cur = BYTE(overworld_screen_index);
+  for (int a = 0; a < 128; a++) {
+    AreaState *st = &g_states[a];
+    if (!st->n_arrows || ((a ^ cur) & 0x40))
+      continue;
+    for (int i = 0; i < st->n_arrows; i++) {
+      const ArrowRec *r = &st->arrows[i];
+      for (int p = 0; p < r->n; p++) {
+        // gli sprite compaiono una riga sotto la loro coordinata
+        int sx0 = r->x + r->dx[p] - cam_x, sy0 = r->y + r->dy[p] - cam_y + 1;
+        if (sx0 + 8 <= 0 || sy0 + 8 <= 0 || sx0 >= width || sy0 >= height)
+          continue;
+        uint8 fl = r->flags[p];
+        uint16 adr = (fl & 1) ? ppu->objTileAdr2 : ppu->objTileAdr1;
+        const uint16 *t = &ppu->vram[(adr + r->chr[p] * 16) & 0x7fff];
+        int pal = 0x80 + (fl >> 1 & 7) * 16;
+        bool hf = (fl & 0x40) != 0, vf = (fl & 0x80) != 0;
+        for (int row = 0; row < 8; row++) {
+          int sy = sy0 + row;
+          if ((unsigned)sy >= (unsigned)height)
+            continue;
+          uint32 *dst = (uint32 *)(pixels + sy * pitch);
+          int rr = vf ? 7 - row : row;
+          uint16 p01 = t[rr], p23 = t[rr + 8];
+          for (int col = 0; col < 8; col++) {
+            int sx = sx0 + col;
+            if ((unsigned)sx >= (unsigned)width)
+              continue;
+            int bit = hf ? col : 7 - col;
+            int v = (p01 >> bit & 1) | (p01 >> (8 + bit) & 1) << 1 |
+                    (p23 >> bit & 1) << 2 | (p23 >> (8 + bit) & 1) << 3;
+            uint32 l = dst[sx] >> 24;
+            if (!v || l == 2 || l == 4 || l == 6)
+              continue;
+            dst[sx] = Dim(Bgr15ToPixel(ppu->cgram[pal + v], 4));
+          }
+        }
+      }
+    }
+  }
+}
+
+// Tutto quello che il mondo persistente aggiunge al fotogramma
+static void DrawPersistent(uint8 *pixels, int pitch, int width, int height, int cam_x, int cam_y,
+                           const OverlayCtx *ov) {
+  if (!PersistOn()) {
+    DrawGuests(pixels, pitch, width, height, ov);  // pezzi oltre il bordo (HdWorld_BeforeRender)
+    return;
+  }
+  DrawLive(pixels, pitch, width, height, ov);
+  DrawGuests(pixels, pitch, width, height, ov);
+  DrawFrozenEnemies(pixels, pitch, width, height, cam_x, cam_y);
+  DrawArrows(pixels, pitch, width, height, cam_x, cam_y);
+}
+
+// ---------------------------------------------------------------------------
 // Composizione del frame
 
 void HdWorld_Composite(uint8 *pixels, int pitch, int width, int height) {
   g_renders_this_frame = 0;
+  GuestRestoreOam();
   if (!HdWorld_Active())
     return;
   Ppu *ppu = g_zenv.ppu;
@@ -1093,15 +2306,18 @@ void HdWorld_Composite(uint8 *pixels, int pitch, int width, int height) {
   // aspetto dei nemici, anche quando la vista coincide con quella del gioco
   if (main_module_index == 9 && submodule_index == 0 && PersistOn())
     CaptureEnemies(pixels, pitch, width, height);
-  if (!all && g_world_dx == 0 && g_world_dy == 0 && ppu->extraLeftRight == 0) {
-    PrefetchNeighbors();
-    return;
-  }
   int ext = (width - 256) / 2;
   int cam_x = (int16)BG2HOFS_copy + ppu->bgBiasX - ext;  // la PPU tiene solo 10 bit
   // +1: la PPU non mostra la sua riga 0, quindi la riga 0 dello schermo e' la
   // riga 1 del fondale
   int cam_y = (int16)BG2VOFS_copy + ppu->bgBiasY + 1;
+  OverlayCtx ov;
+  OverlayBegin(&ov, ext);
+  if (!all && g_world_dx == 0 && g_world_dy == 0 && ppu->extraLeftRight == 0) {
+    DrawPersistent(pixels, pitch, width, height, cam_x, cam_y, &ov);
+    PrefetchNeighbors();
+    return;
+  }
   int ax, ay, as;
   AreaRect(overworld_screen_index, &ax, &ay, &as);
   // La PPU ha le caselle dell'area solo attorno alla telecamera del gioco
@@ -1117,8 +2333,6 @@ void HdWorld_Composite(uint8 *pixels, int pitch, int width, int height) {
   AreaImage *img = NULL;
   // Mosaico del gioco anche sulle immagini (blocchi allineati come nella PPU)
   int msz = mosaic && (ppu->mosaicEnabled & 3) && ppu->mosaicSize > 1 ? ppu->mosaicSize : 1;
-  OverlayCtx ov;
-  OverlayBegin(&ov, ext);
   for (int y = 0; y < height; y++) {
     uint32 *row = (uint32 *)(pixels + y * pitch);
     int wy = cam_y + y;
@@ -1154,8 +2368,7 @@ void HdWorld_Composite(uint8 *pixels, int pitch, int width, int height) {
   }
   if (!mosaic) {
     DrawAnimatedCells(pixels, pitch, width, height, cam_x, cam_y, all, &ov);
-    if (PersistOn())
-      DrawFrozenEnemies(pixels, pitch, width, height, cam_x, cam_y);
+    DrawPersistent(pixels, pitch, width, height, cam_x, cam_y, &ov);
   }
   DrawHeightFog(pixels, pitch, width, height, cam_x, cam_y);
   if (mosaic)

@@ -768,6 +768,9 @@ uint8 g_link_oam_mask[128];
 // Pezzi di Link con y = 0xF0 che non sono "nascosti" ma stanno davvero 16
 // pixel sopra la telecamera del gioco (succede con la vista libera)
 uint8 g_link_oam_real_f0[128];
+// Link nascosto in questo frame (lampeggio dopo un colpo, porta, mantello):
+// i suoi pezzi a 0xF0 sono nascosti davvero, anche vicino alla telecamera
+static bool g_link_oam_hidden;
 
 static void LinkOam_MainInner();
 
@@ -778,10 +781,14 @@ void LinkOam_Main() {
   // lo usa, mentre una posizione qualsiasi puo' essere quella di un pezzo
   for (int i = 0; i < 128; i++)
     WORD(oam_buf[i].charnum) = 0xffff;
+  g_link_oam_hidden = false;
   LinkOam_MainInner();
   int rel = (int16)(link_y_coord - BG2VOFS_copy2);
   // 0xF0 e' una posizione vera se cade fra 16 pixel sopra e 32 sotto Link
-  bool f0_is_real = ((0xf0 - (rel - 16)) & 0xff) <= 48;
+  // (ma non quando il gioco nasconde Link: col mondo continuo Link a cavallo
+  // di due aree sta proprio sul bordo della telecamera, e i pezzi nascosti
+  // comparivano 16 pixel piu' su, come un secondo Link che lampeggia)
+  bool f0_is_real = ((0xf0 - (rel - 16)) & 0xff) <= 48 && !g_link_oam_hidden;
   for (int i = 0; i < 128; i++) {
     g_link_oam_mask[i] = (WORD(oam_buf[i].charnum) != 0xffff);
     g_link_oam_real_f0[i] = g_link_oam_mask[i] && oam_buf[i].y == 0xf0 && f0_is_real;
@@ -1135,6 +1142,7 @@ continue_after_set:
       link_cape_mode != 0)) {
     int shadow_oam_pos = (!hide_shadow && link_visibility_status != 12) ?
         (scratch_0_var ? kShadow_oam_indexes_1 : kShadow_oam_indexes_0)[r4loc] >> 2 : -10;
+    g_link_oam_hidden = true;
 
     // This appears to hide link by setting the extended bits of the oam to hide them from the screen.
     // It doesn't really play well with the widescreen modes, so change how it's done.
@@ -1155,6 +1163,13 @@ continue_after_set:
       // Clear the bit again for the shadow oam so it's not hidden?
       if (shadow_oam_pos >= 0)
         WORD(p[shadow_oam_pos]) = 0;
+      // con la vista libera la x dei pezzi di Link si ricalcola attorno a
+      // Link (ResolveSpritePositions) e il 9o bit non basta a nasconderli
+      OamEnt *oam = &oam_buf[sort_sprites_offset_into_oam_buffer >> 2];
+      for (int i = 0; i < 12; i++) {
+        if (i < shadow_oam_pos || i > shadow_oam_pos + 1)
+          oam[i].y = 0xf0;
+      }
     }
   }
 

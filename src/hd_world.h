@@ -24,13 +24,69 @@ bool HdWorld_BackgroundFromImages(void);
 
 // Mondo persistente (cespugli, sassi, buche, nemici sconfitti per area)
 void HdWorld_ResetStates(void);
+// Dopo il caricamento di un salvataggio: chi seguiva Link resta sconfitto nella sua area
+void HdWorld_AfterLoad(void);
 // Dopo aver decompresso l'area corrente: riscrive le caselle ricordate
 void HdWorld_EnterAreaTiles(bool memorize);
 // Dopo che il gioco ha azzerato la sua lista: la riempie di nuovo
 void HdWorld_RememberTiles(void);
 // Dopo aver letto i nemici dell'area: quelli sconfitti non ricompaiono
 void HdWorld_RestoreKilled(void);
-// Erba alta tagliata e buche della pala (che il gioco non memorizza)
+// Ogni casella cambiata dell'area corrente (anche quelle che il gioco non
+// memorizza o per cui la sua lista non ha posto)
 void HdWorld_RememberExtraTile(uint16 pos, uint16 value);
+// La freccia k, ferma in un muro, resta li' finche' il mondo non torna com'era.
+// Vero se da ora la disegna hd_world.c (l'oggetto in volo si puo' togliere)
+bool HdWorld_KeepArrow(int k);
+
+// Aree vicine dal vivo: una volta per frame di gioco, dopo la telecamera, i
+// nemici delle aree vicine visibili fanno un passo
+void HdWorld_TickNeighbors(void);
+// Vero mentre si muovono i nemici di un'area vicina (nella sua copia dello
+// stato del gioco): niente effetti su quello che vale per tutto il gioco
+extern bool g_hd_neighbor_tick;
+
+// Mondo unico: la casella (map16) nel punto del mondo (in pixel) fuori
+// dall'area corrente, presa dalla mappa di tutto il mondo; -1 nell'area
+// corrente o se non serve (dentro case e labirinti, mondo unico spento)
+int HdWorld_WorldTile(int px, int py);
+// Vero se il terreno fuori dall'area corrente viene dalla mappa del mondo
+bool HdWorld_SeamlessOn(void);
+// Vero se il punto e' fuori dall'area corrente (solo col mondo unico)
+bool HdWorld_OutsideArea(int px, int py);
+// Al cambio d'area, prima che il gioco carichi la nuova
+void HdWorld_LeaveArea(void);
+// Angolo della vista nel mondo all'ultimo frame (zelda_rtl.c), se valido
+extern int g_view_wx, g_view_wy;
+extern bool g_view_valid;
+
+// Nemici che seguono Link: al passaggio in un'altra area, prima che il gioco
+// legga i nemici della nuova, chi lo insegue resta con lui
+void HdWorld_BeforeNewSprites(void);
+// Mondo vivo, nemici fuori dalla vista (Sprite_PrepOamCoordOrDoubleRet): un
+// nemico dell'area resta fermo invece di sparire; chi seguiva Link torna a casa
+bool HdWorld_KeepOffscreen(int k);
+void HdWorld_CarriedLost(int k);
+// Vero se il bordo dell'area fa da muro per questo nemico (Sprite_CheckTileProperty)
+bool HdWorld_ConfinedToArea(int k);
+// Ogni frame di ogni sprite (Sprite_ExecuteSingle) e ogni volta che guarda il
+// terreno: chi non lo guarda da un po' vola e passa da un'area all'altra
+void HdWorld_SpriteFrame(int k);
+void HdWorld_SpriteTouchedTiles(int k);
+// Mondo unico: area (con il bit del mondo) che contiene il punto, -1 se non
+// si sa; e cambio di una casella di un'area diversa da quella corrente (resta
+// nel mondo persistente come le altre caselle cambiate)
+int HdWorld_AreaAt(int px, int py);
+bool HdWorld_SetWorldTile(int px, int py, uint16 value);
+// Mondo unico: i sassi che cadono dall'alto (Montagna della Morte) restano
+// nelle aree in cui cadono: vero se il sasso k e' entrato in un'altra area
+// (nel gioco usciva dallo schermo proprio al bordo dell'area)
+bool HdWorld_BoulderGone(int k);
+// Vero se il nemico k sta seguendo Link fuori dalla sua area: il suo posto
+// non va dato a un nemico nuovo
+bool HdWorld_Carried(int k);
+// Prima del disegno della PPU: i nemici arrivati da un'area con grafica
+// diversa si disegnano a parte, con la grafica della loro area
+void HdWorld_BeforeRender(int width, int height);
 
 #endif  // ZELDA3_HD_WORLD_H_

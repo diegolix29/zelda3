@@ -532,6 +532,8 @@ static bool HandleIniConfig(int section, const char *key, char *value) {
       return ParseBoolBit(value, &g_config.features0, kFeatures0_ModernHud);
     } else if (StringEqualsNoCase(key, "DungeonNames")) {
       return ParseBoolBit(value, &g_config.features0, kFeatures0_DungeonNames);
+    } else if (StringEqualsNoCase(key, "BurnAndFreezeInteraction")) {
+      return ParseBoolBit(value, &g_config.features0, kFeatures0_BurnAndFreeze);
     } else if (StringEqualsNoCase(key, "ShowXLRItemsInHud")) {
       return ParseBoolBit(value, &g_config.features0, kFeatures0_ShowXLRItemsInHud);
     } else if (StringEqualsNoCase(key, "TextSpeed")) {

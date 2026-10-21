@@ -10,6 +10,7 @@ Everything is optional and can be turned on or off from the new in-game options 
 **Gameplay and comfort**
 - Fast and continuous transitions between areas: Link keeps walking while the camera scrolls, no stop-and-go.
 - **Continuous world** (optional, outdoors): beyond the edge of an area you see the neighbouring areas, the camera follows Link past the edges and area changes are instant. Cut bushes and grass, lifted rocks, shovel holes and defeated enemies stay as you left them while you remain outdoors, and the enemies you leave behind stay visible, frozen, beyond the edge. Death Mountain fades into mist toward the lowlands, and the Lost Woods fog covers the whole screen.
+  - The world is alive beyond the edge: enemies of the neighbouring areas move live, enemies chasing Link follow him into the next area, flying enemies and projectiles cross the borders, fire spreads from one area to another, falling rocks keep falling past the edge and arrows stuck in walls stay where they hit.
 - Smooth camera that follows Link with a slight delay (4 levels), with interpolation on displays above 60 Hz.
 - In-game options menu with key and gamepad remapping; settings are written back to `zelda3.ini` keeping its comments.
 - Silent automatic saves on every area change and dungeon/house entrance (rotating slots), plus quick save slots.
@@ -17,7 +18,11 @@ Everything is optional and can be turned on or off from the new in-game options 
 - Dungeon map shows the dungeon name; faster floor switching.
 - Items assigned to X, L and R shown in the HUD; faster dialogue text while holding A or B.
 - Inventory with the bottles in their own column on the right.
-- The options menu, the button hints and the messages are in Italian or English depending on the language.
+- **Sword and items interact with the world** (optional, like the GBA version): every sword collects items, stronger swords cut signs and break pots, arrows break pots, the hammer breaks bushes and light rocks, the Magic Powder breaks bushes and pots, the Lantern hurts enemies, and the first magic item you get fills your magic.
+- **Fire and ice** (optional): the Lantern and the Fire Rod set bushes and tall grass on fire, and the fire spreads; Bombos burns everything on screen. The Ice Rod and Ether freeze bushes and grass (frozen grass is slippery ice), and fire and ice cancel each other.
+- **Dungeon names** (optional): entering a dungeon from its main door shows its name, as on GBA (with "Level N" in the Dark World).
+- Optional: up to 10 bombs at once and an extra flute travel point (9) on top of Death Mountain. More room for Link's weapons and items on screen.
+- The options menu, the button hints and the messages are in Italian or English depending on the language; in Italian the Start menu (item names, actions, headers) is translated too.
 - **Modern HUD** (optional): hearts and a thin magic bar top left, Y/A/B buttons top right like on the controller with the item (and its ammo), the sword and the action of the A button (Talk, Read, Open, Lift, Grab, Pull, Throw, Dash, Swim), rupees and dungeon keys bottom left.
 
 **Graphics**
@@ -25,7 +30,7 @@ Everything is optional and can be turned on or off from the new in-game options 
 - Dynamic lighting: warm glow around torches, braziers, lava and fire; dark rooms lit by the Lantern and by the torches you light.
 - Embers rising from flames, light rays and dust from windows, glow behind items Link holds up, heat haze over lava, denser rain with soft lightning.
 - Blurred game behind the inventory, dialogues and menus, soft shadows under characters and enemies, a soft circle transition, on-screen button hints in the inventory and on the maps, a HUD that slides away during dialogues and an autosave icon.
-- **Four Swords Adventures look** (`shaders/foursword`): crisp pixels, a diagonal brush texture anchored to the world (not on water), soft drop shadows, glow on bright areas and cartoon cloud shadows drifting over sunny outdoor areas. HUD and characters stay untouched.
+- **Four Swords Adventures look** (`shaders/foursword`): crisp pixels, a diagonal brush texture anchored to the world (not on water), soft drop shadows, glow on bright areas and cartoon cloud shadows of three different shapes drifting over sunny outdoor areas. HUD and characters stay untouched.
 
 <img width="500" height="281" alt="1" src="https://github.com/user-attachments/assets/57f92bd8-ecea-4552-8463-49ebad60474d" />
 <img width="500" height="281" alt="2" src="https://github.com/user-attachments/assets/648afd26-692d-482a-9c59-6dac186eea85" />
@@ -44,11 +49,15 @@ To build by hand follow the steps of the original project below; `build_msvc.bat
 
 Fork di [snesrev/zelda3](https://github.com/snesrev/zelda3) con una serie di migliorie "HD" ispirate a *Link's Awakening* per Switch e a *Four Swords Adventures*, più il supporto all'italiano. Ogni miglioria si attiva o disattiva dal nuovo menu opzioni nel gioco (**Esc** o clic della levetta destra) oppure dal [launcher](https://github.com/ghost19880/Zelda-3-Launcher).
 
-- **Mondo continuo** (facoltativo, all'aperto): oltre il bordo di un'area si vedono le aree vicine, la telecamera segue Link oltre i bordi e il cambio d'area è istantaneo. Cespugli ed erba tagliati, sassi sollevati, buche e nemici sconfitti restano come li hai lasciati finché resti all'aperto, e i nemici che ti lasci alle spalle restano visibili, fermi, oltre il bordo. La Montagna della Morte sfuma nella nebbia verso la pianura e la nebbia del Bosco Perduto copre tutto lo schermo.
+- **Mondo continuo** (facoltativo, all'aperto): oltre il bordo di un'area si vedono le aree vicine, la telecamera segue Link oltre i bordi e il cambio d'area è istantaneo. Cespugli ed erba tagliati, sassi sollevati, buche e nemici sconfitti restano come li hai lasciati finché resti all'aperto, e i nemici che ti lasci alle spalle restano visibili, fermi, oltre il bordo. La Montagna della Morte sfuma nella nebbia verso la pianura e la nebbia del Bosco Perduto copre tutto lo schermo. Il mondo è vivo anche oltre il bordo: i nemici delle aree vicine si muovono, chi insegue Link lo segue nell'area dopo, nemici volanti e colpi passano i confini, il fuoco si propaga da un'area all'altra, i sassi che cadono continuano oltre il bordo e le frecce piantate nei muri restano.
 - **HUD moderno** (facoltativo): cuori e magia a sinistra, tasti Y/A/B a destra come sul controller con oggetto, spada e la scritta dell'azione del tasto A (Parla, Leggi, Apri, Solleva…), rupie e chiavi in basso a sinistra.
+- **Spada e oggetti interagiscono con l'ambiente** (facoltativo, come su GBA): ogni spada raccoglie gli oggetti, le spade più forti tagliano i cartelli e rompono i vasi, le frecce rompono i vasi, il martello rompe cespugli e rocce chiare, la Polvere Magica rompe cespugli e vasi, la Lanterna ferisce i nemici e il primo oggetto magico riempie la magia.
+- **Fuoco e ghiaccio** (facoltativo): Lanterna e Bacchetta del Fuoco incendiano cespugli ed erba alta e il fuoco si propaga; il Medaglione della Fiamma brucia tutto lo schermo. La Bacchetta del Ghiaccio e il Medaglione dell'Etere congelano cespugli ed erba (l'erba congelata è ghiaccio che fa scivolare); fuoco e ghiaccio si annullano.
+- **Nomi dei dungeon** (facoltativo): entrando dalla porta principale compare il nome del dungeon, come su GBA (con "Livello N" nel Mondo delle Tenebre).
+- Facoltativi: fino a 10 bombe insieme e un punto di volo in più (9) in cima alla Montagna della Morte. Più posto sullo schermo per armi e oggetti di Link.
 - **Gioco:** transizioni veloci e continue tra le aree, telecamera fluida, menu opzioni con rimappatura di tastiera e pad, salvataggi automatici e rapidi, mappa del mondo interattiva con segnalini, nome del labirinto sulla mappa, oggetti X/L/R nell'HUD, testo più veloce.
-- **Grafica:** testo nitido nei dialoghi, illuminazione dinamica, braci, raggi dalle finestre, bagliore degli oggetti ricevuti, calore sopra la lava, pioggia e lampi migliorati, sfocatura dietro menu e dialoghi, ombre di personaggi e nemici, cerchio di transizione morbido, suggerimenti dei tasti, HUD che scivola via nei dialoghi, icona del salvataggio automatico, e lo shader in stile **Four Swords Adventures** (pennellate, ombre morbide, nuvole).
-- **Italiano:** font con le lettere accentate; la traduzione è nel repository [zelda3-italiano](https://github.com/ghost19880/zelda3-italiano) e la scarica il launcher.
+- **Grafica:** testo nitido nei dialoghi, illuminazione dinamica, braci, raggi dalle finestre, bagliore degli oggetti ricevuti, calore sopra la lava, pioggia e lampi migliorati, sfocatura dietro menu e dialoghi, ombre di personaggi e nemici, cerchio di transizione morbido, suggerimenti dei tasti, HUD che scivola via nei dialoghi, icona del salvataggio automatico, e lo shader in stile **Four Swords Adventures** (pennellate, ombre morbide, ombre di nuvole di tre forme diverse).
+- **Italiano:** font con le lettere accentate e menu Start tradotto (nomi degli oggetti, azioni, intestazioni); la traduzione è nel repository [zelda3-italiano](https://github.com/ghost19880/zelda3-italiano) e la scarica il launcher.
 
 Per cominciare scarica il [launcher](https://github.com/ghost19880/Zelda-3-Launcher/releases), indica la ROM americana e premi *Scarica*: al resto pensa lui.
 

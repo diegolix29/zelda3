@@ -9,6 +9,7 @@
 #include <math.h>
 #include <string.h>
 #include "hd_hud.h"
+#include "hd_world.h"
 #include "zelda_rtl.h"
 #include "variables.h"
 #include "features.h"
@@ -70,6 +71,8 @@ void HdHud_BeforeRender(Ppu *ppu) {
 }
 
 void HdHud_CanTalk(void) {
+  if (g_hd_neighbor_tick)
+    return;  // un abitante di un'area vicina (hd_world.c)
   g_talk_frame = frame_counter;
 }
 
@@ -368,6 +371,30 @@ static bool ShowMaxInYellow(int value, int max) {
   return (enhanced_features0 & kFeatures0_ShowMaxItemsInYellow) && value == max;
 }
 
+// Il giallo delle cifre del gioco (le rupie al massimo, DrawNumberTiles): il
+// colore piu' chiaro della cifra 8 con la palette gialla, cosi' i numeri
+// piccoli di bombe e frecce hanno lo stesso giallo anche con i colori della mod
+static uint32 YellowDigitColor(void) {
+  Ppu *ppu = g_zenv.ppu;
+  const int pal = 0x3490 >> 10 & 7;
+  uint16 base = ppu->bgLayer[2].tileAdr + 0x98 * 8;
+  uint32 best = 0xf8d828;
+  int best_l = -1;
+  for (int r = 0; r < 8; r++) {
+    uint16 w = ppu->vram[(base + r) & 0x7fff];
+    for (int bit = 0; bit < 8; bit++) {
+      int v = (w >> bit & 1) | (w >> (8 + bit) & 1) << 1;
+      if (!v)
+        continue;
+      uint32 c = Bgr15ToRgb(ppu->cgram[pal * 4 + v]);
+      int l = (c >> 16 & 0xff) * 3 + (c >> 8 & 0xff) * 6 + (c & 0xff);
+      if (l > best_l)
+        best = c, best_l = l;
+    }
+  }
+  return best;
+}
+
 // Oggetto dentro un tasto 18x18, con il numero se e' un consumabile; gli
 // oggetti di X, L e R solo se Link li ha ancora (come Hud_DrawXLRItems)
 static void DrawButtonItem(Canvas *cv, int x, int y, int item) {
@@ -385,7 +412,7 @@ static void DrawButtonItem(Canvas *cv, int x, int y, int item) {
     int n = count > 99 ? 99 : count;
     buf[0] = '0' + n / 10, buf[1] = '0' + n % 10, buf[2] = 0;
     const char *t = n < 10 ? buf + 1 : buf;
-    DrawSmallText(cv, x + S - SmallTextWidth(t), y + S - 5, t, ShowMaxInYellow(count, max) ? 0xf8d828 : 0xf8f8f8);
+    DrawSmallText(cv, x + S - SmallTextWidth(t), y + S - 5, t, ShowMaxInYellow(count, max) ? YellowDigitColor() : 0xf8f8f8);
   }
 }
 

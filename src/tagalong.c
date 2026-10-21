@@ -150,7 +150,7 @@ bool Follower_ValidateMessageFreedom() {  // 87f46f
 
 void Follower_MoveTowardsLink() {  // 88f91a
   for(;;) {
-    int k = 9;
+    int k = kAncilla_Slots - 1;
     int j = tagalong_var1;
     ancilla_y_lo[k] = tagalong_y_lo[j];
     ancilla_y_hi[k] = tagalong_y_hi[j];

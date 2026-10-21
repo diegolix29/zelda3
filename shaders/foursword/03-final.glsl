@@ -208,7 +208,9 @@ float brush_marks(vec2 world)
 
 // --- Ombre di nuvole ----------------------------------------------------------
 // Sagome da cartone animato, come in Four Swords: ogni nuvola e' un gruppo di
-// cerchi uniti (un cumulo a lobi), larga circa 250-310 pixel SNES. Ogni nuvola
+// cerchi uniti, larga circa 250-310 pixel SNES, di tre tipi scelti a caso
+// (cumulo lungo, cumulo alto a cupola, nuvola bassa a due strati) e a volte
+// girata da destra a sinistra. Ogni nuvola
 // sta tutta dentro la sua casella, con posizione e misura a caso, e le righe
 // di caselle sono sfalsate a caso: due nuvole non si toccano mai.
 #define CLOUD_CELL vec2(345.0, 250.0)
@@ -222,16 +224,52 @@ vec2 hash22(vec2 p)
     return fract((q.xx + q.yz) * q.zy);
 }
 
+// Distanza dal bordo di un lobo (cerchio di centro c e raggio r), con un po'
+// di variazione a caso di posizione e misura
+float cloud_lobe(vec2 p, vec2 seed, float k, vec2 c, float r, vec2 jitter)
+{
+    vec2 h = hash22(seed + vec2(k * 3.17, k * 1.31));
+    c += (h - 0.5) * jitter;
+    r *= mix(0.88, 1.12, fract(h.x * 5.3));
+    return length(p - c) - r;
+}
+
 float cloud_shape(vec2 p, vec2 seed)
 {
     // p: posizione rispetto al centro della nuvola, in pixel SNES (scala 1)
+    vec2 kind = hash22(seed + vec2(17.9, 63.1));
+    if (kind.y < 0.5)
+        p.x = -p.x;
     float d = 1e9;
-    for (int k = 0; k < 7; k++) {
-        vec2 h = hash22(seed + vec2(float(k) * 3.17, float(k) * 1.31));
-        float fk = float(k) / 6.0;
-        vec2 c = vec2(mix(-58.0, 58.0, fk) + (h.x - 0.5) * 22.0, (h.y - 0.5) * 44.0);
-        float r = mix(36.0, 52.0, 1.0 - abs(fk - 0.5) * 2.0) * mix(0.85, 1.15, fract(h.x * 5.3));
-        d = min(d, length(p - c) - r);
+    if (kind.x < 0.34) {
+        // cumulo lungo: una fila di lobi, piu' grandi in mezzo
+        for (int k = 0; k < 7; k++) {
+            float fk = float(k) / 6.0;
+            float r = mix(36.0, 52.0, 1.0 - abs(fk - 0.5) * 2.0);
+            d = min(d, cloud_lobe(p, seed, float(k), vec2(mix(-58.0, 58.0, fk), 0.0), r, vec2(22.0, 44.0)));
+        }
+    } else if (kind.x < 0.67) {
+        // cumulo alto a cupola: un lobo grande in mezzo, due sopra e i lati
+        // che scendono, con la base quasi piatta
+        d = min(d, cloud_lobe(p, seed, 0.0, vec2(0.0, -8.0), 58.0, vec2(14.0, 10.0)));
+        d = min(d, cloud_lobe(p, seed, 1.0, vec2(-30.0, -40.0), 36.0, vec2(14.0, 10.0)));
+        d = min(d, cloud_lobe(p, seed, 2.0, vec2(26.0, -42.0), 34.0, vec2(14.0, 10.0)));
+        d = min(d, cloud_lobe(p, seed, 3.0, vec2(-56.0, 16.0), 40.0, vec2(14.0, 10.0)));
+        d = min(d, cloud_lobe(p, seed, 4.0, vec2(56.0, 14.0), 40.0, vec2(14.0, 10.0)));
+        d = min(d, cloud_lobe(p, seed, 5.0, vec2(-88.0, 32.0), 26.0, vec2(12.0, 8.0)));
+        d = min(d, cloud_lobe(p, seed, 6.0, vec2(88.0, 30.0), 28.0, vec2(12.0, 8.0)));
+        d = max(d, p.y - 52.0);
+    } else {
+        // nuvola bassa a due strati: sotto tanti lobi piccoli, sopra pochi
+        // lobi spostati da una parte
+        for (int k = 0; k < 6; k++) {
+            float fk = float(k) / 5.0;
+            d = min(d, cloud_lobe(p, seed, float(k), vec2(mix(-84.0, 84.0, fk), 22.0), 30.0, vec2(18.0, 12.0)));
+        }
+        for (int k = 0; k < 3; k++) {
+            float fk = float(k) / 2.0;
+            d = min(d, cloud_lobe(p, seed, float(k) + 7.0, vec2(mix(-62.0, 18.0, fk), -12.0), 36.0, vec2(18.0, 14.0)));
+        }
     }
     return 1.0 - smoothstep(-2.5, 2.5, d);
 }

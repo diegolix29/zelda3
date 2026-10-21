@@ -47,9 +47,20 @@ enum {
   kCheckDamageFromPlayer_Ne = 2,
 };
 
+// Mondo continuo (zelda_rtl.c, hd_world.c): la vista va oltre lo schermo
+// del gioco, e la posizione verticale vera di ogni pezzo si ricostruisce al
+// disegno (ResolveSpritePositions); non nella copia di un'area vicina
+extern bool g_view_valid, g_hd_neighbor_tick;
+// Voci OAM scritte con la y vera 0xf0 (16 pixel sopra lo schermo del gioco),
+// che la PPU altrimenti prenderebbe per nascoste (il soldato al bordo d'area
+// restava senza corpo); si azzera a ogni frame con il buffer OAM
+extern uint8 g_oam_real_f0[128];
+
 static inline void SetOamHelper0(OamEnt *oam, uint16 x, uint16 y, uint8 charnum, uint8 flags, uint8 big) {
   oam->x = x;
-  oam->y = (uint16)(y + 0x10) < 0x100 ? y : 0xf0;
+  oam->y = (uint16)(y + 0x10) < 0x100 || (g_view_valid && !g_hd_neighbor_tick) ? y : 0xf0;
+  if (!g_hd_neighbor_tick)
+    g_oam_real_f0[oam - oam_buf] = (uint8)y == 0xf0 && g_view_valid;
   oam->charnum = charnum;
   oam->flags = flags;
   bytewise_extended_oam[oam - oam_buf] = big | (x >> 8 & 1);

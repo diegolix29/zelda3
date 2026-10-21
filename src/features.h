@@ -29,9 +29,8 @@ enum {
   // CollectItemsWithSword): ogni spada raccoglie gli oggetti, dalla Spada
   // Suprema rompe i cartelli, la Spada d'Oro rompe i vasi; le frecce rompono
   // i vasi (quelle d'argento tutti quelli sul percorso), il martello rompe
-  // cespugli e rocce piccole chiare; Lanterna e Bacchetta del Fuoco incendiano
-  // cespugli ed erba alta e il fuoco si propaga (hd_burn.c); il primo oggetto
-  // magico ricevuto riempie la barra della magia
+  // cespugli e rocce piccole chiare; la Lanterna ferisce i nemici davanti a
+  // Link; il primo oggetto magico ricevuto riempie la barra della magia
   kFeatures0_SwordAndItems = 16,
   // Punto di volo 9 dell'uccello: in cima al Monte della Morte a est, sulla
   // piattaforma dei pioli della Roccia della Tartaruga (prima era
@@ -73,6 +72,12 @@ enum {
   kFeatures0_ContinuousWorld = 1 << 21,
   // Nome del dungeon al centro dello schermo entrando dal mondo esterno, come su GBA
   kFeatures0_DungeonNames = 1 << 22,
+  // Interazione bruciatura e congelamento: Lanterna e Bacchetta del Fuoco
+  // incendiano cespugli ed erba alta e il fuoco si propaga, il Medaglione della
+  // Fiamma brucia tutto quello che si vede; la Bacchetta del Ghiaccio congela
+  // quelli sulla sua linea, il Medaglione dell'Etere tutti quelli che si vedono
+  // (hd_burn.c)
+  kFeatures0_BurnAndFreeze = 1 << 23,
 };
 
 #define enhanced_features0 (*(uint32*)(g_ram+0x64c))

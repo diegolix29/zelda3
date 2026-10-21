@@ -12,6 +12,23 @@
 #include "sprite_main.h"
 #include "assets.h"
 #include "hd_burn.h"
+#include "hd_world.h"
+#include "zelda_rtl.h"
+#include "snes/ppu.h"
+
+// Con il mondo continuo la vista e' piu' larga della telecamera del gioco e
+// spostata rispetto a lei (fino al bordo dell'area la telecamera del gioco
+// si ferma, la vista no): le armi di Link escono dallo schermo quando escono
+// dalla vista, e fino a li' urtano i muri. Non nelle copie delle aree vicine
+static bool Ancilla_LiveView(void) {
+  return g_view_valid && !g_hd_neighbor_tick && HdWorld_Active();
+}
+
+// Vero se il punto del mondo (x, y) e' fuori dalla vista
+static bool Ancilla_OutsideView(uint16 x, uint16 y) {
+  int ext = g_zenv.ppu->extraLeftRight;
+  return (uint16)(x - g_view_wx + ext) >= 256 + 2 * ext || (uint16)(y - g_view_wy) >= 240;
+}
 
 static const uint8 kAncilla_Pflags[68] = {
   0,    8,  0xc, 0x10, 0x10,    4, 0x10, 0x18,    8,    8,    8,    0, 0x14, 0, 0x10, 0x28,
@@ -338,7 +355,7 @@ void Ancilla_SetY(int k, uint16 y) {
 }
 
 int Ancilla_AllocHigh() {
-  for (int k = 9; k >= 0; k--) {
+  for (int k = kAncilla_Slots - 1; k >= 0; k--) {
     if (ancilla_type[k] == 0)
       return k;
   }
@@ -348,7 +365,17 @@ int Ancilla_AllocHigh() {
 static void Ancilla_SetOam(OamEnt *oam, uint16 x, uint16 y, uint8 charnum, uint8 flags, uint8 big) {
   uint8 yval = 0xf0;
   int xt = enhanced_features0 & kFeatures0_ExtendScreen64 ? 0x40 : 0;
-  if ((uint16)(x + xt) < 256 + xt * 2 && y < 256) {
+  if (Ancilla_LiveView()) {
+    // la posizione vera si ricostruisce al disegno (ResolveSpritePositions,
+    // nella finestra da 128 pixel prima a 384 dopo la vista)
+    int dx = g_view_wx - BG2HOFS_copy2, dy = g_view_wy - BG2VOFS_copy2;
+    if ((uint16)(x - dx + 0x80) < 0x200 && (uint16)(y - dy + 0x40) < 0x140) {
+      big |= (x >> 8) & 1;
+      oam->x = x;
+      yval = y;
+      g_oam_real_f0[oam - oam_buf] = yval == 0xf0;
+    }
+  } else if ((uint16)(x + xt) < 256 + xt * 2 && y < 256) {
     big |= (x >> 8) & 1;
     oam->x = x;
     if (y < 0xf0)
@@ -364,7 +391,14 @@ static void Ancilla_SetOam_Safe(OamEnt *oam, uint16 x, uint16 y, uint8 charnum, 
   uint8 yval = 0xf0;
   oam->x = x;
   int xt = enhanced_features0 & kFeatures0_ExtendScreen64 ? 0x48 : 0;
-  if ((uint16)(x + 0x80) < (0x180 + xt)) {
+  if (Ancilla_LiveView()) {
+    int dx = g_view_wx - BG2HOFS_copy2, dy = g_view_wy - BG2VOFS_copy2;
+    if ((uint16)(x - dx + 0x80) < 0x200 && (uint16)(y - dy + 0x40) < 0x140) {
+      big |= (x >> 8) & 1;
+      yval = y;
+      g_oam_real_f0[oam - oam_buf] = yval == 0xf0;
+    }
+  } else if ((uint16)(x + 0x80) < (0x180 + xt)) {
     big |= (x >> 8) & 1;
     if ((uint16)(y + 0x10) < 0x100)
       yval = y;
@@ -618,6 +652,10 @@ void SomariaBlock_SpawnBullets(int k) {  // 8881a7
 }
 
 void Ancilla_Main() {  // 888242
+  // Aree vicine dal vivo (hd_world.c): li' non ci sono oggetti di Link, e
+  // l'incendio non deve andare avanti due volte in un frame
+  if (g_hd_neighbor_tick)
+    return;
   HdBurn_Update();
   Ancilla_WeaponTink();
   Ancilla_ExecuteAll();
@@ -661,7 +699,7 @@ void Bomb_CheckSpriteDamage(int k) {  // 888287
 }
 
 void Ancilla_ExecuteAll() {  // 88832b
-  for (int i = 9; i >= 0; i--) {
+  for (int i = kAncilla_Slots - 1; i >= 0; i--) {
     cur_object_index = i;
     if (ancilla_type[i])
       Ancilla_ExecuteOne(ancilla_type[i], i);
@@ -669,7 +707,7 @@ void Ancilla_ExecuteAll() {  // 88832b
 }
 
 void Ancilla_ExecuteOne(uint8 type, int k) {  // 88833c
-  if (k < 6) {
+  if (k <= kAncilla_LinkSlots) {
     ancilla_oam_idx[k] = Ancilla_AllocateOamFromRegion_A_or_D_or_F(k, ancilla_numspr[k]);
   }
 
@@ -695,7 +733,7 @@ void Ancilla13_IceRodSparkle(int k) {  // 888435
     return;
 
   int j;
-  for (j = 4; j >= 0 && ancilla_type[j] != 0xb; j--) {}
+  for (j = kAncilla_LinkSlots - 1; j >= 0 && ancilla_type[j] != 0xb; j--) {}
   if (j >= 0 && ancilla_objprio[j])
     info.flags = 0x30;
 
@@ -949,7 +987,8 @@ bool Ancilla_CheckTileCollisionOneFloor(int k) {  // 888a03
 }
 
 bool Ancilla_CheckTileCollision_targeted(int k, uint16 x, uint16 y) {  // 888a26
-  if ((uint16)(y - BG2VOFS_copy2) >= 224 || (uint16)(x - BG2HOFS_copy2) >= 256)
+  if (Ancilla_LiveView() ? Ancilla_OutsideView(x, y) :
+      (uint16)(y - BG2VOFS_copy2) >= 224 || (uint16)(x - BG2HOFS_copy2) >= 256)
     return 0;
   uint8 tile_attr;
   if (!player_is_indoors) {
@@ -1285,7 +1324,7 @@ void Ancilla05_Boomerang(int k) {  // 8890fc
   static const int8 kBoomerang_X0[8] = {0, 0, -8, 8, 8, 8, -8, -8};
   static const int8 kBoomerang_Y0[8] = {-16, 6, 0, 0, -8, 8, -8, 8};
 
-  for (int j = 4; j >= 0; j--) {
+  for (int j = kAncilla_LinkSlots - 1; j >= 0; j--) {
     if (ancilla_type[j] == 0x22)
       goto exit_and_draw;
   }
@@ -2011,27 +2050,46 @@ void Ancilla09_Arrow(int k) {  // 88a131
   Arrow_Draw(k);
 }
 
+static const uint8 kArrow_Draw_Char[48] = {
+  0x2b, 0x2a, 0x2a, 0x2b, 0x3d, 0x3a, 0x3a, 0x3d, 0x2b, 0xff, 0x2b, 0xff, 0x3d, 0xff, 0x3d, 0xff,
+  0x3c, 0x2c, 0x3c, 0x2a, 0x3c, 0x2c, 0x3c, 0x2a, 0x2c, 0x3c, 0x2a, 0x3c, 0x2c, 0x3c, 0x2a, 0x3c,
+  0x3b, 0x2d, 0x3b, 0x3a, 0x3b, 0x2d, 0x3b, 0x3a, 0x2d, 0x3b, 0x3a, 0x3b, 0x2d, 0x3b, 0x3a, 0x3b,
+};
+static const uint8 kArrow_Draw_Flags[48] = {
+  0xa4, 0xa4, 0x24, 0x24, 0x64, 0x64, 0x24, 0x24, 0xa4, 0xff, 0x24, 0xff, 0x64, 0xff, 0x24, 0xff,
+  0xa4, 0xa4, 0xa4, 0xa4, 0xa4, 0xe4, 0xa4, 0xa4, 0x24, 0x24, 0x24, 0x24, 0x64, 0x24, 0x24, 0x24,
+  0x64, 0x64, 0x64, 0xe4, 0x64, 0xe4, 0x64, 0xe4, 0x24, 0x24, 0x24, 0xa4, 0xa4, 0x24, 0x24, 0xa4,
+};
+static const int8 kArrow_Draw_Y[48] = {
+  0,  8, 0, 8, 0, 0, 0, 0,  0,  0, 0, 0, 0, 0, 0, 0,
+  0,  8, 0, 8, 0, 8, 0, 8,  0,  8, 0, 8, 0, 8, 0, 8,
+  -1, -1, 0, 0, 0, 1, 0, 0, -1, -1, 0, 0, 1, 0, 0, 0,
+};
+static const int8 kArrow_Draw_X[48] = {
+  0, 0, 0, 0,  0,  8, 0, 8, 0, 0, 0, 0,  0,  0, 0, 0,
+  1, 1, 0, 0, -1, -2, 0, 0, 1, 1, 0, 0, -2, -1, 0, 0,
+  0, 8, 0, 8,  0,  8, 0, 8, 0, 8, 0, 8,  0,  8, 0, 8,
+};
+
+// Mondo persistente (hd_world.c): la freccia rimasta nel muro si disegna
+// a parte. Pezzi del suo disegno finale (dritta, fotogramma con il bit 8),
+// rispetto alla posizione della freccia, come in Arrow_Draw. Ne restituisce
+// il numero (al massimo 2)
+int Arrow_StuckPieces(int k, uint8 *chr, uint8 *flags, int8 *dx, int8 *dy) {
+  int j = ((ancilla_dir[k] & 3) * 4 + 8 + 1) * 2, n = 0;
+  uint8 pal = (link_item_bow & 4) ? 2 : 4;
+  for (int i = 0; i != 2; i++, j++) {
+    if (kArrow_Draw_Char[j] == 0xff)
+      continue;
+    chr[n] = kArrow_Draw_Char[j];
+    flags[n] = kArrow_Draw_Flags[j] & ~0x3E | pal;
+    dx[n] = kArrow_Draw_X[j], dy[n] = kArrow_Draw_Y[j];
+    n++;
+  }
+  return n;
+}
+
 void Arrow_Draw(int k) {  // 88a36e
-  static const uint8 kArrow_Draw_Char[48] = {
-    0x2b, 0x2a, 0x2a, 0x2b, 0x3d, 0x3a, 0x3a, 0x3d, 0x2b, 0xff, 0x2b, 0xff, 0x3d, 0xff, 0x3d, 0xff,
-    0x3c, 0x2c, 0x3c, 0x2a, 0x3c, 0x2c, 0x3c, 0x2a, 0x2c, 0x3c, 0x2a, 0x3c, 0x2c, 0x3c, 0x2a, 0x3c,
-    0x3b, 0x2d, 0x3b, 0x3a, 0x3b, 0x2d, 0x3b, 0x3a, 0x2d, 0x3b, 0x3a, 0x3b, 0x2d, 0x3b, 0x3a, 0x3b,
-  };
-  static const uint8 kArrow_Draw_Flags[48] = {
-    0xa4, 0xa4, 0x24, 0x24, 0x64, 0x64, 0x24, 0x24, 0xa4, 0xff, 0x24, 0xff, 0x64, 0xff, 0x24, 0xff,
-    0xa4, 0xa4, 0xa4, 0xa4, 0xa4, 0xe4, 0xa4, 0xa4, 0x24, 0x24, 0x24, 0x24, 0x64, 0x24, 0x24, 0x24,
-    0x64, 0x64, 0x64, 0xe4, 0x64, 0xe4, 0x64, 0xe4, 0x24, 0x24, 0x24, 0xa4, 0xa4, 0x24, 0x24, 0xa4,
-  };
-  static const int8 kArrow_Draw_Y[48] = {
-    0,  8, 0, 8, 0, 0, 0, 0,  0,  0, 0, 0, 0, 0, 0, 0,
-    0,  8, 0, 8, 0, 8, 0, 8,  0,  8, 0, 8, 0, 8, 0, 8,
-    -1, -1, 0, 0, 0, 1, 0, 0, -1, -1, 0, 0, 1, 0, 0, 0,
-  };
-  static const int8 kArrow_Draw_X[48] = {
-    0, 0, 0, 0,  0,  8, 0, 8, 0, 0, 0, 0,  0,  0, 0, 0,
-    1, 1, 0, 0, -1, -2, 0, 0, 1, 1, 0, 0, -2, -1, 0, 0,
-    0, 8, 0, 8,  0,  8, 0, 8, 0, 8, 0, 8,  0,  8, 0, 8,
-  };
   Point16U pt;
   Ancilla_PrepAdjustedOamCoord(k, &pt);
   if (ancilla_objprio[k])
@@ -2082,9 +2140,26 @@ void Ancilla0A_ArrowInTheWall(int k) {  // 88a45b
       return;
     } else if (ancilla_item_to_link[k] & 8) {
       ancilla_aux_timer[k] = 0x80;
+      // mondo persistente: la freccia ferma nel muro (non in un nemico) resta
+      // li' e da ora la disegna hd_world.c
+      if (sign8(ancilla_S[k]) && !ancilla_H[k] && HdWorld_KeepArrow(k)) {
+        ancilla_type[k] = 0;
+        return;
+      }
     }
   }
   Arrow_Draw(k);
+}
+
+// Il colpo della Bacchetta del Ghiaccio congela i cespugli e l'erba alta che
+// incontra in linea retta, nei punti in cui controlla i muri
+static void IceRodShot_FreezeAhead(int k) {
+  static const int8 kProbe8_X[4] = {4, 4, 4, 12}, kProbe8_Y[4] = {4, 12, 5, 5};
+  static const int8 kProbe12_X[4] = {12, 12, 4, 12}, kProbe12_Y[4] = {4, 12, 12, 12};
+  int d = ancilla_dir[k] & 3;
+  uint16 x = Ancilla_GetX(k), y = Ancilla_GetY(k);
+  HdBurn_Freeze(x + kProbe8_X[d], y + kProbe8_Y[d]);
+  HdBurn_Freeze(x + kProbe12_X[d], y + kProbe12_Y[d]);
 }
 
 void Ancilla0B_IceRodShot(int k) {  // 88a4dd
@@ -2102,6 +2177,7 @@ void Ancilla0B_IceRodShot(int k) {  // 88a4dd
         return;
       Ancilla_MoveY(k);
       Ancilla_MoveX(k);
+      IceRodShot_FreezeAhead(k);
       if (Ancilla_CheckSpriteCollision(k) >= 0 || Ancilla_CheckTileCollision(k)) {
         ancilla_type[k] = 0x11;
         ancilla_numspr[k] = kAncilla_Pflags[0x11];
@@ -2516,6 +2592,9 @@ void EtherSpell_HandleRadialSpin(int k) {  // 88abef
     }
   }
   ancilla_type[k] = 0;
+  // fine dell'animazione: i nemici si congelano e con loro cespugli ed erba
+  // che si vedono
+  HdBurn_FreezeScreen();
   load_chr_halfslot_even_odd = 1;
   byte_7E0324 = 0;
   state_for_spin_attack = 0;
@@ -2825,6 +2904,9 @@ void BombosSpell_ControlBlasting(int kk) {  // 88b40d
     }
   }
   ancilla_type[kk] = 0;
+  // fine dell'animazione: i nemici prendono fuoco e con loro cespugli ed
+  // erba che si vedono
+  HdBurn_IgniteScreen();
   load_chr_halfslot_even_odd = 1;
   byte_7E0324 = 0;
   state_for_spin_attack = 0;
@@ -4735,7 +4817,7 @@ void Ancilla27_Duck(int k) {  // 88dde8
         (link_pose_for_item | related_to_hookshot | link_force_hold_sword_up | link_disable_sprite_damage) ||
         (link_state_bits & 0x80))
       goto endif_1;
-    for (int i = 4; i >= 0; i--) {
+    for (int i = kAncilla_LinkSlots - 1; i >= 0; i--) {
       uint8 a = ancilla_type[i];
       if (a == 0x2a || a == 0x1f || a == 0x30 || a == 0x31 || a == 0x41)
         ancilla_type[i] = 0;
@@ -4805,7 +4887,7 @@ int AncillaAdd_SomariaBlock(uint8 type, uint8 y) {  // 88e078
   int k = AncillaAdd_AddAncilla_Bank08(type, y);
   if (k < 0)
     return k;
-  for (int j = 4; j >= 0; j--) {
+  for (int j = kAncilla_LinkSlots - 1; j >= 0; j--) {
     if (j == k || ancilla_type[j] != 0x2c)
       continue;
     if (j == flag_is_ancilla_to_pick_up - 1)
@@ -5546,7 +5628,7 @@ void RevivalFairy_MonitorHP() {  // 88f430
     some_animation_timer_steps = 0;
     BYTE(link_z_coord) = 0;
     link_incapacitated_timer = 0;
-    for(int i = 0; i < 5; i++)
+    for(int i = 0; i < kAncilla_LinkSlots; i++)
       ancilla_type[i] = 0;
     return;
   }
@@ -6063,7 +6145,7 @@ int AncillaAdd_FallingPrize(uint8 a, uint8 item_idx, uint8 yv) {  // 898bc1
 }
 
 void AncillaAdd_ChargedSpinAttackSparkle() {  // 898cb1
-  for (int k = 9; k >= 0; k--) {
+  for (int k = kAncilla_Slots - 1; k >= 0; k--) {
     if (ancilla_type[k] == 0 || ancilla_type[k] == 0x3c) {
       ancilla_type[k] = 13;
       ancilla_floor[k] = link_is_on_lower_level;
@@ -6225,7 +6307,7 @@ void AncillaAdd_BlastWallFireball(uint8 a, uint8 y, int r4) {  // 899031
     -64, 0, -22,  42, -38,  38, -42,  22, 0,  64,  22,  42,  38,  38,  42,  22,
     64, 0,  22, -42,  38, -38,  42, -22, 0, -64, -22, -42, -38, -38, -42, -22,
   };
-  for (int k = 10; k != 4; k--) {
+  for (int k = kAncilla_Slots - 1; k != kAncilla_LinkSlots - 1; k--) {
     if (ancilla_type[k] == 0) {
       ancilla_type[k] = 0x32;
       ancilla_floor[k] = link_is_on_lower_level;
@@ -6525,7 +6607,7 @@ void AncillaAdd_SpinAttackInitSpark(uint8 a, uint8 x, uint8 y) {  // 89960b
   static const int8 kSpinAttackStartSparkle_X[4] = {10, 7, 28, -10};
 
   int k = Ancilla_AddAncilla(a, y);
-  for (int i = 4; i >= 0; i--) {
+  for (int i = kAncilla_LinkSlots - 1; i >= 0; i--) {
     if (ancilla_type[i] == 0x31)
       ancilla_type[i] = 0;
   }
@@ -6583,7 +6665,7 @@ void AncillaAdd_BlastWall() {  // 899692
 
 void AncillaAdd_SwordChargeSparkle(int k) {  // 899757
   int j;
-  for (j = 9; ancilla_type[j] != 0; ) {
+  for (j = kAncilla_Slots - 1; ancilla_type[j] != 0; ) {
     if (--j < 0)
       return;
   }
@@ -6848,7 +6930,7 @@ int Ancilla_AddAncilla(uint8 a, uint8 y) {  // 899ce2
 }
 
 bool AncillaAdd_CheckForPresence(uint8 a) {  // 899d20
-  for (int k = 5; k >= 0; k--) {
+  for (int k = kAncilla_LinkSlots; k >= 0; k--) {
     if (ancilla_type[k] == a)
       return true;
   }
@@ -6857,19 +6939,19 @@ bool AncillaAdd_CheckForPresence(uint8 a) {  // 899d20
 
 int AncillaAdd_ArrowFindSlot(uint8 type, uint8 ay) {  // 899d36
   int k, n = 0;
-  for (k = 4; k >= 0; k--) {
+  for (k = kAncilla_LinkSlots - 1; k >= 0; k--) {
     if (ancilla_type[k] == 10)
       n++;
   }
   if (n != ay + 1) {
-    for (k = 4; k >= 0; k--) {
+    for (k = kAncilla_LinkSlots - 1; k >= 0; k--) {
       if (ancilla_type[k] == 0)
         break;
     }
   } else {
     do {
       if (sign8(--ancilla_alloc_rotate))
-        ancilla_alloc_rotate = 4;
+        ancilla_alloc_rotate = kAncilla_LinkSlots - 1;
       k = ancilla_alloc_rotate;
     } while (ancilla_type[k] != 10);
   }
@@ -6915,7 +6997,7 @@ bool Ancilla_CheckInitialTileCollision_Class2(int k) {  // 899e44
 }
 
 uint8 Ancilla_TerminateSelectInteractives(uint8 y) {  // 89ac6b
-  int i = 5;
+  int i = kAncilla_LinkSlots;
 
   do {
     if (ancilla_type[i] == 0x3e) {
@@ -7026,7 +7108,7 @@ int Ancilla_AllocInit(uint8 type, uint8 limit) {  // 8ff577
     BYTE(R14) = limit + 1;
 
   int n = 0;
-  for (int i = 0; i < 5; i++) {
+  for (int i = 0; i < kAncilla_LinkSlots; i++) {
     if (ancilla_type[i] == type)
       n++;
   }
@@ -7034,7 +7116,7 @@ int Ancilla_AllocInit(uint8 type, uint8 limit) {  // 8ff577
     return -1;
 
   // Try to reuse an empty ancilla slot
-  for (int j = (type == 7 || type == 8) ? limit : 4; j >= 0; j--) {
+  for (int j = (type == 7 || type == 8) ? limit : kAncilla_LinkSlots - 1; j >= 0; j--) {
     if (ancilla_type[j] == 0)
       return j;
   }
@@ -7147,6 +7229,11 @@ int DashTremor_TwiddleOffset(int k) {  // 8ffafe
 }
 
 void Ancilla_TerminateIfOffscreen(int j) {  // 8ffd52
+  if (Ancilla_LiveView()) {
+    if (Ancilla_OutsideView(Ancilla_GetX(j), Ancilla_GetY(j)))
+      ancilla_type[j] = 0;
+    return;
+  }
   int xt = (enhanced_features0 & kFeatures0_ExtendScreen64) ? 0x40 : 0;
   uint16 x = Ancilla_GetX(j) - BG2HOFS_copy2 + xt;
   uint16 y = Ancilla_GetY(j) - BG2VOFS_copy2;

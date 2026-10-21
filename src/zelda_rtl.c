@@ -143,6 +143,10 @@ static void SimpleHdma_DoLine(SimpleHdma *c) {
 
 // Spostamento visivo della telecamera fluida
 int g_cam_dx, g_cam_dy;
+// Mondo continuo: angolo della vista nel mondo all'ultimo frame, valido
+// anche quando la telecamera del gioco salta al cambio d'area
+int g_view_wx, g_view_wy;
+bool g_view_valid;
 // Spostamento totale applicato al fondale nel frame disegnato (telecamera
 // fluida + interpolazione per schermi oltre i 60 Hz), letto anche dallo shader
 int g_render_bias_x, g_render_bias_y;
@@ -294,6 +298,8 @@ void ZeldaUpdateCamera() {
   g_cam_last_x = link_x_coord, g_cam_last_y = link_y_coord;
   g_cam_dx = g_cam_int_x - gx;
   g_cam_dy = g_cam_int_y - gy;
+  g_view_wx = g_cam_int_x, g_view_wy = g_cam_int_y;
+  g_view_valid = HdWorld_Active();
   g_vis_prev_x = g_vis_cur_x, g_vis_prev_y = g_vis_cur_y;
   g_vis_cur_x = gx + g_cam_dx, g_vis_cur_y = gy + g_cam_dy;
 }
@@ -324,7 +330,7 @@ static void ApplyRenderBias() {
 // essere "poco sotto lo schermo" o "27 pixel sopra". Per ogni sprite si
 // sceglie l'interpretazione piu' vicina a un oggetto vero del gioco (Link,
 // nemici, oggetti in volo), visto che ogni sprite si disegna vicino al suo.
-extern uint8 g_link_oam_mask[128], g_link_oam_real_f0[128], g_sprite_oam_owner[128];
+extern uint8 g_link_oam_mask[128], g_link_oam_real_f0[128], g_sprite_oam_owner[128], g_oam_real_f0[128];
 
 // Fra v + k*period sceglie il valore la cui posizione sullo schermo (v - bias)
 // cade nella finestra [lo, lo + period)
@@ -339,15 +345,17 @@ static int WrapInto(int v, int period, int bias, int lo) {
 // - in verticale ha 8 bit: si sceglie il valore (a passi di 256) piu' vicino
 //   a un oggetto vero del gioco (Link, nemici, oggetti in volo), visto che
 //   ogni sprite si disegna vicino al suo;
-// - in orizzontale ha 9 bit: il gioco tiene in vita gli sprite da 128 pixel
-//   prima a 384 dopo la sua telecamera, quindi il valore si legge in quella
-//   finestra (rispetto alla telecamera del gioco, non alla vista). I pezzi di
+// - in orizzontale ha 9 bit: il valore si legge nella finestra da 128 pixel
+//   prima a 384 dopo la vista (gli sprite restano in vita fino a poco oltre
+//   la vista: Sprite_PrepOamCoordOrDoubleRet, Ancilla_SetOam). I pezzi di
 //   Link fanno eccezione: il gioco scrive
 //   il 9° bit dando per scontato che Link sia sullo schermo, quindi si prende
 //   il valore (a passi di 256) piu' vicino a Link.
 static void ResolveSpritePositions(Ppu *ppu) {
   ppu->objYValid = ppu->objXValid = false;
-  if (ppu->objBiasY == 0 && ppu->objBiasX == 0)
+  // col mondo continuo anche senza spostamento: i nemici fuori dallo schermo
+  // del gioco hanno la posizione vera (SetOamHelper0 non li nasconde)
+  if (ppu->objBiasY == 0 && ppu->objBiasX == 0 && !g_view_valid)
     return;
   int link_x = (int16)(link_x_coord - BG2HOFS_copy2) + 8;
   // Si confronta anche la x: un nemico fermo 256 pixel piu' in alto ma
@@ -362,7 +370,7 @@ static void ResolveSpritePositions(Ppu *ppu) {
       oy[n] = (int16)((sprite_y_hi[k] << 8 | sprite_y_lo[k]) - sprite_z[k] - cy);
       ox[n++] = (int16)((sprite_x_hi[k] << 8 | sprite_x_lo[k]) - cx);
     }
-  for (int k = 0; k < 10 && n < 32; k++)
+  for (int k = 0; k < kAncilla_Slots && n < 32; k++)
     if (ancilla_type[k]) {
       oy[n] = (int16)((ancilla_y_hi[k] << 8 | ancilla_y_lo[k]) - cy);
       ox[n++] = (int16)((ancilla_x_hi[k] << 8 | ancilla_x_lo[k]) - cx);
@@ -376,7 +384,7 @@ static void ResolveSpritePositions(Ppu *ppu) {
       while (x + 4 < link_x - 128) x += 256;
       while (x + 4 >= link_x + 128) x -= 256;
     } else {
-      x = WrapInto(lo + hi * 256, 512, 0, -128);
+      x = WrapInto(lo + hi * 256, 512, 0, ppu->objBiasX - 128);  // attorno alla vista
     }
     ppu->objX[i] = (int16)x;
     // i pezzi di Link si riferiscono solo a Link (oy[0]): un nemico 256 pixel
@@ -397,7 +405,9 @@ static void ResolveSpritePositions(Ppu *ppu) {
           best = d, y = yy + c * 256;
       }
     ppu->objY[i] = (int16)y;
-    ppu->objShowF0[i] = g_link_oam_real_f0[i];
+    // i pezzi di Link hanno la loro tabella; gli altri scritti con la y vera
+    // 0xf0 (SetOamHelper0) non sono nascosti
+    ppu->objShowF0[i] = g_link_oam_real_f0[i] || (!g_link_oam_mask[i] && g_oam_real_f0[i] && yy == 0xf0);
   }
   ppu->objYValid = ppu->objXValid = true;
 }
@@ -441,6 +451,8 @@ void ZeldaDrawPpuFrame(uint8 *pixel_buffer, size_t pitch, uint32 render_flags) {
   HdHud_BeforeRender(g_zenv.ppu);
   HdFx_IrisBeforeRender(g_zenv.ppu);
   HdFx_ShadowsBeforeRender(g_zenv.ppu, 256 + 2 * g_zenv.ppu->extraLeftRight, height);
+  HdFx_IceBeforeRender(g_zenv.ppu);
+  HdWorld_BeforeRender(256 + 2 * g_zenv.ppu->extraLeftRight, height);
 
   for (int i = 0; i <= height; i++) {
     if (i == 128 && irq_flag) {
@@ -512,6 +524,7 @@ static void ZeldaInitializationCode() {
 static void ClearOamBuffer() {  // 80841e
   for (int i = 0; i < 128; i++)
     oam_buf[i].y = 0xf0;
+  memset(g_oam_real_f0, 0, sizeof(g_oam_real_f0));
 }
 
 static void ZeldaRunGameLoop() {
@@ -660,6 +673,7 @@ static void LoadSnesState(SaveLoadFunc *func, void *ctx) {
   ZeldaApuUnlock();
   EmuSynchronizeWholeState();
   HdWorld_ResetStates();  // il mondo persistente riparte dal salvataggio
+  HdWorld_AfterLoad();
 }
 
 static void SaveSnesState(SaveLoadFunc *func, void *ctx) {
@@ -1009,6 +1023,7 @@ bool ZeldaRunFrame(int inputs) {
 
   ZeldaPushApuState();
   ZeldaUpdateCamera();
+  HdWorld_TickNeighbors();  // mondo continuo: nemici delle aree vicine
 
   return is_replay;
 }

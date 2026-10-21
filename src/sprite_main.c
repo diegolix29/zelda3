@@ -1,5 +1,6 @@
 #include "sprite_main.h"
 #include "sprite.h"
+#include "hd_world.h"
 #include "tagalong.h"
 #include "ancilla.h"
 #include "overworld.h"
@@ -1857,8 +1858,10 @@ void ArcheryGame_Host_ProctorGame(int k) {  // 8582d4
                  kArcheryGame_Char[i], kArcheryGame_Flags[i], 0);
   } while (oam++, --i >= 0);
 
-  if (archery_game_arrows_left | sprite_delay_aux4[k] |
-      ancilla_type[0] | ancilla_type[1] | ancilla_type[2] | ancilla_type[3] | ancilla_type[4])
+  uint8 link_ancillae = 0;
+  for (int i = 0; i < kAncilla_LinkSlots; i++)
+    link_ancillae |= ancilla_type[i];
+  if (archery_game_arrows_left | sprite_delay_aux4[k] | link_ancillae)
     return;
   sprite_flags4[k] = 0xA;
   if (Sprite_CheckDamageToLink_same_layer(k) && filtered_joypad_L & 0x80) {
@@ -9616,6 +9619,8 @@ void Sprite_EC_ThrownItem(int k) {  // 86aae0
       int j = sprite_C[k];
       oam->charnum = kThrowableScenery_Char[j + ((t >= 2) ? 6 : 0)];
       oam->flags = (oam->flags & 0xf0) | kThrowableScenery_Flags[j];
+      if (sprite_unk5[k] && j >= 2 && j <= 4)
+        oam->flags = (oam->flags & 0xf1) | 4;  // congelato (hd_burn.c): blu
       sprite_oam_flags[k] = (sprite_oam_flags[k] & 0xc0) | (oam->flags & 0xf);
     }
   }
@@ -11060,7 +11065,7 @@ void Sprite_3A_MagicBat(int k) {  // 86c044
       return;
     if (!Sprite_CheckDamageToLink_same_layer(k))
       return;
-    for (int i = 4; i >= 0; i--) {
+    for (int i = kAncilla_LinkSlots - 1; i >= 0; i--) {
       if (ancilla_type[i] == 0x1a) {
         Sprite_SpawnSuperficialBombBlast(k);
         SpriteSfx_QueueSfx1WithPan(k, 0xd);
@@ -12245,7 +12250,7 @@ void Sprite_02_StalfosHead(int k) {  // 86ddb7
 }
 
 bool Pipe_ValidateEntry() {  // 87f4f1
-  for (int k = 4; k >= 0; k--) {
+  for (int k = kAncilla_LinkSlots - 1; k >= 0; k--) {
     if (ancilla_type[k] == 0x31) {
       link_position_mode = 0;
       link_cant_change_direction = 0;
@@ -12257,7 +12262,7 @@ bool Pipe_ValidateEntry() {  // 87f4f1
 }
 
 void Ancilla_TerminateSparkleObjects() {  // 89adc7
-  for (int i = 4; i >= 0; i--) {
+  for (int i = kAncilla_LinkSlots - 1; i >= 0; i--) {
     uint8 t = ancilla_type[i];
     if (t == 0x2a || t == 0x2b || t == 0x30 || t == 0x31 || t == 0x18 || t == 0x19 || t == 0xc)
       ancilla_type[i] = 0;
@@ -13444,7 +13449,7 @@ void ArcheryGameGuy_Draw(int k) {  // 8ddac4
 }
 
 void ShopKeeper_RapidTerminateReceiveItem() {  // 8ffaea
-  for (int i = 4; i >= 0; i--) {
+  for (int i = kAncilla_LinkSlots - 1; i >= 0; i--) {
     if (ancilla_type[i] == 0x22)
       ancilla_aux_timer[i] = 1;
   }
@@ -13453,7 +13458,7 @@ void ShopKeeper_RapidTerminateReceiveItem() {  // 8ffaea
 void Sprite_InitializeSecondaryItemMinigame(int what) {  // 8ffd86
   is_archer_or_shovel_game = what;
   Link_ResetProperties_C();
-  for (int k = 4; k >= 0; k--) {
+  for (int k = kAncilla_LinkSlots - 1; k >= 0; k--) {
     if (ancilla_type[k] == 0x30 || ancilla_type[k] == 0x31) {
       ancilla_type[k] = 0;
     } else if (ancilla_type[k] == 5) {
@@ -17610,6 +17615,10 @@ void Boulder_OutdoorsMain(int k) {  // 9dd02a
   sprite_subtype2[k] -= sprite_D[k];
   Sprite_CheckDamageToAndFromLink(k);
   Sprite_MoveXYZ(k);
+  if (HdWorld_BoulderGone(k)) {
+    sprite_state[k] = 0;
+    return;
+  }
   sprite_z_vel[k]-=2;
   if (sign8(sprite_z[k])) {
     sprite_z[k] = 0;

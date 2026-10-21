@@ -710,8 +710,14 @@ void ResetAncillaAndCutscene() {  // 829e6e
   flag_is_link_immobilized = 0;
 }
 
+static bool InstantWorldTransition(void);
+
 void Module09_Overworld() {  // 82a475
   kOverworldSubmodules[submodule_index]();
+  // Mondo unico: il cambio d'area appena deciso si fa tutto in questo
+  // frame, senza fermare Link nemmeno per un frame
+  if (main_module_index == 9 && submodule_index == 1 && InstantWorldTransition())
+    kOverworldSubmodules[submodule_index]();
 
   int bg2x = BG2HOFS_copy2;
   int bg2y = BG2VOFS_copy2;
@@ -802,10 +808,64 @@ static bool InstantWorldTransition(void);
 // Distanza dal bordo destro (meno 0x1c) a cui scatta il cambio d'area verso
 // destra. Il gioco lascia 8 pixel prima del bordo, ma ne bastano 4 (gli altri
 // lati ne hanno 4): Link corre al massimo a 4 pixel per frame e i controlli
-// delle caselle arrivano a 16 pixel dalla sua posizione. Col mondo continuo
-// cosi' Link cammina da solo meno strada al passaggio.
+// delle caselle arrivano a 16 pixel dalla sua posizione.
 static int RightTransitionExtra(void) {
-  return InstantWorldTransition() ? 8 : 4;
+  return 4;
+}
+
+// Mondo unico: il cambio d'area scatta quando il centro di Link passa il
+// bordo (con qualche pixel di margine, per non rimbalzare fra due aree
+// stando sul confine), in qualunque modo ci arrivi. Link non si ferma e non
+// cammina da solo: il terreno oltre il bordo viene dalla mappa del mondo
+// (hd_world.c). Ritorna la direzione (1 destra, 2 sinistra, 4 giu', 8 su) o
+// 0, e mette in current_area_of_player il quadrato dell'area corrente
+// accanto a Link, da cui il gioco ricava l'area nuova.
+enum { kSeamMargin = 3 };
+static int SeamlessCrossing(void) {
+  int a = BYTE(overworld_screen_index) & 0x3f;
+  int ax = kOverworld_OffsetBaseX[a], ay = kOverworld_OffsetBaseY[a];
+  int s = kOverworldMapIsSmall[a] ? 512 : 1024;
+  int cx = (int16)link_x_coord + 8, cy = (int16)link_y_coord + 12;
+  int px = cx < ax ? ax : cx >= ax + s ? ax + s - 1 : cx;
+  int py = cy < ay ? ay : cy >= ay + s ? ay + s - 1 : cy;
+  current_area_of_player = ((py >> 9) * 8 + (px >> 9)) * 2;
+  // niente oltre i bordi della mappa del mondo
+  if (cx >= ax + s + kSeamMargin && ax + s < 4096)
+    return 1;
+  if (cx < ax - kSeamMargin && ax > 0)
+    return 2;
+  if (cy >= ay + s + kSeamMargin && ay + s < 4096)
+    return 4;
+  if (cy < ay - kSeamMargin && ay > 0)
+    return 8;
+  // Alcuni passaggi (l'ingresso dei Boschi Perduti da sud) hanno sul bordo
+  // caselle per meta' muro: il gioco cambiava area prima di arrivarci (a 4
+  // pixel dal bordo in alto, 6 a sinistra, 0x1c in basso e 0x18 a destra),
+  // qui Link ci sbatte contro e resta fermo. Se spinge verso il bordo da
+  // fermo dentro quella fascia, passa e si mette appena oltre il confine
+  static uint16 last_x, last_y;
+  static uint8 still;
+  bool moved = link_x_coord != last_x || link_y_coord != last_y;
+  last_x = link_x_coord, last_y = link_y_coord;
+  still = moved || link_player_handler_state != 0 ? 0 : still < 255 ? still + 1 : 255;
+  if (still < 2)
+    return 0;
+  int tx = (int16)link_x_coord - ax, ty = (int16)link_y_coord - ay;
+  int d = (link_direction & 8) && ty < 4 && ay > 0 ? 8 :
+          (link_direction & 4) && ty >= s - 0x1c && ay + s < 4096 ? 4 :
+          (link_direction & 2) && tx < 6 && ax > 0 ? 2 :
+          (link_direction & 1) && tx >= s - 0x18 && ax + s < 4096 ? 1 : 0;
+  if (d == 8)
+    link_y_coord = ay - 12 - kSeamMargin - 1;
+  else if (d == 4)
+    link_y_coord = ay + s - 12 + kSeamMargin;
+  else if (d == 2)
+    link_x_coord = ax - 8 - kSeamMargin - 1;
+  else if (d == 1)
+    link_x_coord = ax + s - 8 + kSeamMargin;
+  if (d)
+    still = 0, last_x = link_x_coord, last_y = link_y_coord;
+  return d;
 }
 
 void OverworldHandleTransitions() {  // 82a9c4
@@ -813,6 +873,18 @@ void OverworldHandleTransitions() {  // 82a9c4
     OverworldHandleMapScroll();
   int dir;
   uint16 x, y, t;
+  if (InstantWorldTransition()) {
+    // (anche mentre Link viene respinto da un colpo: il gioco lo fermava sul
+    // bordo dello schermo, Link_CheckForEdgeScreenTransition, e col mondo
+    // unico restava incastrato sul confine fra due aree)
+    dir = SeamlessCrossing();
+    if (!dir) {
+      Overworld_CheckSpecialSwitchArea();
+      return;
+    }
+    y = dir == 1 ? 0 : dir == 2 ? 2 : dir == 4 ? 4 : 6;
+    goto after;
+  }
   if (link_y_vel != 0) {
     dir = link_direction & 12;
     t = link_y_coord - kOverworld_OffsetBaseY[BYTE(current_area_of_player) >> 1];
@@ -831,6 +903,7 @@ compare:
   Overworld_CheckSpecialSwitchArea();
   return;
 after:
+  HdWorld_LeaveArea();  // mondo unico: le caselle dell'area che si lascia
   y >>= 1;
   Dungeon_ResetTorchBackgroundAndPlayerInner();
   map16_load_src_off &= kSwitchAreaTab0[y];
@@ -914,15 +987,12 @@ void ScrollAndCheckForSOWExit() {  // 82ab7b
 // Mondo continuo: lo scorrimento fra le aree non si vede (la vista segue
 // Link), quindi il passaggio si fa tutto in un frame e Link non rallenta
 static bool g_instant_transition;
-static int g_entry_speed;  // velocita' di Link (pixel per frame) all'inizio del passaggio
 
 static bool InstantWorldTransition(void) {
   return (enhanced_features0 & kFeatures0_ContinuousWorld) && BYTE(overworld_screen_index) < 0x80;
 }
 
 void Module09_LoadAuxGFX() {  // 82ab88
-  int vx = abs((int8)link_x_vel), vy = abs((int8)link_y_vel);
-  g_entry_speed = vx > vy ? vx : vy;
   save_ow_event_info[0x3b] &= ~0x20;
   save_ow_event_info[0x7b] &= ~0x20;
   save_dung_info[267] &= ~0x80;
@@ -935,11 +1005,11 @@ void Module09_LoadAuxGFX() {  // 82ab88
   // occupano un frame ciascuna, con il gioco fermo) vengono eseguite subito,
   // facendo fra l'una e l'altra il lavoro dell'NMI che copia i dati in VRAM.
   // Con il mondo continuo si prosegue nello stesso frame fino alla fine
-  // dello scorrimento (fasi 5, 6 e 7).
+  // dello scorrimento e all'ingresso nell'area (fasi 5, 6, 7 e 8).
   bool instant = InstantWorldTransition();
   if ((instant || (enhanced_features0 & kFeatures0_ContinuousTransitions)) && submodule_index == 2) {
-    int last = instant ? 7 : 4;
-    for (int guard = 0; guard < 12 && submodule_index >= 2 && submodule_index <= last; guard++) {
+    int last = instant ? 8 : 4;
+    for (int guard = 0; guard < 24 && submodule_index >= 2 && submodule_index <= last; guard++) {
       NMI_DoUpdates();
       kOverworldSubmodules[submodule_index]();
     }
@@ -1012,6 +1082,7 @@ void Overworld_RunScrollTransition() {  // 82abda
 }
 
 void Module09_LoadNewSprites() {  // 82abed
+  HdWorld_BeforeNewSprites();  // mondo continuo: chi insegue Link lo segue
   if (overworld_screen_transition == 1) {
     BG2VOFS_copy2 += 2;
     link_y_coord += 2;
@@ -1869,35 +1940,12 @@ void Overworld_SetCameraBoundaries(int big, int area) {  // 82c0c3
 
 void Overworld_FinalizeEntryOntoScreen() {  // 82c242
   Link_HandleMovingAnimation_FullLongEntry();
-  // Link entra nell'area da solo, 2 pixel per frame. Con il mondo continuo
-  // avanza solo quanto basta perche' tutto il suo corpo (16x24 pixel, la
-  // posizione e' l'angolo in alto a sinistra) sia dentro l'area nuova: gli
-  // ostacoli si leggono dalla mappa dell'area, e fuori sarebbero caselle a
-  // caso. Il gioco fa scattare il cambio qualche pixel prima del bordo; va
-  // alla velocita' che aveva, un pixel alla volta. La zona di scatto del lato
-  // opposto fa tornare indietro solo camminando in quella direzione.
+  // Link entra nell'area da solo, 2 pixel per frame. Con il mondo unico non
+  // serve: il terreno oltre il bordo viene dalla mappa del mondo (hd_world.c)
+  // e il cambio d'area scatta a meta' del corpo di Link, che non si ferma.
   bool arrived;
   if (InstantWorldTransition()) {
-    int a = BYTE(overworld_screen_index) & 0x3f;
-    bool small = kOverworldMapIsSmall[a] != 0;
-    bool horiz = (byte_7E069C & 2) != 0;
-    int base = horiz ? kOverworld_OffsetBaseX[a] : kOverworld_OffsetBaseY[a];
-    // Fino al primo pixel fuori dalle fasce in cui scatta il cambio d'area
-    // (sinistra < 6, su < 4, destra >= 0x1e4+8, giu' >= 0x1e4 per le aree
-    // piccole), non oltre: dentro una fascia, camminando verso il bordo, il
-    // gioco controllerebbe il terreno oltre il bordo, dove la mappa dell'area
-    // ricomincia dal lato opposto (Link cadeva nell'acqua del lato opposto
-    // invece di cambiare area)
-    int bound = (small ? 0x1e4 : 0x3e4) + (horiz ? RightTransitionExtra() : 0);
-    int lo = base + (horiz ? 6 : 4), hi = base + bound;  // hi escluso
-    uint16 *c = horiz ? &link_x_coord : &link_y_coord;
-    int dir = (byte_7E069C & 1) ? 1 : -1;
-    int step = g_entry_speed > 2 ? g_entry_speed : (frame_counter & 1) ? 1 : 2;
-    arrived = (*c >= lo && *c < hi);
-    for (int i = 0; i < step && !arrived; i++) {
-      *c += dir;
-      arrived = (*c >= lo && *c < hi);
-    }
+    arrived = true;
   } else {
     int d = (byte_7E069C & 1) ? 2 : -2;
     if (byte_7E069C & 2)
@@ -2880,7 +2928,8 @@ int Decompress_bank02(uint8 *dst, const uint8 *src) {  // 82febb
 uint8 Overworld_ReadTileAttribute(uint16 x, uint16 y) {  // 85faa2
   int t = ((x - overworld_offset_base_x) & overworld_offset_mask_x);
   t |= ((y - overworld_offset_base_y) & overworld_offset_mask_y) << 3;
-  return kSomeTileAttr[dung_bg2[t >> 1]];
+  int w = HdWorld_WorldTile(x << 3, y);  // mondo unico: fuori dall'area corrente
+  return kSomeTileAttr[w >= 0 ? w : dung_bg2[t >> 1]];
 }
 
 void Overworld_SetFixedColAndScroll() {  // 8bfe70
@@ -2950,10 +2999,11 @@ getout:
 }
 
 void Overworld_Memorize_Map16_Change(uint16 pos, uint16 value) {  // 8edd40
-  if (value == 0xdc5 || value == 0xdc9) {
-    HdWorld_RememberExtraTile(pos, value);  // mondo persistente
+  // mondo persistente: tutte le caselle, anche quelle che la lista del gioco
+  // non tiene (erba alta tagliata, buche della pala) o per cui non ha posto
+  HdWorld_RememberExtraTile(pos, value);
+  if (value == 0xdc5 || value == 0xdc9)
     return;
-  }
 
   int x = num_memorized_tiles;
   // La lista ha posto per 256 caselle: con il mondo persistente si riempie
@@ -3030,7 +3080,8 @@ const uint16 *Overworld_GetMap16OfLink_Mult8() {  // 8ede9a
   uint16 xc = (link_x_coord + 8) >> 3, yc = link_y_coord + 12;
   uint16 pos = ((yc - overworld_offset_base_y) & overworld_offset_mask_y) * 8 +
                ((xc - overworld_offset_base_x) & overworld_offset_mask_x);
-  return map8 + dung_bg2[pos >> 1] * 4;
+  int w = HdWorld_WorldTile(link_x_coord + 8, yc);  // mondo unico: fuori dall'area corrente
+  return map8 + (w >= 0 ? w : dung_bg2[pos >> 1]) * 4;
 }
 
 void Palette_AnimGetMasterSword() {  // 8ef400
@@ -3415,7 +3466,7 @@ loc_8EF7B4:
 void Ancilla_TerminateWaterfallSplashes() {  // 8ffd3c
   uint8 t = BYTE(overworld_screen_index);
   if (t == 0xf) {
-    for (int i = 4; i >= 0; i--) {
+    for (int i = kAncilla_LinkSlots - 1; i >= 0; i--) {
       if (ancilla_type[i] == 0x41)
         ancilla_type[i] = 0;
     }
@@ -3446,6 +3497,9 @@ void Overworld_GetPitDestination() {  // 9bb860
 }
 
 void Overworld_UseEntrance() {  // 9bbbf4
+  // mondo unico: gli ingressi sono quelli dell'area corrente
+  if (HdWorld_OutsideArea(link_x_coord, link_y_coord + 7))
+    return;
   uint16 xc = link_x_coord >> 3, yc = link_y_coord + 7;
   uint16 pos = ((yc - overworld_offset_base_y) & overworld_offset_mask_y) * 8 +
     ((xc - overworld_offset_base_x) & overworld_offset_mask_x);
@@ -3604,6 +3658,9 @@ void Overworld_PowderSmash(uint16 px, uint16 py) {
 uint16 Overworld_ToolAndTileInteraction(uint16 x, uint16 y) {  // 9bbd82
   word_7E04B2 = 0;
   index_of_interacting_tile = 0;
+  // mondo unico: fuori dall'area corrente niente da tagliare o scavare
+  if (HdWorld_OutsideArea(x << 3, y))
+    return 0;
   uint16 pos = ((y - overworld_offset_base_y) & overworld_offset_mask_y) * 8 +
     ((x - overworld_offset_base_x) & overworld_offset_mask_x);
   uint16 attr = overworld_tileattr[pos >> 1], yv;
@@ -3714,6 +3771,12 @@ uint8 Overworld_HandleLiftableTiles(Point16U *pt_arg) {  // 9bbf9d
   uint16 pos = Overworld_GetLinkMap16Coords(pt_arg);
   Point16U pt = *pt_arg;
   uint16 a = overworld_tileattr[pos >> 1], y;
+  // mondo unico: fuori dall'area corrente si guarda soltanto
+  int w = HdWorld_WorldTile(pt.x, pt.y);
+  if (w >= 0) {
+    uint16 t = w * 4 + (pt.x & 8 ? 2 : 0) + (pt.y & 8 ? 1 : 0);
+    return kMap8DataToTileAttr[GetMap16toMap8Table()[t] & 0x1ff];
+  }
   if ((y = 0, a == 0x36d) || (y = 1, a == 0x36e) || (y = 2, a == 0x374) || (y = 3, a == 0x375) ||
       (y = 0, a == 0x23b) || (y = 1, a == 0x23c) || (y = 2, a == 0x23d) || (y = 3, a == 0x23e)) {
     return SmashRockPile_fromLift(a, pos, y, pt);
@@ -3796,6 +3859,8 @@ void Overworld_BombTiles32x32(uint16 x, uint16 y) {  // 9bc0f8
 
 void Overworld_BombTile(int x, int y) {  // 9bc155
   int a, j, k;
+  if (HdWorld_OutsideArea(x, y))
+    return;  // mondo unico: le bombe cambiano solo l'area corrente
 
   int pos = ((y - overworld_offset_base_y & overworld_offset_mask_y) << 3) +
     ((x >> 3) - overworld_offset_base_x & overworld_offset_mask_x);
