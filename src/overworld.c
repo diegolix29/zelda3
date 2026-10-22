@@ -1001,15 +1001,13 @@ void Module09_LoadAuxGFX() {  // 82ab88
   PrepTransAuxGfx();
   nmi_disable_core_updates = nmi_subroutine_index = 9;
   submodule_index++;
-  // Transizione continua: le fasi di caricamento successive (che di norma
-  // occupano un frame ciascuna, con il gioco fermo) vengono eseguite subito,
-  // facendo fra l'una e l'altra il lavoro dell'NMI che copia i dati in VRAM.
-  // Con il mondo continuo si prosegue nello stesso frame fino alla fine
-  // dello scorrimento e all'ingresso nell'area (fasi 5, 6, 7 e 8).
-  bool instant = InstantWorldTransition();
-  if ((instant || (enhanced_features0 & kFeatures0_ContinuousTransitions)) && submodule_index == 2) {
-    int last = instant ? 8 : 4;
-    for (int guard = 0; guard < 24 && submodule_index >= 2 && submodule_index <= last; guard++) {
+  // Mondo continuo: le fasi di caricamento successive (che di norma occupano
+  // un frame ciascuna, con il gioco fermo) vengono eseguite subito, facendo
+  // fra l'una e l'altra il lavoro dell'NMI che copia i dati in VRAM, e si
+  // prosegue nello stesso frame fino alla fine dello scorrimento e
+  // all'ingresso nell'area (fasi 5, 6, 7 e 8).
+  if (InstantWorldTransition() && submodule_index == 2) {
+    for (int guard = 0; guard < 24 && submodule_index >= 2 && submodule_index <= 8; guard++) {
       NMI_DoUpdates();
       kOverworldSubmodules[submodule_index]();
     }
@@ -1104,24 +1102,7 @@ void Overworld_StartScrollTransition() {  // 82ac27
   }
 }
 
-static void Overworld_EaseOffScrollTransitionStep();
-
 void Overworld_EaseOffScrollTransition() {  // 82ac3a
-  if (!(enhanced_features0 & kFeatures0_ContinuousTransitions)) {
-    Overworld_EaseOffScrollTransitionStep();
-    return;
-  }
-  // Transizione continua: si completano subito tutti i passi, copiando in
-  // VRAM le strisce di tile fra un passo e l'altro.
-  uint8 sm = submodule_index;
-  for (int guard = 0; guard < 12 && submodule_index == sm; guard++) {
-    if (guard)
-      NMI_DoUpdates();
-    Overworld_EaseOffScrollTransitionStep();
-  }
-}
-
-static void Overworld_EaseOffScrollTransitionStep() {
   if (kOverworldMapIsSmall[BYTE(overworld_screen_index)]) {
     BYTE(overworld_screen_trans_dir_bits2) = BYTE(overworld_screen_trans_dir_bits);
     OverworldTransitionScrollAndLoadMap();
@@ -1829,63 +1810,17 @@ int OverworldCameraBoundaryCheck(int xa, int ya, int vd, int r8) {  // 82bd62
   return vd;
 }
 
-// Transizione continua: nell'originale Link si sposta solo negli ultimi passi
-// dello scorrimento e poi, a scorrimento finito, cammina da solo di 2px per
-// frame fino a una posizione fissa dentro la nuova area. Qui quasi tutto quel
-// tragitto viene distribuito lungo lo scorrimento, cosi' Link sembra
-// camminare mentre la telecamera passa all'area nuova. Alla fase finale
-// restano solo 8px. La posizione in cui Link riprende il controllo e'
-// identica all'originale.
-static uint16 g_trans_link_start;
-static int g_trans_steps, g_trans_total;
-
-static void ContinuousTransition_MoveLink(uint16 *coord, int d, int scroll_pos, int target, int tab2) {
-  if (transition_counter == 1) {
-    g_trans_link_start = *coord;
-    g_trans_steps = (target - (scroll_pos - d)) / d;
-    int moves = g_trans_steps - tab2 + 1;
-    g_trans_total = (moves > 0 ? moves : 0) * d;
-    // Dove si fermerebbe Link nell'originale a scorrimento finito...
-    int s = d > 0 ? 1 : -1;
-    int end = (uint16)(g_trans_link_start + g_trans_total) & ~7;
-    // ...e dove lo porterebbe la camminata automatica della fase finale
-    int c = end;
-    for (int i = 0; i < 256; i++) {
-      c += 2 * s;
-      if ((c & 0xfe) == kOverworld_Func8_tab[byte_7E069C & 3])
-        break;
-    }
-    // Ci si ferma 8px prima (multiplo di 8, quindi l'allineamento &~7
-    // dell'originale non lo cambia)
-    int e = c - 8 * s;
-    if ((e - end) * s > 0 && (e - end) * s <= 96)
-      g_trans_total = e - g_trans_link_start;
-  }
-  if (g_trans_steps <= 0 || g_trans_steps > 64) {
-    // Valori inattesi: comportamento originale
-    if (transition_counter >= tab2)
-      *coord += d;
-    return;
-  }
-  int k = transition_counter < g_trans_steps ? transition_counter : g_trans_steps;
-  *coord = g_trans_link_start + g_trans_total * k / g_trans_steps;
-}
-
 int OverworldScrollTransition() {  // 82c001
   transition_counter++;
   int y = overworld_screen_transition;
   int d = kOverworld_Func6B_Tab1[y], rv;
-  bool continuous = (enhanced_features0 & kFeatures0_ContinuousTransitions) != 0;
   if (y < 2) {
     byte_7E069E[0] = d;
     rv = (BG2VOFS_copy2 += d);
     if (BYTE(overworld_screen_index) != 0x1b && BYTE(overworld_screen_index) != 0x5b)
       BG1VOFS_copy2 = BG2VOFS_copy2;
-    if (g_instant_transition)
-      ;  // mondo continuo: Link resta dov'e'
-    else if (continuous)
-      ContinuousTransition_MoveLink(&link_y_coord, d, (uint16)rv, (&up_down_scroll_target)[y], kOverworld_Func6B_Tab2[y]);
-    else if (transition_counter >= kOverworld_Func6B_Tab2[y])
+    // mondo continuo: Link resta dov'e'
+    if (!g_instant_transition && transition_counter >= kOverworld_Func6B_Tab2[y])
       link_y_coord += d;
     if (rv != (&up_down_scroll_target)[y])
       return rv;
@@ -1903,11 +1838,7 @@ int OverworldScrollTransition() {  // 82c001
     rv = (BG2HOFS_copy2 += d);
     if (BYTE(overworld_screen_index) != 0x1b && BYTE(overworld_screen_index) != 0x5b)
       BG1HOFS_copy2 = BG2HOFS_copy2;
-    if (g_instant_transition)
-      ;  // mondo continuo: Link resta dov'e'
-    else if (continuous)
-      ContinuousTransition_MoveLink(&link_x_coord, d, (uint16)rv, (&up_down_scroll_target)[y], kOverworld_Func6B_Tab2[y]);
-    else if (transition_counter >= kOverworld_Func6B_Tab2[y])
+    if (!g_instant_transition && transition_counter >= kOverworld_Func6B_Tab2[y])
       link_x_coord += d;
     if (rv != (&up_down_scroll_target)[y])
       return rv;

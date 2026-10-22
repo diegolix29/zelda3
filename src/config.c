@@ -524,8 +524,6 @@ static bool HandleIniConfig(int section, const char *key, char *value) {
       return ParseBoolBit(value, &g_config.features0, kFeatures0_BirdTravel9);
     } else if (StringEqualsNoCase(key, "FastTransitions")) {
       return ParseBoolBit(value, &g_config.features0, kFeatures0_FastTransitions);
-    } else if (StringEqualsNoCase(key, "ContinuousTransitions")) {
-      return ParseBoolBit(value, &g_config.features0, kFeatures0_ContinuousTransitions);
     } else if (StringEqualsNoCase(key, "ContinuousWorld")) {
       return ParseBoolBit(value, &g_config.features0, kFeatures0_ContinuousWorld);
     } else if (StringEqualsNoCase(key, "ModernHud")) {
@@ -580,6 +578,24 @@ static bool ParseOneConfigFile(const char *filename, int depth) {
   return true;
 }
 
+// Opzioni che funzionano solo insieme a un'altra (come nel launcher):
+// - oggetti X, L, R nell'HUD solo con il cambio oggetti con L e R;
+// - mappa del mondo in HD e schermo largo solo con la PPU ottimizzata (il
+//   vecchio renderer disegna 256 pixel e lascia neri i lati);
+// - con l'MSU la frequenza e' quella dei suoi file: 48000 per gli opuz,
+//   44100 per i pcm.
+static void ApplyConfigRules(void) {
+  if (!(g_config.features0 & kFeatures0_SwitchLR))
+    g_config.features0 &= ~kFeatures0_ShowXLRItemsInHud;
+  if (!g_config.new_renderer) {
+    g_config.enhanced_mode7 = false;
+    g_config.extended_aspect_ratio = 0;
+    g_config.features0 &= ~(kFeatures0_ExtendScreen64 | kFeatures0_WidescreenVisualFixes);
+  }
+  if (g_config.enable_msu)
+    g_config.audio_freq = (g_config.enable_msu & kMsuEnabled_Opuz) ? 48000 : 44100;
+}
+
 void ParseConfigFile(const char *filename) {
   g_config.msuvolume = 100;  // default msu volume, 100%
 
@@ -592,6 +608,7 @@ void ParseConfigFile(const char *filename) {
   } else {
     g_config_filename = "zelda3.user.ini";
   }
+  ApplyConfigRules();
   RegisterDefaultKeys();
 }
 

@@ -515,7 +515,8 @@ void HdHud_Draw(uint8 *pixels, int pitch, int width, int height, int scale) {
   // ci sono i dorsali L e R
   const int S = HD_BUTTON_SIZE;
   int yx, yy, ax, ay, bx, by;
-  if (enhanced_features0 & kFeatures0_ShowXLRItemsInHud) {
+  // (come l'HUD classico: senza il cambio oggetti con L e R non ci sono oggetti su X, L e R)
+  if ((enhanced_features0 & kFeatures0_ShowXLRItemsInHud) && (enhanced_features0 & kFeatures0_SwitchLR)) {
     int gx = W - margin - HD_BUTTONS4_W, gy = top;
     DrawImage(&cv, gx, gy, kHdButtons4, HD_BUTTONS4_W, HD_BUTTONS4_H);
     yx = gx + HD_BUTTON4_Y_X, yy = gy + HD_BUTTON4_Y_Y;

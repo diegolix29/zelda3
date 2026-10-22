@@ -66,6 +66,10 @@ void HdWorld_BeforeNewSprites(void);
 // Mondo vivo, nemici fuori dalla vista (Sprite_PrepOamCoordOrDoubleRet): un
 // nemico dell'area resta fermo invece di sparire; chi seguiva Link torna a casa
 bool HdWorld_KeepOffscreen(int k);
+void HdWorld_SpriteBegin(int k);
+void HdWorld_SpriteEnd(int k, bool offscreen);
+bool HdWorld_LeashWall(int k, uint16 x, uint16 y);
+void HdWorld_SpriteSpawned(int k);
 void HdWorld_CarriedLost(int k);
 // Vero se il bordo dell'area fa da muro per questo nemico (Sprite_CheckTileProperty)
 bool HdWorld_ConfinedToArea(int k);

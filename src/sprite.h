@@ -287,6 +287,7 @@ void Sprite_ActivateWhenProximal();
 void Sprite_ActivateWhenProximalBig();
 void Sprite_Overworld_ProximityMotivatedLoad(uint16 x, uint16 y);
 void Overworld_LoadProximaSpriteIfAlive(uint16 blk);
+void Sprite_OverworldLoadAllEnemies(void);
 void SpriteExplode_SpawnEA(int k);
 void Sprite_KillFriends();
 void Garnish16_ThrownItemDebris(int k);

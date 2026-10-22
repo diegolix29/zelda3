@@ -1131,6 +1131,9 @@ void Sprite_SpawnSecret(int k) {  // 868264
 // Nemico (0-15) che ha scritto ogni voce OAM nell'ultimo frame, 0xff = nessuno
 uint8 g_sprite_oam_owner[128];
 uint8 g_oam_real_f0[128];
+// Mondo continuo: il nemico e' fuori dalla vista ma continua a muoversi
+// (Sprite_PrepOamCoordOrDoubleRet); i pezzi che disegna si nascondono
+static uint8 g_sprite_offscreen[16];
 
 void Sprite_Main() {  // 868328
   if (!player_is_indoors) {
@@ -1174,12 +1177,22 @@ void Sprite_Main() {  // 868328
     uint16 saved[128];
     for (int j = 0; j < 128; j++)
       saved[j] = WORD(oam_buf[j].charnum), WORD(oam_buf[j].charnum) = 0xffff;
+    g_sprite_offscreen[i] = 0;
+    uint8 sfx1 = sound_effect_1, sfx2 = sound_effect_2;
+    HdWorld_SpriteBegin(i);  // vede Link solo da vicino, resta vicino a casa
     Sprite_ExecuteSingle(i);
+    HdWorld_SpriteEnd(i, g_sprite_offscreen[i] != 0);
+    // fuori dalla vista: niente pezzi sullo schermo e niente suoni
+    bool hide = g_sprite_offscreen[i] != 0;
+    if (hide)
+      sound_effect_1 = sfx1, sound_effect_2 = sfx2;
     for (int j = 0; j < 128; j++) {
-      if (WORD(oam_buf[j].charnum) != 0xffff)
-        g_sprite_oam_owner[j] = i;
-      else
+      if (WORD(oam_buf[j].charnum) == 0xffff)
         WORD(oam_buf[j].charnum) = saved[j];
+      else if (hide)
+        oam_buf[j].y = 0xf0, g_oam_real_f0[j] = 0;
+      else
+        g_sprite_oam_owner[j] = i;
     }
   }
   flag_unk1 = saved_freeze;
@@ -1905,12 +1918,17 @@ bool Sprite_PrepOamCoordOrDoubleRet(int k, PrepOamCoordsRet *ret) {  // 86e41e
 
   if ((uint16)(kx + 0x40 + xt) >= (0x170 + xt * 2) ||
       (uint16)(ky + 0x40) >= 0x170 && !(sprite_flags4[k] & 0x20)) {
-    sprite_pause[k]++;
-    // mondo vivo: i nemici dell'area restano fermi fuori dalla vista
-    if (!(sprite_defl_bits[k] & 0x80) && !(live && HdWorld_KeepOffscreen(k))) {
-      if (live)
-        HdWorld_CarriedLost(k);
-      Sprite_KillSelf(k);
+    // mondo continuo tutto attivo: i nemici dell'area continuano a muoversi
+    // anche fuori dalla vista (senza disegnarsi, vedi Sprite_Main)
+    if (live && HdWorld_KeepOffscreen(k)) {
+      g_sprite_offscreen[k] = 1;
+    } else {
+      sprite_pause[k]++;
+      if (!(sprite_defl_bits[k] & 0x80)) {
+        if (live)
+          HdWorld_CarriedLost(k);
+        Sprite_KillSelf(k);
+      }
     }
     out_of_bounds = true;
   }
@@ -2038,6 +2056,9 @@ bool Sprite_CheckTileProperty(int k, int j) {  // 86e73c
     y = cur_sprite_y + kSprite_Func5_Y[j];
     in_bounds = (uint16)(x - sprcoll_x_base) < sprcoll_x_size &&
                 (uint16)(y - sprcoll_y_base) < sprcoll_y_size;
+    // mondo continuo: senza Link vicino il nemico non si allontana da casa
+    if (HdWorld_LeashWall(k, x, y))
+      return true;
     // mondo unico: oltre l'area c'e' il terreno delle aree vicine, non un
     // muro; ma i nemici dell'area di Link non escono dalla loro area
     if (!in_bounds && HdWorld_SeamlessOn()) {
@@ -3891,6 +3912,23 @@ void Sprite_Overworld_ProximityMotivatedLoad(uint16 x, uint16 y) {  // 89c6f5
   Overworld_LoadProximaSpriteIfAlive(r1 << 8 | r0);
 }
 
+// Mondo continuo tutto attivo: tutti i nemici dell'area si caricano subito,
+// non solo quelli vicini alla telecamera (finche' ci sono posti liberi; i
+// generatori di nemici restano legati alla telecamera)
+void Sprite_OverworldLoadAllEnemies(void) {
+  for (int blk = 0; blk < 0x1000; blk++) {
+    uint8 t = sprite_where_in_overworld[blk];
+    if (!t || t >= 0xf4 || (overworld_sprite_was_loaded[blk >> 3] & (0x80 >> (blk & 7))))
+      continue;
+    int i = 14;
+    while (i >= 0 && sprite_state[i])
+      i--;
+    if (i < 0)
+      return;
+    Overworld_LoadProximaSpriteIfAlive(blk);
+  }
+}
+
 void Overworld_LoadProximaSpriteIfAlive(uint16 blk) {  // 89c739
   uint8 *p5 = sprite_where_in_overworld + blk;
   uint8 sprite_to_spawn = *p5;
@@ -3930,6 +3968,7 @@ void Overworld_LoadProximaSpriteIfAlive(uint16 blk) {  // 89c739
     sprite_N_word[k] = blk;
     sprite_type[k] = sprite_to_spawn - 1;
     sprite_state[k] = 8;
+    HdWorld_SpriteSpawned(k);
     sprite_x_lo[k] = blk << 4 & 0xf0;
     sprite_y_lo[k] = blk & 0xf0;
     sprite_x_hi[k] = (blk >> 8 & 3) + HIBYTE(sprcoll_x_base);

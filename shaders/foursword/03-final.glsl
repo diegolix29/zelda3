@@ -165,14 +165,16 @@ vec3 sample_sharp(vec2 uv, vec2 sz, float sharp)
     return COMPAT_TEXTURE(OrigTexture, (i + 0.5 + f) / sz).rgb;
 }
 
-// Menu (intro, selezione file, inventario, scelta del punto di partenza):
-// escono intatti. GameModule arriva incrementato di 1.
+// Menu (intro, selezione file, inventario, scelta del punto di partenza)
+// e morte di Link (modulo 18, lo schermo rosso): escono intatti.
+// GameModule arriva incrementato di 1.
 float menu_amount()
 {
     float known = step(0.5, GameModule);
     float m = GameModule;
     float menu = step(m, 6.5)
                + step(14.5, m) * step(m, 15.5)
+               + step(18.5, m) * step(m, 19.5)
                + step(27.5, m) * step(m, 28.5);
     return known * clamp(menu, 0.0, 1.0) * FSA_SKIP_MENUS;
 }

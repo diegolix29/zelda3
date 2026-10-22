@@ -1292,22 +1292,25 @@ void HdFx_IceBeforeRender(Ppu *ppu) {
   memset(ppu->objIce, 0, sizeof(ppu->objIce));
   if (!(enhanced_features0 & kFeatures0_BurnAndFreeze) || player_is_indoors || !InGameplay(&mod))
     return;
-  static const int8 kBlue[7] = { 1, 2, 3, 4, 5, 6, 7 };
-  int blue_lum[7];
+  // i blu 1-7 della palette 2 in ordine di luminosita', scelti con la stessa
+  // formula di DrawFrozenTile: sollevato il cespuglio resta del colore che
+  // aveva a terra
+  int8 order[7];
+  int lum[7];
   for (int i = 0; i < 7; i++) {
-    uint16 c = ppu->cgram[0x80 + 2 * 16 + kBlue[i]];
-    blue_lum[i] = (c & 31) * 3 + (c >> 5 & 31) * 6 + (c >> 10 & 31);
+    uint16 c = ppu->cgram[0x80 + 2 * 16 + 1 + i];
+    int l = (c & 31) * 3 + (c >> 5 & 31) * 6 + (c >> 10 & 31), j = i;
+    while (j > 0 && lum[j - 1] > l)
+      lum[j] = lum[j - 1], order[j] = order[j - 1], j--;
+    lum[j] = l, order[j] = 1 + i;
   }
   ppu->iceRemap[0] = 0;
   for (int v = 1; v < 16; v++) {
     uint16 c = ppu->cgram[0x80 + 6 * 16 + v];
     int l = (c & 31) * 3 + (c >> 5 & 31) * 6 + (c >> 10 & 31);
-    l = l < 40 ? l : 40 + (l - 40) * 11 / 10;  // il ghiaccio e' un po' piu' chiaro
-    int best = 0;
-    for (int i = 1; i < 7; i++)
-      if (abs(blue_lum[i] - l) < abs(blue_lum[best] - l))
-        best = i;
-    ppu->iceRemap[v] = kBlue[best];
+    float t = 0.30f + 0.70f * l / 310.0f;
+    int idx = (int)(t * 6 + 0.5f);
+    ppu->iceRemap[v] = order[idx < 0 ? 0 : idx > 6 ? 6 : idx];
   }
   for (int i = 0; i < 128; i++) {
     uint16 oam1 = ppu->oam[i * 2 + 1];
@@ -1402,14 +1405,62 @@ void HdFx_SpriteShadows(uint8 *pixels, int pitch, int width, int height) {
 // (layer 5) e' il cielo con le nuvole, e lo shader lo deve lasciare com'e'.
 // Altrove lo sfondo e' spesso il prato fra le caselle e va dipinto: per questo
 // si marca come 3 (layer non usato all'aperto) solo in queste aree.
+// Anche qui pero' fra le caselle del terreno (attorno alle chiome degli
+// alberi) lo sfondo si vede a strisce sottili: quelle sono prato e vanno
+// dipinte, altrimenti ombre e nuvole dello shader le saltano e si vedono i
+// quadretti. Cielo = sfondo entro kSkyReach pixel da un punto che ha attorno
+// (quadrato di lato 2 * kSkyCore + 1) quasi solo sfondo.
+enum { kSkyCore = 8, kSkyReach = 10 };
+
+// Somme del quadrato attorno a ogni pixel, dalla tabella delle somme s
+// (larghezza w + 1)
+static int BoxSum(const int *s, int w, int h, int x, int y, int r) {
+  int x0 = x - r < 0 ? 0 : x - r, x1 = x + r + 1 > w ? w : x + r + 1;
+  int y0 = y - r < 0 ? 0 : y - r, y1 = y + r + 1 > h ? h : y + r + 1;
+  return s[y1 * (w + 1) + x1] - s[y0 * (w + 1) + x1] - s[y1 * (w + 1) + x0] + s[y0 * (w + 1) + x0];
+}
+
+static void Integral(int *s, int w, int h, const uint8 *m) {
+  memset(s, 0, (w + 1) * sizeof(int));
+  for (int y = 0; y < h; y++) {
+    int acc = 0;
+    s[(y + 1) * (w + 1)] = 0;
+    for (int x = 0; x < w; x++) {
+      acc += m[y * w + x];
+      s[(y + 1) * (w + 1) + x + 1] = s[y * (w + 1) + x + 1] + acc;
+    }
+  }
+}
+
 void HdFx_MarkBackdrop(uint8 *pixels, int pitch, int width, int height) {
   int mod;
   if (!InGameplay(&mod) || mod != 9 || !IsBackdropScene())
     return;
+  static uint8 *mask, *core;
+  static int *sum, cap;
+  if (cap < width * height) {
+    free(mask), free(core), free(sum);
+    mask = malloc(width * height), core = malloc(width * height);
+    sum = malloc((width + 1) * (height + 1) * sizeof(int));
+    cap = mask && core && sum ? width * height : 0;
+    if (!cap)
+      return;
+  }
+  for (int y = 0; y < height; y++) {
+    const uint32 *row = (const uint32 *)(pixels + y * pitch);
+    for (int x = 0; x < width; x++)
+      mask[y * width + x] = (row[x] >> 24) == 5;
+  }
+  int side = 2 * kSkyCore + 1;
+  Integral(sum, width, height, mask);
+  for (int y = 0; y < height; y++)
+    for (int x = 0; x < width; x++)
+      core[y * width + x] = mask[y * width + x] && BoxSum(sum, width, height, x, y, kSkyCore) * 10 >= side * side * 9;
+  Integral(sum, width, height, core);
   for (int y = 0; y < height; y++) {
     uint32 *row = (uint32 *)(pixels + y * pitch);
     for (int x = 0; x < width; x++)
-      if ((row[x] >> 24) == 5)
+      if (mask[y * width + x] && BoxSum(sum, width, height, x, y, kSkyReach))
         row[x] = (row[x] & 0x00ffffff) | 3u << 24;
   }
 }

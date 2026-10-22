@@ -77,7 +77,6 @@ typedef struct FeatureOption {
 
 static const FeatureOption kFeatureOptions[] = {
   { "Transizioni veloci", "FastTransitions", kFeatures0_FastTransitions },
-  { "Transizione continua tra aree", "ContinuousTransitions", kFeatures0_ContinuousTransitions },
   { "Mondo continuo all'esterno", "ContinuousWorld", kFeatures0_ContinuousWorld },
   { "HUD moderno", "ModernHud", kFeatures0_ModernHud },
   { "Oggetti X, L, R nell'HUD", "ShowXLRItemsInHud", kFeatures0_ShowXLRItemsInHud },
@@ -437,10 +436,12 @@ static bool IsItalian() {
 static const char *Tr(const char *it) {
   static const char *const kTr[][2] = {
     { "Transizioni veloci", "Fast transitions" },
-    { "Transizione continua tra aree", "Continuous area transitions" },
     { "Mondo continuo all'esterno", "Continuous overworld" },
     { "HUD moderno", "Modern HUD" },
     { "Oggetti X, L, R nell'HUD", "X, L, R items in the HUD" },
+    { "Richiede Cambio oggetti con L e R", "Requires Switch items with L and R" },
+    { "Richiede la PPU ottimizzata (NewRenderer)", "Requires the optimized PPU (NewRenderer)" },
+    { "Richiede Salva a ogni cambio di area", "Requires Save on every area change" },
     { "Nomi dei dungeon", "Dungeon names" },
     { "Cambio oggetti con L e R", "Switch items with L and R" },
     { "Spada e oggetti interazione ambiente", "Sword and items interaction" },
@@ -741,6 +742,8 @@ static void Activate(int id, int dir) {
       g_smooth_camera = v;
     } else if (id == 1) {
       Host_ToggleFullscreen();
+    } else if (id == 2 && !g_config.new_renderer) {
+      ShowMessage("Richiede la PPU ottimizzata (NewRenderer)");
     } else if (id == 2) {
       g_config.enhanced_mode7 = !g_config.enhanced_mode7;
       if (Host_IsOpenGL())
@@ -773,7 +776,14 @@ static void Activate(int id, int dir) {
       Font_Load();
     } else {
       uint32 bit = kFeatureOptions[id].bit;
+      // oggetti X, L, R nell'HUD solo con il cambio oggetti con L e R
+      if (bit == kFeatures0_ShowXLRItemsInHud && !(g_config.features0 & kFeatures0_SwitchLR)) {
+        ShowMessage("Richiede Cambio oggetti con L e R");
+        break;
+      }
       SetFeature(bit, !(g_config.features0 & bit));
+      if (bit == kFeatures0_SwitchLR && !(g_config.features0 & bit))
+        SetFeature(kFeatures0_ShowXLRItemsInHud, false);
     }
     break;
   case kPage_Audio:
@@ -796,6 +806,8 @@ static void Activate(int id, int dir) {
   case kPage_Saves:
     if (id == 100) {
       g_config.autosave_areas = !g_config.autosave_areas;
+    } else if (id == 101 && !g_config.autosave_areas) {
+      ShowMessage("Richiede Salva a ogni cambio di area");
     } else if (id == 101) {
       int n = AutosaveCount() + (dir < 0 ? -1 : 1);
       g_config.autosave_slots = n < 1 ? kMaxAutosaves : n > kMaxAutosaves ? 1 : n;
@@ -1192,11 +1204,11 @@ static void DrawButtonHints(Canvas *cv) {
     }
   } else if (sub == 3 && overworld_map_state >= 2 && overworld_map_state <= 4) {  // mappa del labirinto
     Hint h[2] = { { kBtn_Dpad, "Cambia piano" }, { map_btn, "Chiudi" } };
-    DrawHints(cv, h, 2, 46);  // sopra il nome del labirinto
+    DrawHints(cv, h, 2, 22);  // in basso al centro (il nome del labirinto sta in alto)
   }
 }
 
-// Nome del labirinto mostrato sulla mappa del dungeon
+// Nome del labirinto mostrato sulla mappa del dungeon, in alto al centro
 static void DrawDungeonMapStatus(Canvas *cv) {
   static const char *const kDungeonNames[14] = {
     "Fogne del castello", "Castello di Hyrule", "Palazzo dell'Est", "Castello di Sabbia",
@@ -1212,8 +1224,8 @@ static void DrawDungeonMapStatus(Canvas *cv) {
   const char *name = Tr(kDungeonNames[dung]);
   int w = TextWidth(name);
   int x = (cv->width - w) / 2;
-  Canvas_Rect(cv, x - 8, cv->height - 20, w + 16, 18, 0x101830);
-  DrawText(cv, x, cv->height - 20, name, 0xf8f8f8);
+  Canvas_Rect(cv, x - 8, 4, w + 16, 18, 0x101830);
+  DrawText(cv, x, 4, name, 0xf8f8f8);
 }
 
 // Nome del dungeon al centro dello schermo appena Link ci entra dal mondo

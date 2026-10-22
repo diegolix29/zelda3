@@ -217,11 +217,6 @@ static bool g_cam_valid;
 
 static bool SmoothCamera_IsGameplay() {
   int mod = main_module_index;
-  // Con la transizione continua la telecamera fluida resta attiva anche
-  // durante lo scorrimento fra aree esterne: la panoramica accelera e frena.
-  if (mod == 9 && (enhanced_features0 & kFeatures0_ContinuousTransitions) &&
-      submodule_index >= 5 && submodule_index <= 8)
-    return true;
   // Con il mondo continuo il passaggio fra aree dura un frame (fase 1) e la
   // vista segue Link: la telecamera fluida non deve riallinearsi di colpo
   if (mod == 9 && (enhanced_features0 & kFeatures0_ContinuousWorld) &&

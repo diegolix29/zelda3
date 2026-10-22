@@ -35,6 +35,7 @@
 uint8 Overworld_AreaHead(int square);
 extern int g_cam_dx, g_cam_dy;          // vista rispetto alla telecamera del gioco (zelda_rtl.c)
 extern uint8 g_sprite_oam_owner[128];   // sprite.c
+extern uint8 g_link_oam_mask[128];      // player_oam.c
 
 static bool FeatureOn(void) {
   return (enhanced_features0 & kFeatures0_ContinuousWorld) != 0;
@@ -160,6 +161,7 @@ static const SpriteField kSpriteFields[] = {
   {0xF00,1},{0xF10,1},{0xF20,1},{0xF30,1},{0xF40,1},{0xF50,1},{0xF60,1},{0xF70,1},
   {0xF80,1},{0xF90,1},
   {0x1F9C2,1},{0x1FA1C,1},{0x1FA2C,1},{0x1FA3C,1},{0x1FA4C,1},
+  {0x1F580,1},  // spr_disturbed (vedi "La schermata di ogni nemico")
 };
 enum { kRecSize = 64 };
 
@@ -236,6 +238,177 @@ static bool FreeMover(int k) {
   return untouched_frames[k] >= kFreeMoverFrames;
 }
 
+// La schermata di ogni nemico. Sullo SNES un nemico viveva solo nella
+// schermata di Link; nel mondo unico ognuno "vede" solo attorno a se':
+// - la sua "schermata" e' quella del gioco originale, dove un nemico restava
+//   attivo fino a 64 pixel oltre lo schermo (256x224) con Link al centro:
+//   128 + 64 = 192 pixel in orizzontale, 112 + 64 = 176 in verticale;
+// - se Link e' fuori dalla sua schermata non lo vede (durante il suo passo
+//   crede che Link sia lontanissimo) e non si allontana oltre la stessa
+//   distanza dal suo punto di partenza (fa da muro, o torna dov'era);
+// - un nemico disturbato (ha visto Link o ha perso vita) torna al punto di
+//   partenza con la vita piena quando Link e' a piu' di 3 schermate: il
+//   gioco lo toglie e lo ricarica dalla tabella dell'area. Lo stesso per i
+//   nemici sconfitti, con Link a 3 schermate dal loro punto di partenza;
+// - chi ha perso Link fuori dalla sua schermata ed e' fuori dalla vista
+//   sparisce e ricompare al suo posto, come nel gioco originale (prima
+//   restava dove aveva perso Link, per esempio i fantasmi del cimitero).
+enum { kSightX = 192, kSightY = 176, kResetDistance = 3 * 256 };
+#define spr_disturbed ((uint8*)(g_ram+0x1F580))
+
+static int g_sight_k = -1;
+static bool g_sight_sees;
+static uint16 g_sight_lx, g_sight_ly;
+static int g_sight_px, g_sight_py;
+static uint8 g_sight_hp, g_sight_state;
+
+static bool IsAreaEnemy(int k);
+static int SpriteWorldX(int k);
+static int SpriteWorldY(int k);
+
+static bool SightOn(int k) {
+  return FeatureOn() && BYTE(overworld_screen_index) < 0x80 && !player_is_indoors &&
+         main_module_index == 9 && IsAreaEnemy(k);
+}
+
+// Punto di partenza (centro) del nemico, dalla tabella dell'area caricata
+static void HomeOf(int k, int *hx, int *hy) {
+  uint16 blk = sprite_N_word[k];
+  *hx = (sprcoll_x_base & 0xff00) + ((blk >> 8 & 3) << 8) + (blk << 4 & 0xf0) + 8;
+  *hy = (sprcoll_y_base & 0xff00) + ((blk >> 10) << 8) + (blk & 0xf0) + 8;
+}
+
+// Distanza "a rettangolo": vale kSightLimit sul bordo della schermata
+enum { kSightLimit = kSightX * kSightY };
+static int Dist2(int x0, int y0, int x1, int y1) {
+  int dx = abs(x1 - x0) * kSightY, dy = abs(y1 - y0) * kSightX;
+  return dx > dy ? dx : dy;
+}
+
+void HdWorld_SpriteSpawned(int k) {
+  spr_disturbed[k] = 0;
+}
+
+// Toglie il nemico: Sprite_OverworldLoadAllEnemies lo ricarica al suo posto
+// con la vita piena
+static void ResetEnemy(int k) {
+  uint16 blk = sprite_N_word[k];
+  sprite_state[k] = 0;
+  spr_disturbed[k] = 0;
+  overworld_sprite_was_loaded[blk >> 3] &= ~(0x80 >> (blk & 7));
+}
+
+void HdWorld_SpriteBegin(int k) {
+  g_sight_k = -1;
+  if (!sprite_state[k] || !SightOn(k))
+    return;
+  g_sight_k = k;
+  g_sight_px = SpriteWorldX(k), g_sight_py = SpriteWorldY(k);
+  g_sight_hp = sprite_health[k], g_sight_state = sprite_state[k];
+  g_sight_sees = Dist2(g_sight_px + 8, g_sight_py + 8, link_x_coord + 8, link_y_coord + 12) <= kSightLimit;
+  if (g_sight_sees) {
+    spr_disturbed[k] = 1;
+    return;
+  }
+  // Link lontano: per questo nemico sta molto piu' in la' (anche il byte
+  // basso della distanza e' grande, per chi guarda solo quello)
+  g_sight_lx = link_x_coord, g_sight_ly = link_y_coord;
+  link_x_coord = g_sight_px + 0x780;
+  link_y_coord = g_sight_py + 0x780;
+}
+
+void HdWorld_SpriteEnd(int k, bool offscreen) {
+  if (g_sight_k != k)
+    return;
+  g_sight_k = -1;
+  if (!g_sight_sees)
+    link_x_coord = g_sight_lx, link_y_coord = g_sight_ly;
+  if (!sprite_state[k])
+    return;
+  if (g_sight_state == 9 && sprite_state[k] == 9 && sprite_health[k] < g_sight_hp)
+    spr_disturbed[k] = 1;
+  if (g_sight_sees || !IsAreaEnemy(k))
+    return;
+  // oltre il raggio da casa si puo' solo tornare indietro
+  int hx, hy;
+  HomeOf(k, &hx, &hy);
+  int now = Dist2(SpriteWorldX(k) + 8, SpriteWorldY(k) + 8, hx, hy);
+  int before = Dist2(g_sight_px + 8, g_sight_py + 8, hx, hy);
+  if (now > kSightLimit && now > before) {
+    Sprite_SetX(k, g_sight_px);
+    Sprite_SetY(k, g_sight_py);
+    now = before;
+  }
+  if (offscreen && now > kSightLimit)
+    ResetEnemy(k);
+}
+
+// Sprite_CheckTileProperty: il punto (x, y) oltre il raggio da casa, e piu'
+// lontano del nemico, fa da muro (cosi' chi cammina si gira come davanti a
+// un ostacolo)
+bool HdWorld_LeashWall(int k, uint16 x, uint16 y) {
+  if (g_sight_k != k || g_sight_sees)
+    return false;
+  int hx, hy;
+  HomeOf(k, &hx, &hy);
+  int d = Dist2(x, y, hx, hy);
+  return d > kSightLimit &&
+         d > Dist2(SpriteWorldX(k) + 8, SpriteWorldY(k) + 8, hx, hy);
+}
+
+// Nemici sconfitti gia' fatti ricomparire mentre Link era lontano: alcuni
+// (legati agli eventi) il gioco li toglie appena caricati, e senza questo
+// ricomparirebbero a ogni frame. Si libera quando Link torna vicino.
+static uint8 g_revived[128][0x200];
+
+static bool FarFromLink(int x, int y, int lx, int ly) {
+  int dx = abs(x - (lx + 8)), dy = abs(y - (ly + 12));
+  return (dx > dy ? dx : dy) > kResetDistance;
+}
+
+// Vero se il nemico (area, posto nella tabella) segue Link nel gioco vero:
+// la sua area lo conta sconfitto, ma non deve ricomparire (main_ram = RAM
+// del gioco vero, anche durante il passo di una copia)
+static bool CarriedFrom(const uint8 *main_ram, int area, uint16 blk) {
+  for (int k = 0; k < 16; k++)
+    if (main_ram[0x1F520 + k] == (0x80 | area) &&
+        (main_ram[0x1F540 + k * 2] | main_ram[0x1F541 + k * 2] << 8) == blk)
+      return true;
+  return false;
+}
+
+// Con Link a piu' di 3 schermate i nemici disturbati tornano come all'inizio
+// e quelli sconfitti ricompaiono (Sprite_OverworldLoadAllEnemies li ricarica
+// dalla tabella dell'area)
+static void ResetFarEnemies(int lx, int ly, const uint8 *main_ram) {
+  for (int k = 0; k < 16; k++)
+    if (spr_disturbed[k] && IsAreaEnemy(k) && FarFromLink(SpriteWorldX(k) + 8, SpriteWorldY(k) + 8, lx, ly))
+      ResetEnemy(k);
+  int area = BYTE(overworld_screen_index) & 0x7f;
+  int bx = sprcoll_x_base & 0xff00, by = sprcoll_y_base & 0xff00;
+  uint8 *revived = g_revived[area];
+  for (int blk = 0; blk < 0x1000; blk++) {
+    uint8 t = sprite_where_in_overworld[blk], bit = 0x80 >> (blk & 7);
+    if (!t || t >= 0xf4)
+      continue;
+    int hx = bx + ((blk >> 8 & 3) << 8) + (blk << 4 & 0xf0) + 8;
+    int hy = by + ((blk >> 10) << 8) + (blk & 0xf0) + 8;
+    if (!FarFromLink(hx, hy, lx, ly)) {
+      revived[blk >> 3] &= ~bit;
+      continue;
+    }
+    if (!(overworld_sprite_was_loaded[blk >> 3] & bit) || (revived[blk >> 3] & bit))
+      continue;
+    bool active = false;
+    for (int k = 0; k < 16 && !active; k++)
+      active = sprite_state[k] && sprite_N_word[k] == blk;
+    if (!active && !CarriedFrom(main_ram, area, blk)) {
+      overworld_sprite_was_loaded[blk >> 3] &= ~bit;
+      revived[blk >> 3] |= bit;
+    }
+  }
+}
+
 static void MarkCarried(int k, int area, uint16 blk) {
   carried_area[k] = 0x80 | (area & 0x7f);
   carried_type[k] = sprite_type[k];
@@ -279,6 +452,7 @@ static void ForgetEnemies(int i) {
 }
 
 static void LiveDropAll(void);
+static void LiveDropArea(int a);
 
 void HdWorld_ResetStates(void) {
   // anche i cespugli bruciati ricrescono: niente macchie all'uscita
@@ -493,6 +667,7 @@ void HdWorld_EnterAreaTiles(bool memorize) {
     if (g_states[i].used && i != (a & 0x7f) && AreaGap(i, a) >= kEnemyResetGap) {
       ForgetEnemies(i);
       KeepCarriedKilled(i);  // chi segue Link non torna a casa
+      LiveDropArea(i);  // la sua copia dal vivo riparte dai nemici di partenza
     }
   ApplyTiles(a, memorize);
 }
@@ -1516,6 +1691,7 @@ static void TrackMain(void) {
   SaveGfx(&g_area_gfx, g_zenv.ppu);
   g_area_gfx_valid = true;
   g_last_head = BYTE(overworld_screen_index);
+  ResetFarEnemies(link_x_coord, link_y_coord, g_ram);
   UpdateWorldMap();
 }
 
@@ -1741,8 +1917,23 @@ void HdWorld_BeforeRender(int width, int height) {
     int wx = cam_x + sx, wy = cam_y + sy;
     any |= sel[i] = wx < in_x0 || wx + size > in_x1 || wy < ay || wy + size > in_y1;
   }
-  if (any)
-    RenderApart(sel, NULL, width, height);
+  if (!any)
+    return;
+  // con un pezzo si disegnano a parte tutti quelli dello stesso personaggio:
+  // divisi tra il gioco e il disegno a parte perdevano l'ordine (Link sul
+  // confine aveva lo scudo sopra la testa)
+  bool link = false, owner[256] = { 0 };
+  for (int i = 0; i < 128; i++)
+    if (sel[i]) {
+      if (g_link_oam_mask[i])
+        link = true;
+      else if (g_sprite_oam_owner[i] != 0xff)
+        owner[g_sprite_oam_owner[i]] = true;
+    }
+  for (int i = 0; i < 128; i++)
+    if (!sel[i] && !g_hidden[i] && (g_link_oam_mask[i] ? link : g_sprite_oam_owner[i] != 0xff && owner[g_sprite_oam_owner[i]]))
+      sel[i] = true;
+  RenderApart(sel, NULL, width, height);
 }
 
 static void GuestRestoreOam(void) {
@@ -1783,13 +1974,17 @@ static void DrawGuests(uint8 *pixels, int pitch, int width, int height, const Ov
 // erano. La PPU della copia disegna solo i suoi sprite, che si mettono sul
 // fotogramma oltre il bordo.
 
-enum { kMaxLive = 6, kLiveMargin = 96, kLiveKeepFrames = 30 };
+// Tutto il mondo e' attivo: ogni area del mondo di Link ha la sua copia, che
+// fa un passo a ogni frame. Solo quelle che toccano la vista (near) si
+// disegnano. Si prepara al massimo una copia per frame, prima le vicine.
+enum { kMaxLive = 64, kLiveMargin = 96 };
 
 typedef struct LiveArea {
   bool used;
   int head;            // area (con il bit del mondo)
   uint32 key;          // AreaKey quando e' stata preparata
   uint32 wanted_at;    // ultimo frame in cui toccava la vista
+  bool near;           // tocca la vista (con il margine): si disegna
   bool fresh;          // ha fatto un passo: gli sprite vanno ridisegnati
   bool drawn;          // pix contiene gli sprite dell'ultimo passo
   uint8 *ram;          // copia di g_ram
@@ -1814,6 +2009,12 @@ bool g_hd_neighbor_tick;
 static void LiveDropAll(void) {
   for (int i = 0; i < kMaxLive; i++)
     g_live[i].used = false;
+}
+
+static void LiveDropArea(int a) {
+  for (int i = 0; i < kMaxLive; i++)
+    if ((g_live[i].head & 0x7f) == a)
+      g_live[i].used = false;
 }
 
 // Un nemico che seguiva Link e lo ha perso di vista (il gioco lo toglie)
@@ -1897,7 +2098,7 @@ static bool LiveShown(int a) {
   if (!LiveVisibleNow())
     return false;
   for (int i = 0; i < kMaxLive; i++)
-    if (g_live[i].used && g_live[i].drawn && (g_live[i].head & 0x7f) == a)
+    if (g_live[i].used && g_live[i].near && g_live[i].drawn && (g_live[i].head & 0x7f) == a)
       return true;
   return false;
 }
@@ -1954,7 +2155,7 @@ static bool LiveBuild(LiveArea *la, int head, int vx, int vy) {
   la->used = true;
   la->head = head;
   la->key = AreaKey(head);
-  la->fresh = la->drawn = false;
+  la->fresh = la->drawn = la->near = false;
   la->wanted_at = g_live_frame;
   memset(la->chase, 0, sizeof(la->chase));
   memset(la->chase_type, 0xff, sizeof(la->chase_type));
@@ -1979,6 +2180,7 @@ static void LiveTick(LiveArea *la, int vx, int vy, const LiveLink *m) {
   filtered_joypad_L = filtered_joypad_H = joypad1L_last = joypad1H_last = 0;
   SetLiveCamera(vx, vy);
   Sprite_ActivateAllProxima();
+  Sprite_OverworldLoadAllEnemies();
   uint8 was[16];
   uint16 px[16], py[16];
   for (int k = 0; k < 16; k++)
@@ -1989,6 +2191,7 @@ static void LiveTick(LiveArea *la, int vx, int vy, const LiveLink *m) {
   Sprite_Main();
   NMI_PrepareSprites();
   g_hd_neighbor_tick = false;
+  ResetFarEnemies(m->x, m->y, g_saved_ram);
   for (int k = 0; k < 16; k++) {
     if (!was[k] || !sprite_state[k] || sprite_type[k] != la->chase_type[k])
       la->chase[k] = 0, la->chase_type[k] = sprite_state[k] ? sprite_type[k] : 0xff;
@@ -2067,42 +2270,46 @@ void HdWorld_TickNeighbors(void) {
     return;
   TrackMain();
   GuestsFromCopies();
+  // anche nell'area di Link tutti i nemici sono presenti, non solo quelli
+  // vicini alla telecamera
+  Sprite_OverworldLoadAllEnemies();
   int cur = BYTE(overworld_screen_index);
   int vx = BG2HOFS_copy2 + g_cam_dx, vy = BG2VOFS_copy2 + g_cam_dy;
   int ext = g_zenv.ppu->extraLeftRight;
-  // aree che toccano la vista, con un margine: i nemici si attivano poco
-  // prima di entrare nello schermo
+  // tutte le aree del mondo di Link; vicine = toccano la vista, con un
+  // margine (si disegnano, e si preparano per prime)
   int x0 = vx - ext - kLiveMargin, x1 = vx + 256 + ext + kLiveMargin;
   int y0 = vy - kLiveMargin, y1 = vy + 240 + kLiveMargin;
-  int sx0 = x0 < 0 ? 0 : x0 >> 9, sx1 = x1 >= 4096 ? 7 : x1 >> 9;
-  int sy0 = y0 < 0 ? 0 : y0 >> 9, sy1 = y1 >= 4096 ? 7 : y1 >> 9;
-  int want[16], nw = 0;
-  for (int sy = sy0; sy <= sy1; sy++)
-    for (int sx = sx0; sx <= sx1; sx++) {
+  int want[64], nw = 0;
+  bool want_near[64];
+  for (int sy = 0; sy < 8; sy++)
+    for (int sx = 0; sx < 8; sx++) {
       int head = HeadAt(sx * 512, sy * 512), i = 0;
       if (head < 0 || head == cur)
         continue;
+      bool near = sx * 512 + 512 > x0 && sx * 512 <= x1 && sy * 512 + 512 > y0 && sy * 512 <= y1;
       while (i < nw && want[i] != head)
         i++;
-      if (i == nw && nw < 16)
-        want[nw++] = head;
+      if (i == nw)
+        want[nw] = head, want_near[nw++] = near;
+      else
+        want_near[i] |= near;
     }
   // via le copie che non servono piu': l'area in cui e' entrato Link (ora la
-  // muove il gioco), l'altro mondo, un evento che ha cambiato l'area, o
-  // lontane dalla vista da un po'
+  // muove il gioco), l'altro mondo, un evento che ha cambiato l'area
   for (int i = 0; i < kMaxLive; i++) {
     LiveArea *la = &g_live[i];
     if (!la->used)
       continue;
-    bool wanted = false;
-    for (int j = 0; j < nw && !wanted; j++)
-      wanted = want[j] == la->head;
-    if (la->head == cur || ((la->head ^ cur) & 0x40) || la->key != AreaKey(la->head))
+    int j = 0;
+    while (j < nw && want[j] != la->head)
+      j++;
+    if (j == nw || la->head == cur || ((la->head ^ cur) & 0x40) || la->key != AreaKey(la->head)) {
       la->used = false;
-    else if (wanted)
-      la->wanted_at = g_live_frame;
-    else if (g_live_frame - la->wanted_at > kLiveKeepFrames)
-      la->used = false;
+      continue;
+    }
+    la->wanted_at = g_live_frame;
+    la->near = want_near[j];
   }
   if (!nw)
     return;
@@ -2118,27 +2325,27 @@ void HdWorld_TickNeighbors(void) {
   memcpy(owner, g_sprite_oam_owner, sizeof(owner));
   if (!SaveMain())
     return;
-  // al massimo un'area nuova per frame, per non rallentare
-  for (int j = 0; j < nw; j++) {
-    LiveArea *slot = NULL;
-    bool present = false;
-    for (int i = 0; i < kMaxLive && !present; i++)
-      present = g_live[i].used && g_live[i].head == want[j];
-    if (present)
-      continue;
-    for (int i = 0; i < kMaxLive && !slot; i++)
-      if (!g_live[i].used)
-        slot = &g_live[i];
-    for (int i = 0; i < kMaxLive && !slot; i++)
-      if (g_live[i].wanted_at != g_live_frame)
-        slot = &g_live[i];
-    if (!slot)
-      break;
-    slot->used = false;
-    LiveBuild(slot, want[j], vx, vy);
-    RestoreMain();
-    break;
-  }
+  // al massimo un'area nuova per frame, per non rallentare: prima le vicine
+  for (int pass = 0, built = 0; pass < 2 && !built; pass++)
+    for (int j = 0; j < nw && !built; j++) {
+      if (want_near[j] != (pass == 0))
+        continue;
+      LiveArea *slot = NULL;
+      bool present = false;
+      for (int i = 0; i < kMaxLive && !present; i++)
+        present = g_live[i].used && g_live[i].head == want[j];
+      if (present)
+        continue;
+      for (int i = 0; i < kMaxLive && !slot; i++)
+        if (!g_live[i].used)
+          slot = &g_live[i];
+      if (!slot)
+        break;
+      LiveBuild(slot, want[j], vx, vy);
+      slot->near = want_near[j];
+      RestoreMain();
+      built = 1;
+    }
   for (int i = 0; i < kMaxLive; i++) {
     LiveArea *la = &g_live[i];
     if (la->used && la->wanted_at == g_live_frame)
@@ -2213,7 +2420,7 @@ static void DrawLive(uint8 *pixels, int pitch, int width, int height, const Over
   int cur = BYTE(overworld_screen_index);
   for (int i = 0; i < kMaxLive; i++) {
     LiveArea *la = &g_live[i];
-    if (!la->used || la->head == cur || ((la->head ^ cur) & 0x40) || (!la->fresh && !la->drawn))
+    if (!la->used || !la->near || la->head == cur || ((la->head ^ cur) & 0x40) || (!la->fresh && !la->drawn))
       continue;
     if (la->fresh || la->pix_w != width || la->pix_h != height)
       LiveRender(la, width, height);

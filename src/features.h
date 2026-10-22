@@ -61,9 +61,8 @@ enum {
   kFeatures0_FastTransitions = 1 << 17,
   // Mostra nell'HUD gli oggetti assegnati a X/L/R
   kFeatures0_ShowXLRItemsInHud = 1 << 18,
-  // Transizione continua tra aree esterne: niente blocco iniziale, Link
-  // cammina in modo uniforme durante lo scorrimento, assestamento immediato
-  kFeatures0_ContinuousTransitions = 1 << 19,
+  // 1 << 19 era la transizione continua tra aree esterne (tolta: la fa meglio
+  // il mondo continuo)
   // HUD moderno: cuori e magia a sinistra, tasti Y/A/B a destra, scritta
   // dell'azione del tasto A
   kFeatures0_ModernHud = 1 << 20,
