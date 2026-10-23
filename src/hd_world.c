@@ -246,6 +246,22 @@ static bool FreeMover(int k) {
 // - se Link e' fuori dalla sua schermata non lo vede (durante il suo passo
 //   crede che Link sia lontanissimo) e non si allontana oltre la stessa
 //   distanza dal suo punto di partenza (fa da muro, o torna dov'era);
+// - come con le tessere del gioco originale vede Link solo se Link e' nella
+//   sua area. Eccezioni: chi lo ha visto e lo sta seguendo (Chasing, lo segue
+//   anche fuori dalla sua area) e, con Link nell'area accanto, chi e' a meno di
+//   kBorderSight pixel da lui (3 volte Link: un nemico vicino al confine);
+// - chi ha perso Link (lo vedeva e ora non piu') non lo insegue piu': per
+//   lui Link e' lontanissimo in basso a destra, e prima ci scivolava contro.
+//   I soldati tornano a guardarsi intorno e a camminare come prima di
+//   vederlo; gli altri restano dove sono (finche' Link non torna o non e' a
+//   3 schermate, quando tornano a casa);
+// - chi non vede Link non va verso il Link finto: un passo in basso a destra
+//   si annulla (il soldato rosso 0x45 corre sempre verso Link: prima
+//   scendeva da solo dal castello verso la casa di Link e, avvicinandosi,
+//   contava come inseguitore);
+// - chi non vede Link non sente neanche i rumori (sprite_alert_flag, per
+//   esempio una freccia contro un muro), che nell'originale arrivavano solo
+//   ai nemici sullo schermo;
 // - un nemico disturbato (ha visto Link o ha perso vita) torna al punto di
 //   partenza con la vita piena quando Link e' a piu' di 3 schermate: il
 //   gioco lo toglie e lo ricarica dalla tabella dell'area. Lo stesso per i
@@ -253,18 +269,21 @@ static bool FreeMover(int k) {
 // - chi ha perso Link fuori dalla sua schermata ed e' fuori dalla vista
 //   sparisce e ricompare al suo posto, come nel gioco originale (prima
 //   restava dove aveva perso Link, per esempio i fantasmi del cimitero).
-enum { kSightX = 192, kSightY = 176, kResetDistance = 3 * 256 };
+enum { kSightX = 192, kSightY = 176, kResetDistance = 3 * 256, kBorderSight = 48 };
+// bit 0: disturbato; bit 1: ha visto Link (finche' non lo perde)
 #define spr_disturbed ((uint8*)(g_ram+0x1F580))
 
 static int g_sight_k = -1;
-static bool g_sight_sees;
+static bool g_sight_sees, g_sight_lost;
 static uint16 g_sight_lx, g_sight_ly;
 static int g_sight_px, g_sight_py;
-static uint8 g_sight_hp, g_sight_state;
+static uint8 g_sight_hp, g_sight_state, g_sight_alert;
 
 static bool IsAreaEnemy(int k);
 static int SpriteWorldX(int k);
 static int SpriteWorldY(int k);
+static int HeadAt(int wx, int wy);
+static bool Chasing(int k);
 
 static bool SightOn(int k) {
   return FeatureOn() && BYTE(overworld_screen_index) < 0x80 && !player_is_indoors &&
@@ -300,16 +319,38 @@ static void ResetEnemy(int k) {
 
 void HdWorld_SpriteBegin(int k) {
   g_sight_k = -1;
+  g_sight_lost = false;
   if (!sprite_state[k] || !SightOn(k))
     return;
   g_sight_k = k;
   g_sight_px = SpriteWorldX(k), g_sight_py = SpriteWorldY(k);
   g_sight_hp = sprite_health[k], g_sight_state = sprite_state[k];
-  g_sight_sees = Dist2(g_sight_px + 8, g_sight_py + 8, link_x_coord + 8, link_y_coord + 12) <= kSightLimit;
+  int lx = link_x_coord + 8, ly = link_y_coord + 12;
+  g_sight_sees = Dist2(g_sight_px + 8, g_sight_py + 8, lx, ly) <= kSightLimit;
+  if (g_sight_sees && HeadAt(lx, ly) != BYTE(overworld_screen_index) && !((spr_disturbed[k] & 2) && Chasing(k))) {
+    int dx = abs(g_sight_px + 8 - lx), dy = abs(g_sight_py + 8 - ly);
+    g_sight_sees = (dx > dy ? dx : dy) <= kBorderSight;
+  }
   if (g_sight_sees) {
-    spr_disturbed[k] = 1;
+    spr_disturbed[k] = 3;
     return;
   }
+  if (spr_disturbed[k] & 2) {
+    uint8 t = sprite_type[k];
+    if (t >= 0x41 && t <= 0x43 && !sprite_C[k]) {
+      // soldato (Guard_Main): smette di inseguire e si guarda intorno
+      if (sprite_ai_state[k] == 3 || sprite_ai_state[k] == 4) {
+        sprite_ai_state[k] = 2;
+        sprite_delay_main[k] = 160;
+        sprite_x_vel[k] = sprite_y_vel[k] = 0;
+      }
+      spr_disturbed[k] &= ~2;
+    } else {
+      g_sight_lost = true;
+    }
+  }
+  g_sight_alert = sprite_alert_flag;
+  sprite_alert_flag = 0;
   // Link lontano: per questo nemico sta molto piu' in la' (anche il byte
   // basso della distanza e' grande, per chi guarda solo quello)
   g_sight_lx = link_x_coord, g_sight_ly = link_y_coord;
@@ -321,12 +362,19 @@ void HdWorld_SpriteEnd(int k, bool offscreen) {
   if (g_sight_k != k)
     return;
   g_sight_k = -1;
-  if (!g_sight_sees)
+  if (!g_sight_sees) {
     link_x_coord = g_sight_lx, link_y_coord = g_sight_ly;
+    sprite_alert_flag = g_sight_alert;
+  }
   if (!sprite_state[k])
     return;
   if (g_sight_state == 9 && sprite_state[k] == 9 && sprite_health[k] < g_sight_hp)
-    spr_disturbed[k] = 1;
+    spr_disturbed[k] |= 1;
+  if (!g_sight_sees && (g_sight_lost || (SpriteWorldX(k) > g_sight_px && SpriteWorldY(k) > g_sight_py))) {
+    // ha perso Link (resta dov'e') o va verso il Link finto
+    Sprite_SetX(k, g_sight_px);
+    Sprite_SetY(k, g_sight_py);
+  }
   if (g_sight_sees || !IsAreaEnemy(k))
     return;
   // oltre il raggio da casa si puo' solo tornare indietro
@@ -1582,6 +1630,13 @@ static GuestGfx g_area_gfx;  // grafica dell'area corrente all'ultimo frame di g
 static bool g_area_gfx_valid;
 static int g_last_head = -1;
 static uint8 g_chase[16], g_chase_type[16];
+static const uint8 *g_live_chase;  // inseguimento nella copia che fa il passo
+
+// Vero se il nemico sta inseguendo Link (vedi ChaseStep), nel gioco vero o
+// nella copia dell'area vicina
+static bool Chasing(int k) {
+  return (g_hd_neighbor_tick ? (g_live_chase ? g_live_chase[k] : 0) : g_chase[k]) >= kChaseFollow;
+}
 static bool g_carried[16];  // nemico che segue Link fuori dalla sua area
 static uint16 g_chase_x[16], g_chase_y[16];
 static Ppu *g_guest_ppu;
@@ -2188,6 +2243,7 @@ static void LiveTick(LiveArea *la, int vx, int vy, const LiveLink *m) {
   for (int i = 0; i < 128; i++)
     oam_buf[i].y = 0xf0;
   g_hd_neighbor_tick = true;
+  g_live_chase = la->chase;
   Sprite_Main();
   NMI_PrepareSprites();
   g_hd_neighbor_tick = false;
