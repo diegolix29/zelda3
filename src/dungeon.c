@@ -15,6 +15,7 @@
 #include "tagalong.h"
 #include "messaging.h"
 #include "assets.h"
+#include "hd_trans.h"
 
 // todo: move to config
 static const uint16 kBossRooms[] = {
@@ -2456,6 +2457,9 @@ void TileMapPrep_NotWaterOnTag() {  // 8091d3
   nmi_disable_core_updates = 1;
 }
 
+// Quadrante di BG1 (0-3) con il cono scelto dall'ultima chiamata (zelda_rtl.c)
+int g_lamp_cone_idx;
+
 void OrientLampLightCone() {  // 80f567
   static const uint16 kOrientLampBgTab0[] = { 0, 256, 0, 256 };
   static const uint16 kOrientLampBgTab1[] = { 0, 0, 256, 256 };
@@ -2481,6 +2485,7 @@ void OrientLampLightCone() {  // 80f567
         idx = a;
     }
   }
+  g_lamp_cone_idx = idx;
 
   if (idx < 2) {
     BG1HOFS_copy2 = BG2HOFS_copy2 - (link_x_coord - 0x77) + kOrientLampBgTab0[idx];
@@ -6634,11 +6639,37 @@ void Module07_00_PlayerControl() {  // 8288de
   Link_Main();
 }
 
+// Transizioni veloci: le fasi in cui il gioco prepara il passaggio con Link
+// fermo (di norma un frame ciascuna) si fanno di seguito nello stesso frame,
+// con fra l'una e l'altra il lavoro dell'NMI. Le fasi e il loro ordine sono
+// quelli originali; quelle che aspettano (dissolvenze delle stanze buie) si
+// fermano da sole perche' non vanno avanti.
+static bool IntraRoomPhaseIsInstant(uint8 k) {
+  // 3 = scorrimento, 5 = Link che esce dalla porta
+  return k != 3 && k != 5;
+}
+
+static bool InterRoomPhaseIsInstant(uint8 k) {
+  // 8 = scorrimento, 13 = Link che esce dalla porta
+  return k != 8 && k != 13;
+}
+
 void Module07_01_SubtileTransition() {  // 82897c
   link_y_coord_prev = link_y_coord;
   link_x_coord_prev = link_x_coord;
   Link_HandleMovingAnimation_FullLongEntry();
   kDungeon_IntraRoomTrans[subsubmodule_index]();
+  if (!(enhanced_features0 & kFeatures0_FastTransitions))
+    return;
+  for (int guard = 0; guard < 8 && submodule_index == 1 && IntraRoomPhaseIsInstant(subsubmodule_index); guard++) {
+    uint8 old = subsubmodule_index;
+    NMI_DoUpdates();
+    link_y_coord_prev = link_y_coord;
+    link_x_coord_prev = link_x_coord;
+    kDungeon_IntraRoomTrans[subsubmodule_index]();
+    if (subsubmodule_index == old)
+      break;
+  }
 }
 
 void DungeonTransition_Subtile_ResetShutters() {  // 828995
@@ -6682,7 +6713,8 @@ void DungeonTransition_Subtile_TriggerShutters() {  // 8289f0
   }
 }
 
-void Module07_02_SupertileTransition() {  // 828a26
+// Un frame della transizione tra stanze, senza l'animazione di Link
+static void InterRoomTransitionStep() {
   link_y_coord_prev = link_y_coord;
   link_x_coord_prev = link_x_coord;
   if (subsubmodule_index != 0) {
@@ -6690,8 +6722,30 @@ void Module07_02_SupertileTransition() {  // 828a26
       Graphics_IncrementalVRAMUpload();
     Dungeon_LoadAttribute_Selectable();
   }
-  Link_HandleMovingAnimation_FullLongEntry();
+  // Transizioni veloci: Link non aspetta, a scorrimento finito, che finiscano
+  // di caricarsi le caselle della stanza (di norma una parte per frame) e la
+  // grafica dei nemici
+  if (subsubmodule_index == 12 && (enhanced_features0 & kFeatures0_FastTransitions)) {
+    for (int guard = 0; guard < 256 && overworld_map_state != 5; guard++)
+      Dungeon_LoadAttribute_Selectable();
+    while (incremental_counter_for_vram < 16)
+      Graphics_IncrementalVRAMUploadImmediate();
+  }
   kDungeon_InterRoomTrans[subsubmodule_index]();
+}
+
+void Module07_02_SupertileTransition() {  // 828a26
+  Link_HandleMovingAnimation_FullLongEntry();
+  InterRoomTransitionStep();
+  if (!(enhanced_features0 & kFeatures0_FastTransitions))
+    return;
+  for (int guard = 0; guard < 16 && submodule_index == 2 && InterRoomPhaseIsInstant(subsubmodule_index); guard++) {
+    uint8 old = subsubmodule_index;
+    NMI_DoUpdates();
+    InterRoomTransitionStep();
+    if (subsubmodule_index == old)
+      break;
+  }
 }
 
 void Module07_02_00_InitializeTransition() {  // 828a4f
@@ -8193,7 +8247,20 @@ static void DungeonTransition_ScrollRoomStep();
 static void Module07_11_0A_ScrollCameraStep();
 
 void DungeonTransition_ScrollRoom() {  // 82be03
-  RunTransitionSteps(&DungeonTransition_ScrollRoomStep);
+  if (!(enhanced_features0 & kFeatures0_FastTransitions)) {
+    DungeonTransition_ScrollRoomStep();
+    return;
+  }
+  // Transizioni veloci: 1 o 2 passi per frame, perche' la transizione duri
+  // sempre kHdTransFrames frame
+  HdTransPlan plan;
+  int steps = Dungeon_TransitionPlan(&plan) ? HdTrans_ScrollSteps(&plan) : 2;
+  for (int i = 0; i < steps; i++) {
+    uint8 old = subsubmodule_index;
+    DungeonTransition_ScrollRoomStep();
+    if (subsubmodule_index != old)
+      break;
+  }
 }
 
 void Module07_11_0A_ScrollCamera() {  // 82be75
@@ -8295,9 +8362,9 @@ bool DungeonTransition_MoveLinkOutDoor() {  // 82c191
   }
 }
 
-uint8 CalculateTransitionLanding() {  // 82c1e5
-  int pos = ((link_y_coord + 12) & 0x1f8) << 3;
-  pos |= ((link_x_coord + 8) & 0x1f8) >> 3;
+static uint8 TransitionLandingAt(uint16 x, uint16 y) {
+  int pos = ((y + 12) & 0x1f8) << 3;
+  pos |= ((x + 8) & 0x1f8) >> 3;
   pos |= (link_is_on_lower_level ? 0x1000 : 0);
   uint8 a = dung_bg2_attr_table[pos];
   uint8 r = (a == 0 || a == 9) ? 0 :
@@ -8305,7 +8372,83 @@ uint8 CalculateTransitionLanding() {  // 82c1e5
     (a == 0x82) ? 2 :
     (a == 0x84 || a == 0x88) ? 3 :
     (a == 0x86) ? 4 : 2;
-  return byte_7E004E = r;
+  return r;
+}
+
+uint8 CalculateTransitionLanding() {  // 82c1e5
+  return byte_7E004E = TransitionLandingAt(link_x_coord, link_y_coord);
+}
+
+// Transizioni veloci (hd_trans.c): previsione della transizione in corso fra
+// stanze o parti di stanza, calcolata dalle stesse tabelle del gioco senza
+// toccarne lo stato. Link dopo lo scorrimento atterra sulla soglia
+// (SubtileTransitionCalculateLanding) e poi esce dalla porta di 2 pixel per
+// frame (DungeonTransition_MoveLinkOutDoor).
+static int WalkOutOfDoor(int c, uint8 r, int *frames) {
+  int i = overworld_screen_transition;
+  uint8 x = kStaircaseTab2[r + i * 5];
+  int d = i & 1 ? -2 : 2, n = 0;
+  do {
+    c += d, n++;
+  } while ((c & 0xfe) != x && n < 128);
+  *frames = n;
+  return c;
+}
+
+bool Dungeon_TransitionPlan(HdTransPlan *p) {
+  int i = overworld_screen_transition & 3;
+  int scroll_phase = submodule_index == 1 ? 3 : 8, walk_phase = submodule_index == 1 ? 5 : 13;
+  int k = subsubmodule_index;
+  int step = kStaircaseTab3[i];
+  p->axis = (i & 2) ? 0 : 1;
+  p->dir = step > 0 ? 1 : -1;
+  int link = p->axis ? link_y_coord : link_x_coord;
+  uint16 cam = p->axis ? BG2VOFS_copy2 : BG2HOFS_copy2;
+  // passi di scorrimento che mancano (come DungeonTransition_ScrollRoomStep)
+  int steps = 0;
+  uint16 t = cam;
+  if (k <= scroll_phase) {
+    do {
+      t = (t + step) & ~1, steps++;
+    } while ((t & 0x1fc) != (&up_down_scroll_target)[i] && steps < 256);
+  }
+  p->cam_end = k <= scroll_phase ? t : cam;
+  p->steps_left = steps;
+  p->max_steps = 3;  // la stanza d'arrivo e' gia' tutta in VRAM
+  p->frames_before = k < scroll_phase ? 1 : 0;
+  if (k > walk_phase) {
+    p->link_final = link, p->frames_after = 0;
+    return true;
+  }
+  int walk;
+  if (k == walk_phase) {
+    p->link_final = WalkOutOfDoor(link, byte_7E004E, &walk);
+    p->frames_after = walk;
+    return true;
+  }
+  // Link si muove negli ultimi passi dello scorrimento...
+  int tc = k == scroll_phase ? transition_counter : 0;
+  int first = IntMax(tc + 1, kStaircaseTab4[i]);
+  int moves = IntMax(tc + steps - first + 1, 0);
+  int after = link + moves * step;
+  // ...atterra sulla soglia (le caselle della stanza nuova potrebbero non
+  // essere ancora caricate: la previsione si corregge quando lo sono)...
+  uint16 lx = p->axis ? link_x_coord : after, ly = p->axis ? after : link_y_coord;
+  uint8 r = TransitionLandingAt(lx, ly);
+  for (int tries = 0; tries < 2; tries++, r = 0) {
+    int a = (r == 2) ? 1 : (r == 4) ? 2 : r;
+    int8 v = kStaircaseTab2[a + i * 5];
+    v -= (v < 0) ? -8 : 8;
+    int landing = (after & ~0xff) | (uint8)v;
+    // ...e cammina fino a dentro la stanza (la soglia si raggiunge
+    // nell'ultimo frame di scorrimento). Un tragitto lungo vuol dire caselle
+    // ancora della stanza vecchia: si prende la soglia di una porta normale.
+    p->link_final = WalkOutOfDoor(landing, r, &walk);
+    if (walk <= 8)
+      break;
+  }
+  p->frames_after = walk;
+  return true;
 }
 
 // This gets called when entering a dungeon from ow.

@@ -452,20 +452,19 @@ static bool HandleIniConfig(int section, const char *key, char *value) {
       return true;
     } else if (StringEqualsNoCase(key, "ExtendedAspectRatio")) {
       const char* s;
-      int h = 224;
+      int h = 224, num = 0, den = 1;
       bool nospr = false, novis = false;
-      // todo: make it not depend on the order
       while ((s = NextDelim(&value, ',')) != NULL) {
         if (strcmp(s, "extend_y") == 0)
           h = 240, g_config.extend_y = true;
         else if (strcmp(s, "16:9") == 0)
-          g_config.extended_aspect_ratio = (h * 16 / 9 - 256) / 2;
+          num = 16, den = 9;
         else if (strcmp(s, "16:10") == 0)
-          g_config.extended_aspect_ratio = (h * 16 / 10 - 256) / 2;
+          num = 16, den = 10;
         else if (strcmp(s, "18:9") == 0)
-          g_config.extended_aspect_ratio = (h * 18 / 9 - 256) / 2;
+          num = 18, den = 9;
         else if (strcmp(s, "4:3") == 0)
-          g_config.extended_aspect_ratio = 0;
+          num = 0;
         else if (strcmp(s, "unchanged_sprites") == 0)
           nospr = true;
         else if (strcmp(s, "no_visual_fixes") == 0)
@@ -473,6 +472,9 @@ static bool HandleIniConfig(int section, const char *key, char *value) {
         else
           return false;
       }
+      // la larghezza si calcola dopo aver letto tutte le parole: con extend_y in
+      // qualunque posizione il rapporto resta quello scelto (16:9 = 426x240)
+      g_config.extended_aspect_ratio = num ? (h * num / den - 256) / 2 : 0;
       if (g_config.extended_aspect_ratio && !nospr)
         g_config.features0 |= kFeatures0_ExtendScreen64;
       if (g_config.extended_aspect_ratio && !novis)

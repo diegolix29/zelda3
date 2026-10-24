@@ -29,6 +29,7 @@ void Ancilla_Unused_14(int k);
 void Ancilla_Unused_25(int k);
 void SpinSpark_Draw(int k, int offs);
 bool SomarianBlock_CheckEmpty(OamEnt *oam);
+void SomariaBlock_RemoveOffscreen(void);
 void AddDashingDustEx(uint8 a, uint8 y, uint8 flag);
 void AddBirdCommon(int k);
 ProjectSpeedRet Bomb_ProjectSpeedTowardsPlayer(int k, uint16 x, uint16 y, uint8 vel);

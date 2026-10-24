@@ -31,11 +31,16 @@ void HdMenu_Draw(uint8 *pixels, int pitch, int width, int height, int scale);
 
 // Mostra un breve messaggio in basso sullo schermo
 void HdMenu_ShowMessage(const char *msg);
+// Suggerimenti dei tasti accesi e disegnabili (solo con le fasce del 16:9 o 16:10)
+bool HdMenu_ButtonHintsOn(void);
 // Link entra da una porta del mondo esterno: se e' la porta principale di un
 // dungeon ne mostra il nome al centro
 void HdMenu_ShowDungeonName(void);
 // Scritta del dungeon visibile: i nemici restano fermi finche' Link non si muove
 bool HdMenu_FreezeEnemies(void);
+// Input del fotogramma con la scritta del dungeon: tutto fermo, il primo tasto
+// toglie solo la scritta
+int HdMenu_FilterInput(int inputs);
 
 // Da chiamare dopo ogni frame di gioco (con l'audio bloccato)
 void HdMenu_AfterFrame(bool is_replay);

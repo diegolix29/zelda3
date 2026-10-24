@@ -4793,6 +4793,8 @@ void Sprite_Guard_SendOutProbe(int k) {  // 85c5f2
 void Sprite_SpawnProbeAlways(int k, uint8 r15) {  // 85c612
   SpriteSpawnInfo info;
   int j = Sprite_SpawnDynamicallyEx(k, 0x41, &info, 10);
+  if (j < 0 && HdWorld_ProbeMoreSlots(k))
+    j = Sprite_SpawnDynamicallyEx(k, 0x41, &info, 14);
   if (j < 0)
     return;
   int t = info.r0_x + 8;
@@ -10303,6 +10305,8 @@ void SmithySpark_Draw(int k) {  // 86b72c
   Sprite_DrawMultiple(k, &kSmithySpark_Dmd[sprite_graphics[k] * 2], 2, NULL);
 }
 
+static void EnemyArrow_KeepInWall(int k);
+
 void Sprite_1B_Arrow(int k) {  // 86b754
   int j;
   static const int8 kEnemyArrow_Xvel[8] = {0, 0, 16, 16, 0, 0, -16, -16};
@@ -10316,6 +10320,7 @@ void Sprite_1B_Arrow(int k) {  // 86b754
     j = sprite_delay_main[k];
     if (j != 0) {
       if (--j == 0) {
+        EnemyArrow_KeepInWall(k);
         sprite_state[k] = 0;
       } else if (j >= 32 && !(j & 1)) {
         j = (frame_counter << 1 & 4) | sprite_D[k];
@@ -10356,18 +10361,34 @@ void Sprite_1B_Arrow(int k) {  // 86b754
   }
 }
 
-void EnemyArrow_Draw(int k) {  // 86b867
-  static const int16 kEnemyArrow_Draw_X[8] = {-8, 0, 0, 8, 0, 0, 0, 0};
-  static const int16 kEnemyArrow_Draw_Y[8] = {0, 0, 0, 0, -8, 0, 0, 8};
-  static const uint8 kEnemyArrow_Draw_Char[32] = {
-    0x3a, 0x3d, 0x3d, 0x3a, 0x2a, 0x2b, 0x2b, 0x2a, 0x7c, 0x6c, 0x6c, 0x7c, 0x7b, 0x6b, 0x6b, 0x7b,
-    0x3a, 0x3b, 0x3b, 0x3a, 0x2a, 0x3c, 0x3c, 0x2a, 0x81, 0x80, 0x80, 0x81, 0x91, 0x90, 0x90, 0x91,
-  };
-  static const uint8 kEnemyArrow_Draw_Flags[32] = {
-    8,    8, 0x48, 0x48, 8, 8, 0x88, 0x88,    9, 0x49, 9, 0x49,    9, 0x89, 9, 0x89,
-    8, 0x88, 0xc8, 0x48, 8, 8, 0x88, 0x88, 0x49, 0x49, 9,    9, 0x89, 0x89, 9,    9,
-  };
+static const int16 kEnemyArrow_Draw_X[8] = {-8, 0, 0, 8, 0, 0, 0, 0};
+static const int16 kEnemyArrow_Draw_Y[8] = {0, 0, 0, 0, -8, 0, 0, 8};
+static const uint8 kEnemyArrow_Draw_Char[32] = {
+  0x3a, 0x3d, 0x3d, 0x3a, 0x2a, 0x2b, 0x2b, 0x2a, 0x7c, 0x6c, 0x6c, 0x7c, 0x7b, 0x6b, 0x6b, 0x7b,
+  0x3a, 0x3b, 0x3b, 0x3a, 0x2a, 0x3c, 0x3c, 0x2a, 0x81, 0x80, 0x80, 0x81, 0x91, 0x90, 0x90, 0x91,
+};
+static const uint8 kEnemyArrow_Draw_Flags[32] = {
+  8,    8, 0x48, 0x48, 8, 8, 0x88, 0x88,    9, 0x49, 9, 0x49,    9, 0x89, 9, 0x89,
+  8, 0x88, 0xc8, 0x48, 8, 8, 0x88, 0x88, 0x49, 0x49, 9,    9, 0x89, 0x89, 9,    9,
+};
 
+// Mondo persistente: la freccia piantata nel muro resta (hd_world.c la
+// disegna con i due pezzi di EnemyArrow_Draw)
+static void EnemyArrow_KeepInWall(int k) {
+  if (sprite_A[k] != 2)
+    return;
+  uint8 chr[2], flags[2];
+  int8 dx[2], dy[2];
+  for (int i = 0; i < 2; i++) {
+    int j = sprite_D[k] * 2 + i;
+    chr[i] = kEnemyArrow_Draw_Char[j + 16];
+    flags[i] = kEnemyArrow_Draw_Flags[j + 16] | sprite_oam_flags[k];
+    dx[i] = kEnemyArrow_Draw_X[j], dy[i] = kEnemyArrow_Draw_Y[j];
+  }
+  HdWorld_KeepEnemyArrow(k, chr, flags, dx, dy);
+}
+
+void EnemyArrow_Draw(int k) {  // 86b867
   PrepOamCoordsRet info;
   if (Sprite_PrepOamCoordOrDoubleRet(k, &info))
     return;

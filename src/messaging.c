@@ -1339,7 +1339,7 @@ void WorldMap_PlayerControl() {  // 8abae6
   }
 
   MapMarkers_Load();
-  if (!g_map_hint_shown && !g_config.fx_button_hints) {
+  if (!g_map_hint_shown && !HdMenu_ButtonHintsOn()) {
     g_map_hint_shown = true;
     HdMenu_ShowMessage("A segnalino   Y centra su Link   tieni B per scorrere veloce");
   }

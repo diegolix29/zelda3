@@ -4883,10 +4883,32 @@ endif_5:
   }
 }
 
+// Blocco di Somaria che all'ultimo disegno era fuori dalla telecamera
+static bool g_somaria_offscreen[kAncilla_Slots];
+
+// Bastone di Somaria all'aperto: il blocco rimasto fuori dalla telecamera
+// sparisce senza esplodere, cosi' il bastone ne crea subito uno nuovo vicino
+// a Link (come nell'originale, dove il blocco spariva uscendo dallo schermo)
+void SomariaBlock_RemoveOffscreen(void) {
+  if (player_is_indoors)
+    return;
+  for (int i = kAncilla_LinkSlots - 1; i >= 0; i--) {
+    if (ancilla_type[i] != 0x2c || !g_somaria_offscreen[i] || i + 1 == flag_is_ancilla_to_pick_up)
+      continue;
+    ancilla_type[i] = 0;
+    dung_flag_somaria_block_switch = 0;
+    if (link_speed_setting == 0x12) {
+      bitmask_of_dragstate = 0;
+      link_speed_setting = 0;
+    }
+  }
+}
+
 int AncillaAdd_SomariaBlock(uint8 type, uint8 y) {  // 88e078
   int k = AncillaAdd_AddAncilla_Bank08(type, y);
   if (k < 0)
     return k;
+  g_somaria_offscreen[k] = false;
   for (int j = kAncilla_LinkSlots - 1; j >= 0; j--) {
     if (j == k || ancilla_type[j] != 0x2c)
       continue;
@@ -5167,7 +5189,12 @@ void AncillaDraw_SomariaBlock(int k) {  // 88e61b
     oam++;
   } while (j++, ++r8 & 3);
 
-  if (SomarianBlock_CheckEmpty(oam_org)) {
+  // all'aperto il blocco resta anche fuori dalla telecamera, fino al cambio
+  // d'area (Ancilla_TerminateSelectInteractives) o finche' Link non lo rompe
+  // (o non ne crea un altro: SomariaBlock_RemoveOffscreen)
+  bool empty = SomarianBlock_CheckEmpty(oam_org);
+  g_somaria_offscreen[k] = empty;
+  if (empty && player_is_indoors) {
     dung_flag_somaria_block_switch = 0;
     ancilla_type[k] = 0;
     if (k + 1 == flag_is_ancilla_to_pick_up) {

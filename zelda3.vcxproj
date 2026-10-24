@@ -238,6 +238,7 @@
     <ClCompile Include="src\hd_fx.c" />
     <ClCompile Include="src\hd_hud.c" />
     <ClCompile Include="src\hd_world.c" />
+    <ClCompile Include="src\hd_trans.c" />
     <ClCompile Include="src\hud.c" />
     <ClCompile Include="src\load_gfx.c" />
     <ClCompile Include="src\main.c" />

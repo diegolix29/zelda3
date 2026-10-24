@@ -38,6 +38,7 @@ void HdWorld_RememberExtraTile(uint16 pos, uint16 value);
 // La freccia k, ferma in un muro, resta li' finche' il mondo non torna com'era.
 // Vero se da ora la disegna hd_world.c (l'oggetto in volo si puo' togliere)
 bool HdWorld_KeepArrow(int k);
+bool HdWorld_KeepEnemyArrow(int k, const uint8 *chr, const uint8 *flags, const int8 *dx, const int8 *dy);
 
 // Aree vicine dal vivo: una volta per frame di gioco, dopo la telecamera, i
 // nemici delle aree vicine visibili fanno un passo
@@ -69,6 +70,10 @@ bool HdWorld_KeepOffscreen(int k);
 void HdWorld_SpriteBegin(int k);
 void HdWorld_SpriteEnd(int k, bool offscreen);
 bool HdWorld_LeashWall(int k, uint16 x, uint16 y);
+bool HdWorld_HoldReload(uint16 blk);
+bool HdWorld_ProbeMoreSlots(int k);
+int HdWorld_FreeSlot(int k, int last);
+bool HdWorld_KeepDropNormal(int k);
 void HdWorld_SpriteSpawned(int k);
 void HdWorld_CarriedLost(int k);
 // Vero se il bordo dell'area fa da muro per questo nemico (Sprite_CheckTileProperty)

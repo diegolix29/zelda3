@@ -488,6 +488,8 @@ static const char *Tr(const char *it) {
     { "Ombre di personaggi e nemici", "Shadows of characters and enemies" },
     { "Cerchio di transizione morbido", "Soft transition circle" },
     { "Suggerimenti dei tasti", "Button hints" },
+    { "Solo 16:9 e 16:10", "Only 16:9 and 16:10" },
+    { "Richiede lo schermo 16:9 o 16:10", "Requires a 16:9 or 16:10 screen" },
     { "Velocit\xc3\xa0 del testo", "Text speed" },
     { "Lingua dei dialoghi", "Dialogue language" },
     { "Musica orchestrale MSU", "MSU orchestral music" },
@@ -683,7 +685,7 @@ static void BuildItems() {
     AddItem(12, "Sfocatura dietro menu", YesNo(g_config.fx_menu_blur));
     AddItem(13, "Ombre di personaggi e nemici", YesNo(g_config.fx_sprite_shadows));
     AddItem(14, "Cerchio di transizione morbido", YesNo(g_config.fx_soft_iris));
-    AddItem(15, "Suggerimenti dei tasti", YesNo(g_config.fx_button_hints));
+    AddItem(15, "Suggerimenti dei tasti", g_zenv.ppu->extraLeftRight > 0 ? YesNo(g_config.fx_button_hints) : "Solo 16:9 e 16:10");
     break;
   case kPage_Game:
     AddItem(100, "Velocit\xc3\xa0 del testo", kTextSpeedNames[g_config.text_speed % 3]);
@@ -757,6 +759,8 @@ static void Activate(int id, int dir) {
     } else if (id == 6) {
       g_config.dynamic_light = !g_config.dynamic_light;
       g_dynamic_light = g_config.dynamic_light;
+    } else if (id == 15 && g_zenv.ppu->extraLeftRight == 0) {
+      ShowMessage("Richiede lo schermo 16:9 o 16:10");
     } else if (id >= 7 && id <= 15) {
       bool *opt[9] = { &g_config.fx_embers, &g_config.fx_window_rays, &g_config.fx_item_glow,
                        &g_config.fx_heat_haze, &g_config.fx_rain, &g_config.fx_menu_blur,
@@ -1081,13 +1085,19 @@ static void DrawHints(Canvas *cv, const Hint *h, int n, int bottom) {
   int total = 0;
   for (int i = 0; i < n; i++) {
     ButtonName(h[i].btn, names[i], sizeof(names[i]));
-    total += TextWidth(names[i]) + 8 + 4 + TextWidth(Tr(h[i].label)) + (i ? 14 : 0);
+    total += TextWidth(names[i]) + 8 + 4 + TextWidth(Tr(h[i].label));
   }
+  // spazio fra i suggerimenti: piu' stretto se la riga non entra nello schermo
+  // (16:10 o 4:3 con nomi dei tasti lunghi)
+  int gap = 14;
+  if (n > 1 && total + (n - 1) * gap + 16 > cv->width)
+    gap = IntMax(4, (cv->width - 16 - total) / (n - 1));
+  total += (n - 1) * gap;
   int x = (cv->width - total) / 2, y = cv->height - bottom;
   DrawPanel(cv, x - 8, y - 2, total + 16, 20, 0x101020, 0.70f);
   for (int i = 0; i < n; i++) {
     if (i)
-      x += 14;
+      x += gap;
     int kw = TextWidth(names[i]) + 8;
     DrawPanel(cv, x, y + 1, kw, 14, 0xe0e0e8, 1.0f);
     DrawPanel(cv, x + 1, y + 2, kw - 2, 12, 0x383848, 1.0f);
@@ -1097,15 +1107,28 @@ static void DrawHints(Canvas *cv, const Hint *h, int n, int bottom) {
   }
 }
 
+// Larghezza del riquadro piu' largo di una colonna di suggerimenti, con il
+// margine interno pad
+static int HintColumnWidth(const Hint *h, int n, int pad) {
+  int w = 0;
+  for (int i = 0; i < n; i++) {
+    char name[48];
+    ButtonName(h[i].btn, name, sizeof(name));
+    int kw = TextWidth(name) + 8, lw = TextWidth(Tr(h[i].label));
+    w = IntMax(w, IntMax(kw, lw) + pad);
+  }
+  return w;
+}
+
 // Suggerimenti in colonna ai lati dello schermo: per ognuno il tasto e sotto
 // la sua azione, centrati nella fascia laterale
-static void DrawHintColumn(Canvas *cv, const Hint *h, int n, int cx) {
+static void DrawHintColumn(Canvas *cv, const Hint *h, int n, int cx, int pad) {
   int y = cv->height - 12 - n * 40;
   for (int i = 0; i < n; i++, y += 40) {
     char name[48];
     ButtonName(h[i].btn, name, sizeof(name));
     int kw = TextWidth(name) + 8, lw = TextWidth(Tr(h[i].label));
-    int pw = (kw > lw ? kw : lw) + 12;
+    int pw = (kw > lw ? kw : lw) + pad;
     DrawPanel(cv, cx - pw / 2, y - 3, pw, 37, 0x101020, 0.70f);
     int kx = cx - kw / 2;
     DrawPanel(cv, kx, y, kw, 14, 0xe0e0e8, 1.0f);
@@ -1172,8 +1195,14 @@ static void DrawInventoryLetterOutlines(Canvas *cv) {
   }
 }
 
+// I suggerimenti stanno nelle fasce del widescreen (16:9, 16:10): in 4:3 non
+// c'e' posto e coprirebbero il menu o uscirebbero dallo schermo
+bool HdMenu_ButtonHintsOn(void) {
+  return g_config.fx_button_hints && g_zenv.ppu->extraLeftRight > 0;
+}
+
 static void DrawButtonHints(Canvas *cv) {
-  if (!g_config.fx_button_hints || main_module_index != 14)
+  if (!HdMenu_ButtonHintsOn() || main_module_index != 14)
     return;
   // il tasto della mappa e' X, oppure Select se a X e' assegnato un oggetto
   int map_btn = hud_cur_item_x != 0 ? kBtn_Select : kBtn_X;
@@ -1186,13 +1215,17 @@ static void DrawButtonHints(Canvas *cv) {
       right[nr++] = (Hint){ kBtn_Select, "Salva" };
     if (enhanced_features0 & kFeatures0_SwitchLR)
       right[nr++] = (Hint){ kBtn_Y, "Riordina" };
-    // in 4:3 non c'e' spazio ai lati: niente suggerimenti (sotto coprirebbero
-    // i riquadri dell'inventario)
-    int side = (cv->width - 256) / 2;
-    if (side >= 60) {
-      DrawHintColumn(cv, left, 2, side / 2);
+    // Le colonne stanno nelle fasce laterali: in 16:9 (71 px) con il margine
+    // interno pieno, in 16:10 (51 px) con un margine piu' stretto. In 4:3 non
+    // c'e' spazio: niente suggerimenti (sotto coprirebbero i riquadri)
+    int side = (cv->width - 256) / 2, pad = 12;
+    int need = IntMax(HintColumnWidth(left, 2, pad), HintColumnWidth(right, nr, pad));
+    if (need > side - 2)
+      pad = 4, need = IntMax(HintColumnWidth(left, 2, pad), HintColumnWidth(right, nr, pad));
+    if (need <= side - 2) {
+      DrawHintColumn(cv, left, 2, side / 2, pad);
       if (nr)
-        DrawHintColumn(cv, right, nr, cv->width - side / 2);
+        DrawHintColumn(cv, right, nr, cv->width - side / 2, pad);
     }
   } else if (sub == 7 && overworld_map_state >= 4 && overworld_map_state <= 5) {  // mappa del mondo
     if (overworld_map_flags & 1) {
@@ -1372,10 +1405,16 @@ static const DungeonEntry kDungeonEntries[] = {
 static const DungeonEntry *g_dungeon_name;
 static bool g_dungeon_name_armed;
 static uint16 g_dungeon_name_x, g_dungeon_name_y;
+// Suono di un cartello quando compare il nome: le lettere (12) per tre
+// fotogrammi di fila e, 26 fotogrammi dopo, il colpo di fine testo (0x24)
+static int g_dungeon_name_tick;
+static bool g_dungeon_name_held;  // tasto tenuto mentre la scritta aspettava (HdMenu_FilterInput)
 
 void HdMenu_ShowDungeonName(void) {
   g_dungeon_name = NULL;
   g_dungeon_name_armed = false;
+  g_dungeon_name_tick = 0;
+  g_dungeon_name_held = false;
   for (int i = 0; i < countof(kDungeonEntries); i++)
     if (kDungeonEntries[i].entrance == which_entrance)
       g_dungeon_name = &kDungeonEntries[i];
@@ -1399,7 +1438,8 @@ static void GbaTextCentered(Canvas *cv, int y, const char *s) {
 }
 
 // Dopo ogni frame: la scritta resta finche' Link non si muove dal punto in cui
-// e' comparso nel dungeon
+// e' comparso nel dungeon (per esempio su un nastro) o non si preme un tasto
+// (HdMenu_FilterInput)
 static void UpdateDungeonName(void) {
   if (!(enhanced_features0 & kFeatures0_DungeonNames))
     g_dungeon_name = NULL;
@@ -1418,10 +1458,63 @@ static void UpdateDungeonName(void) {
   } else if (link_x_coord != g_dungeon_name_x || link_y_coord != g_dungeon_name_y) {
     g_dungeon_name = NULL;
   }
+  if (g_dungeon_name && g_dungeon_name_armed && submodule_index == 0 && (INIDISP_copy & 0x8f) == 0x0f) {
+    if (g_dungeon_name_tick < 3)
+      sound_effect_2 = 12;
+    else if (g_dungeon_name_tick == 28)
+      sound_effect_2 = 0x24;
+    g_dungeon_name_tick++;
+  }
 }
 
 bool HdMenu_FreezeEnemies(void) {
   return g_dungeon_name && g_dungeon_name_armed && main_module_index == 7;
+}
+
+// Con la scritta sullo schermo e' fermo anche Link: il primo tasto (passo,
+// spada, oggetto) toglie solo la scritta e non arriva al gioco finche' non si
+// lasciano tutti i tasti; dal tasto dopo Link si muove. Chi entra tenendo
+// premuta la freccia si ferma appena dentro (l'input si ignora anche mentre lo
+// schermo si schiarisce) e vede la scritta: quella freccia conta gia' come primo
+// tasto, quindi lasciata e ripremuta toglie la scritta e muove subito Link.
+// Il tasto della mappa (X) intanto non conta: non apre la mappa e non toglie
+// la scritta; la corsa (A) e tutti gli altri si'.
+enum { kInputMapButton = 1 << 9 };  // X (kKbdRemap in main.c)
+static bool g_dungeon_name_swallow;
+static int g_dungeon_name_prev_inputs;
+
+int HdMenu_FilterInput(int inputs) {
+  int all = inputs;
+  // con la scritta (o mentre la si aspetta) il tasto della mappa non esiste
+  if (g_dungeon_name && main_module_index == 7)
+    inputs &= ~kInputMapButton;
+  int pressed = inputs & ~g_dungeon_name_prev_inputs;
+  g_dungeon_name_prev_inputs = inputs;
+  if (g_dungeon_name_swallow) {
+    if (inputs)
+      return 0;
+    g_dungeon_name_swallow = false;
+  }
+  // sottomodulo 15: lo schermo si schiarisce entrando (la freccia tenuta
+  // spostava Link proprio nell'ultimo fotogramma)
+  if (!g_dungeon_name || main_module_index != 7 || (submodule_index != 0 && submodule_index != 15))
+    return all;
+  bool visible = g_dungeon_name_armed && submodule_index == 0 && (INIDISP_copy & 0x8f) == 0x0f;
+  if (!visible || (inputs & ~pressed)) {
+    // si aspetta la scritta, o si tiene un tasto premuto da prima
+    if (inputs)
+      g_dungeon_name_held = true;
+    return 0;
+  }
+  if (!pressed)
+    return 0;
+  g_dungeon_name = NULL;
+  if (g_dungeon_name_held) {
+    g_dungeon_name_held = false;
+    return inputs;
+  }
+  g_dungeon_name_swallow = true;
+  return 0;
 }
 
 static void DrawDungeonEntryName(Canvas *cv) {

@@ -1566,13 +1566,20 @@ void SpriteDraw_SingleLarge(int k) {  // 86dc10
   Sprite_PrepAndDrawSingleLargeNoPrep(k, &info);
 }
 
+// Mondo continuo: come SetOamHelper0, il pezzo si scrive anche sopra o sotto
+// la telecamera del gioco (ferma al bordo dell'area mentre la vista va oltre);
+// prima il sasso dell'Octorok spariva passando il bordo dell'area in alto
+static bool SpriteDraw_YVisible(uint16 y) {
+  return (uint16)(y + 0x10) < 0x100 || (g_view_valid && !g_hd_neighbor_tick);
+}
+
 void Sprite_PrepAndDrawSingleLargeNoPrep(int k, PrepOamCoordsRet *info) {  // 86dc13
   OamEnt *oam = GetOamCurPtr();
   oam->x = info->x;
-  if ((uint16)(info->y + 0x10) < 0x100) {
-    oam->y = info->y;
-    oam->charnum = kSprite_PrepAndDrawSingleLarge_Tab2[kSprite_PrepAndDrawSingleLarge_Tab1[sprite_type[k]] + sprite_graphics[k]];
-    oam->flags = info->flags;
+  if (SpriteDraw_YVisible(info->y)) {
+    SetOamHelper0(oam, info->x, info->y,
+                  kSprite_PrepAndDrawSingleLarge_Tab2[kSprite_PrepAndDrawSingleLarge_Tab1[sprite_type[k]] + sprite_graphics[k]],
+                  info->flags, 2);
   }
   bytewise_extended_oam[oam - oam_buf] = 2 | ((info->x >= 256) ? 1: 0);
   if (sprite_flags3[k] & 0x10)
@@ -1586,13 +1593,13 @@ void SpriteDraw_Shadow_custom(int k, PrepOamCoordsRet *info, uint8 a) {  // 86dc
     return;
   y -= BG2VOFS_copy2;
   info->y = y;
-  if ((uint16)(y + 0x10) >= 0x100)
+  if (!SpriteDraw_YVisible(y))
     return;
   OamEnt *oam = GetOamCurPtr() + (sprite_flags2[k] & 0x1f);
   if (sprite_flags3[k] & 0x20) {
-    SetOamHelper1(oam, info->x, y + 1, 0x38, (info->flags & 0x30) | 8, 0);
+    SetOamHelper0(oam, info->x, y + 1, 0x38, (info->flags & 0x30) | 8, 0);
   } else {
-    SetOamHelper1(oam, info->x, y, 0x6c, (info->flags & 0x30) | 8, 2);
+    SetOamHelper0(oam, info->x, y, 0x6c, (info->flags & 0x30) | 8, 2);
   }
 }
 
@@ -1606,10 +1613,10 @@ void SpriteDraw_SingleSmall(int k) {  // 86dcef
     return;
   OamEnt *oam = GetOamCurPtr();
   oam->x = info.x;
-  if ((uint16)(info.y + 0x10) < 0x100) {
-    oam->y = info.y;
-    oam->charnum = kSprite_PrepAndDrawSingleLarge_Tab2[kSprite_PrepAndDrawSingleLarge_Tab1[sprite_type[k]] + sprite_graphics[k]];
-    oam->flags = info.flags;
+  if (SpriteDraw_YVisible(info.y)) {
+    SetOamHelper0(oam, info.x, info.y,
+                  kSprite_PrepAndDrawSingleLarge_Tab2[kSprite_PrepAndDrawSingleLarge_Tab1[sprite_type[k]] + sprite_graphics[k]],
+                  info.flags, 0);
   }
   bytewise_extended_oam[oam - oam_buf] = 0 | (info.x >= 256);
   if (sprite_flags3[k] & 0x10)
@@ -1920,7 +1927,8 @@ bool Sprite_PrepOamCoordOrDoubleRet(int k, PrepOamCoordsRet *ret) {  // 86e41e
       (uint16)(ky + 0x40) >= 0x170 && !(sprite_flags4[k] & 0x20)) {
     // mondo continuo tutto attivo: i nemici dell'area continuano a muoversi
     // anche fuori dalla vista (senza disegnarsi, vedi Sprite_Main)
-    if (live && HdWorld_KeepOffscreen(k)) {
+    // (nel gioco normale restano gli oggetti caduti, fino al loro tempo)
+    if (live ? HdWorld_KeepOffscreen(k) : HdWorld_KeepDropNormal(k)) {
       g_sprite_offscreen[k] = 1;
     } else {
       sprite_pause[k]++;
@@ -3960,6 +3968,8 @@ void Overworld_LoadProximaSpriteIfAlive(uint16 blk) {  // 89c739
     overlord_gen3[k] = 0;
   } else {
     // load regular sprite
+    if (HdWorld_HoldReload(blk))
+      return;  // mondo continuo: aspetta che la sua casa sia fuori dalla vista
     int k = Overworld_AllocSprite(sprite_to_spawn);
     if (k < 0)
       return;
@@ -4376,28 +4386,32 @@ int Sprite_SpawnDynamically(int k, uint8 what, SpriteSpawnInfo *info) {  // 9df6
 }
 
 int Sprite_SpawnDynamicallyEx(int k, uint8 what, SpriteSpawnInfo *info, int j) {  // 9df65f
-  do {
-    if (sprite_state[j] == 0) {
-      sprite_type[j] = what;
-      sprite_state[j] = 9;
-      info->r0_x = Sprite_GetX(k);
-      info->r2_y = Sprite_GetY(k);
-      info->r4_z = sprite_z[k];
-      info->r5_overlord_x = overlord_x_lo[k] | overlord_x_hi[k] << 8;
-      info->r7_overlord_y = overlord_y_lo[k] | overlord_y_hi[k] << 8;
-      SpritePrep_LoadProperties(j);
-      if (!player_is_indoors) {
-        sprite_N_word[j] = 0xffff;
-      } else {
-        sprite_N[j] = 0xff;
-      }
-      sprite_floor[j] = sprite_floor[k];
-      sprite_D[j] = sprite_D[k];
-      sprite_die_action[j] = 0;
-      sprite_subtype[j] = 0;
-      break;
+  int last = j;
+  while (j >= 0 && sprite_state[j] != 0)
+    j--;
+  // nessun posto libero: col mondo continuo puo' liberarlo un nemico lontano
+  // (le sonde dei soldati hanno la loro regola, HdWorld_ProbeMoreSlots)
+  if (j < 0 && what != 0x41)
+    j = HdWorld_FreeSlot(k, last);
+  if (j >= 0) {
+    sprite_type[j] = what;
+    sprite_state[j] = 9;
+    info->r0_x = Sprite_GetX(k);
+    info->r2_y = Sprite_GetY(k);
+    info->r4_z = sprite_z[k];
+    info->r5_overlord_x = overlord_x_lo[k] | overlord_x_hi[k] << 8;
+    info->r7_overlord_y = overlord_y_lo[k] | overlord_y_hi[k] << 8;
+    SpritePrep_LoadProperties(j);
+    if (!player_is_indoors) {
+      sprite_N_word[j] = 0xffff;
+    } else {
+      sprite_N[j] = 0xff;
     }
-  } while (--j >= 0);
+    sprite_floor[j] = sprite_floor[k];
+    sprite_D[j] = sprite_D[k];
+    sprite_die_action[j] = 0;
+    sprite_subtype[j] = 0;
+  }
   return j;
 }
 

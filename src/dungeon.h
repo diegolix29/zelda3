@@ -87,6 +87,7 @@ void Dungeon_PrepareNextRoomQuadrantUpload();
 void WaterFlood_BuildOneQuadrantForVRAM();
 void TileMapPrep_NotWaterOnTag();
 void OrientLampLightCone();
+extern int g_lamp_cone_idx;
 void PrepareDungeonExitFromBossFight();
 void SavePalaceDeaths();
 void Dungeon_LoadRoom();

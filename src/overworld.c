@@ -15,6 +15,7 @@
 #include "snes/snes_regs.h"
 #include "assets.h"
 #include "nmi.h"
+#include "hd_trans.h"
 
 const uint16 kOverworld_OffsetBaseX[64] = {
   0,     0, 0x400, 0x600, 0x600, 0xa00, 0xa00, 0xe00,
@@ -711,12 +712,16 @@ void ResetAncillaAndCutscene() {  // 829e6e
 }
 
 static bool InstantWorldTransition(void);
+static bool SmoothWorldTransition(void);
 
 void Module09_Overworld() {  // 82a475
+  uint8 prev_submodule = submodule_index;
   kOverworldSubmodules[submodule_index]();
   // Mondo unico: il cambio d'area appena deciso si fa tutto in questo
-  // frame, senza fermare Link nemmeno per un frame
-  if (main_module_index == 9 && submodule_index == 1 && InstantWorldTransition())
+  // frame, senza fermare Link nemmeno per un frame. Con le transizioni
+  // veloci si comincia subito a caricare l'area nuova.
+  if (main_module_index == 9 && submodule_index == 1 &&
+      (InstantWorldTransition() || (prev_submodule == 0 && SmoothWorldTransition())))
     kOverworldSubmodules[submodule_index]();
 
   int bg2x = BG2HOFS_copy2;
@@ -804,6 +809,7 @@ void Module09_00_PlayerControl() {  // 82a53c
 }
 
 static bool InstantWorldTransition(void);
+static void ResetAncillaKeepThrown(void);
 
 // Distanza dal bordo destro (meno 0x1c) a cui scatta il cambio d'area verso
 // destra. Il gioco lascia 8 pixel prima del bordo, ma ne bastano 4 (gli altri
@@ -905,7 +911,7 @@ compare:
 after:
   HdWorld_LeaveArea();  // mondo unico: le caselle dell'area che si lascia
   y >>= 1;
-  Dungeon_ResetTorchBackgroundAndPlayerInner();
+  ResetAncillaKeepThrown();
   map16_load_src_off &= kSwitchAreaTab0[y];
   int pushed = ((current_area_of_player + kSwitchAreaTab3[y]) >> 1) & 0x3f;
   map16_load_src_off += kSwitchAreaTab1[y * 64 + pushed];
@@ -992,6 +998,51 @@ static bool InstantWorldTransition(void) {
   return (enhanced_features0 & kFeatures0_ContinuousWorld) && BYTE(overworld_screen_index) < 0x80;
 }
 
+// Transizioni veloci senza mondo continuo: le fasi di caricamento con Link
+// fermo si fanno in un frame e il passaggio si disegna fluido (hd_trans.c)
+static bool SmoothWorldTransition(void) {
+  return (enhanced_features0 & kFeatures0_FastTransitions) && !InstantWorldTransition();
+}
+
+// Oggetti di Link che restano al cambio d'area col mondo unico: bombe e
+// tutto cio' che vola (con i loro colpi a segno)
+static bool IsThrownAncilla(uint8 t) {
+  switch (t) {
+  case 0x01: case 0x02: case 0x04: case 0x05: case 0x06: case 0x07:  // Somaria, fuoco, boomerang, bomba
+  case 0x09: case 0x0a: case 0x0b: case 0x0c: case 0x11: case 0x13:  // frecce, ghiaccio, raggio della spada
+  case 0x1f: case 0x2d: case 0x2e:  // rampino, blocco di Somaria che si rompe
+    return true;                    // (il blocco 0x2c sparisce, come nel gioco normale)
+  }
+  return false;
+}
+
+// Al cambio d'area il gioco toglie tutti gli oggetti di Link
+// (Ancilla_TerminateSelectInteractives). Col mondo unico le bombe e gli
+// oggetti lanciati restano dove sono e finiscono il loro volo; con il rampino
+// resta anche lo stato di Link che lo usa, con il boomerang il segno che e'
+// in volo
+static void ResetAncillaKeepThrown(void) {
+  bool keep = InstantWorldTransition(), hook = false, boom = false;
+  uint8 kept[kAncilla_LinkSlots + 1];
+  for (int i = 0; i <= kAncilla_LinkSlots; i++) {
+    kept[i] = keep && IsThrownAncilla(ancilla_type[i]) ? ancilla_type[i] : 0;
+    hook |= kept[i] == 0x1f;
+    boom |= kept[i] == 0x05;
+  }
+  uint8 state = link_player_handler_state, mask = button_mask_b_y, cant = link_cant_change_direction;
+  uint8 pos = link_position_mode, rel = related_to_hookshot, boom_flag = flag_for_boomerang_in_place;
+  Dungeon_ResetTorchBackgroundAndPlayerInner();
+  for (int i = 0; i <= kAncilla_LinkSlots; i++)
+    if (kept[i])
+      ancilla_type[i] = kept[i];
+  if (hook) {
+    link_player_handler_state = state, button_mask_b_y = mask, link_cant_change_direction = cant;
+    link_position_mode = pos, related_to_hookshot = rel;
+  }
+  if (boom)
+    flag_for_boomerang_in_place = boom_flag;
+}
+
 void Module09_LoadAuxGFX() {  // 82ab88
   save_ow_event_info[0x3b] &= ~0x20;
   save_ow_event_info[0x7b] &= ~0x20;
@@ -1006,8 +1057,11 @@ void Module09_LoadAuxGFX() {  // 82ab88
   // fra l'una e l'altra il lavoro dell'NMI che copia i dati in VRAM, e si
   // prosegue nello stesso frame fino alla fine dello scorrimento e
   // all'ingresso nell'area (fasi 5, 6, 7 e 8).
-  if (InstantWorldTransition() && submodule_index == 2) {
-    for (int guard = 0; guard < 24 && submodule_index >= 2 && submodule_index <= 8; guard++) {
+  // Con le transizioni veloci ci si ferma all'inizio dello scorrimento
+  // (fase 6), che resta visibile.
+  if ((InstantWorldTransition() || SmoothWorldTransition()) && submodule_index == 2) {
+    int last = InstantWorldTransition() ? 8 : 5;
+    for (int guard = 0; guard < 24 && submodule_index >= 2 && submodule_index <= last; guard++) {
       NMI_DoUpdates();
       kOverworldSubmodules[submodule_index]();
     }
@@ -1060,10 +1114,15 @@ void Overworld_RunScrollTransition() {  // 82abda
     return;
   }
   Graphics_IncrementalVRAMUpload();
-  // Con le transizioni veloci si fanno due passi di scorrimento per frame.
-  // Due passi da 8px attraversano al massimo un multiplo di 16px, quindi
-  // si costruisce comunque una sola striscia di tile per frame.
+  // Con le transizioni veloci si fanno fino a due passi di scorrimento per
+  // frame (senza mondo continuo quanti ne servono perche' la transizione
+  // duri sempre kHdTransFrames frame). Due passi da 8px attraversano al
+  // massimo un multiplo di 16px, quindi si costruisce comunque una sola
+  // striscia di tile per frame.
   int steps = (enhanced_features0 & kFeatures0_FastTransitions) ? 2 : 1;
+  HdTransPlan plan;
+  if (Overworld_TransitionPlan(&plan))
+    steps = HdTrans_ScrollSteps(&plan);
   for (int i = 0; i < steps; i++) {
     uint8 old_submodule = submodule_index;
     if (i != 0)
@@ -1102,7 +1161,23 @@ void Overworld_StartScrollTransition() {  // 82ac27
   }
 }
 
+static void Overworld_EaseOffScrollTransitionStep();
+
 void Overworld_EaseOffScrollTransition() {  // 82ac3a
+  if (submodule_index != 7 || !SmoothWorldTransition()) {
+    Overworld_EaseOffScrollTransitionStep();
+    return;
+  }
+  // Transizioni veloci: tutti i passi subito, copiando in VRAM le strisce di
+  // caselle fra un passo e l'altro
+  for (int guard = 0; guard < 12 && submodule_index == 7; guard++) {
+    if (guard)
+      NMI_DoUpdates();
+    Overworld_EaseOffScrollTransitionStep();
+  }
+}
+
+static void Overworld_EaseOffScrollTransitionStep() {
   if (kOverworldMapIsSmall[BYTE(overworld_screen_index)]) {
     BYTE(overworld_screen_trans_dir_bits2) = BYTE(overworld_screen_trans_dir_bits);
     OverworldTransitionScrollAndLoadMap();
@@ -1631,6 +1706,13 @@ void Module09_2E_Whirlpool() {  // 82b40f
   case 12:
     countdown_for_blink = 144;
     ReloadPreviouslyLoadedSheets();
+    // Col mondo persistente i mulinelli dell'area d'arrivo possono essere gia'
+    // armati (sprite_A 0, come li ha lasciati la copia dell'area o l'ultima
+    // visita): nell'originale nascono qui con sprite_A 1 (SpritePrep_Whirlpool)
+    // e si armano solo quando Link se ne stacca. Senza, Link ripartiva subito.
+    for (int k = 0; k < 16; k++)
+      if (sprite_state[k] && sprite_type[k] == 0xba)
+        sprite_A[k] = 1;
     HDMAEN_copy = 0x80;
     sound_effect_ambient = overworld_music[BYTE(overworld_screen_index)] >> 4;
     music_control = savegame_is_darkworld ? 9 : 2;
@@ -1896,6 +1978,59 @@ void Overworld_FinalizeEntryOntoScreen() {  // 82c242
   Overworld_OperateCameraScroll();
   if (BYTE(overworld_screen_trans_dir_bits2))
     OverworldHandleMapScroll();
+}
+
+// Transizioni veloci (hd_trans.c): previsione del passaggio in corso fra due
+// aree, calcolata dalle stesse tabelle del gioco senza toccarne lo stato.
+// Link si muove negli ultimi passi dello scorrimento (OverworldScrollTransition),
+// si allinea a 8 pixel e poi entra nell'area di 2 pixel per frame
+// (Overworld_FinalizeEntryOntoScreen).
+static int EnterArea(int c, int *frames) {
+  int d = (byte_7E069C & 1) ? 2 : -2, n = 0;
+  do {
+    c += d, n++;
+  } while ((c & 0xfe) != kOverworld_Func8_tab[byte_7E069C & 3] && n < 128);
+  *frames = n;
+  return c;
+}
+
+bool Overworld_TransitionPlan(HdTransPlan *p) {
+  if (!SmoothWorldTransition() || submodule_index < 1 || submodule_index > 8)
+    return false;
+  int y = overworld_screen_transition & 3;
+  int d = kOverworld_Func6B_Tab1[y];
+  p->axis = y < 2 ? 1 : 0;
+  p->dir = d > 0 ? 1 : -1;
+  int link = p->axis ? link_y_coord : link_x_coord;
+  int cam = p->axis ? BG2VOFS_copy2 : BG2HOFS_copy2;
+  int walk;
+  p->frames_before = 0;
+  p->max_steps = 2;  // una sola striscia di caselle nuove per frame
+  if (submodule_index >= 7) {
+    p->cam_end = cam, p->steps_left = 0;
+    p->link_final = EnterArea(link, &walk);
+    p->frames_after = walk + (submodule_index == 7);
+    return true;
+  }
+  // passi di scorrimento che mancano: la telecamera arriva esattamente sul
+  // bersaglio (prima che lo scorrimento cominci potrebbe non essere ancora
+  // quello giusto: si usa una schermata)
+  int target = (&up_down_scroll_target)[y];
+  int diff = (int16)(target - cam), steps = diff / d;
+  if (diff % d != 0 || steps <= 0 || steps > 64) {
+    steps = (p->axis ? 224 : 256) / 8;
+    target = cam + steps * d;
+  }
+  p->cam_end = target - (y == 0 ? 2 : 0);
+  p->steps_left = steps;
+  p->frames_before = submodule_index < 6;
+  int tc = submodule_index == 6 ? transition_counter : 0;
+  int first = IntMax(tc + 1, kOverworld_Func6B_Tab2[y]);
+  int moves = IntMax(tc + steps - first + 1, 0);
+  // dopo lo scorrimento: un frame per finire di caricare, poi Link entra
+  p->link_final = EnterArea((link + moves * d) & ~7, &walk);
+  p->frames_after = 1 + walk;
+  return true;
 }
 
 void Overworld_Func1F() {  // 82c2a4

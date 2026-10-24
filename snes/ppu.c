@@ -55,6 +55,7 @@ void ppu_reset(Ppu* ppu) {
   ppu->extraLeftCur = 0;
   ppu->extraRightCur = 0;
   ppu->extraBottomCur = 0;
+  ppu->bg1ConeQuadrant = -1;
   ppu->vramPointer = 0;
   ppu->vramIncrementOnHigh = false;
   ppu->vramIncrement = 1;
@@ -693,7 +694,9 @@ static void PpuDrawBackground_mode7(Ppu *ppu, uint y, bool sub, PpuZbufType z) {
       } while (xpos += dx * w, ypos += dy * w, dstz += w, w = ppu->mosaicSize, dstz_end - dstz != 0);
     } else {
       do {
-        if ((uint32)(xpos | ypos) > outside_value) {
+        if (ppu->m7CloudFill && ((xpos | ypos) & ~0x1ffff)) {
+          tile = ppu->vram[(ypos >> 11 & 7) * 128 + (xpos >> 11 & 0x3f)] & 0xff;
+        } else if ((uint32)(xpos | ypos) > outside_value) {
           if (!char_fill)
             continue;
           tile = 0;
@@ -770,7 +773,23 @@ static void PpuDrawMode7Upsampled(Ppu *ppu, uint y) {
     *(uint32*)dst = (mode ? (ppu->colorMapRgb[pixel] & 0xfefefe) >> 1 : ppu->colorMapRgb[pixel]); \
     xcur += m0, ycur += m2, dst += 4;
 
-    if (!ppu->halfColor) {
+#define DRAW_PIXEL_CLOUD(mode) \
+    if ((xcur | ycur) & 0x80000000) \
+      tile = ppu->vram[(ycur >> 25 & 7) * 128 + (xcur >> 25 & 0x3f)] & 0xff; \
+    else \
+      tile = ppu->vram[(ycur >> 25 & 0x7f) * 128 + (xcur >> 25 & 0x7f)] & 0xff; \
+    pixel = ppu->vram[tile * 64 + (ycur >> 22 & 7) * 8 + (xcur >> 22 & 7)] >> 8; \
+    *(uint32*)dst = (mode ? (ppu->colorMapRgb[pixel] & 0xfefefe) >> 1 : ppu->colorMapRgb[pixel]); \
+    xcur += m0, ycur += m2, dst += 4;
+
+    if (ppu->m7CloudFill) {
+      // mappa del mondo: oltre i 512 pixel della mappa (anche in negativo) si
+      // ripetono le nuvole delle prime 8 righe, con il passo di 512 in orizzontale
+      bool half = ppu->halfColor;
+      do {
+        DRAW_PIXEL_CLOUD(half);
+      } while (dst != dst_end);
+    } else if (!ppu->halfColor) {
       do {
         DRAW_PIXEL(0);
         DRAW_PIXEL(0);
@@ -786,6 +805,7 @@ static void PpuDrawMode7Upsampled(Ppu *ppu, uint y) {
       } while (dst != dst_end);
     }
 #undef DRAW_PIXEL
+#undef DRAW_PIXEL_CLOUD
 
     dst_curline += pitch;
   }
@@ -818,6 +838,24 @@ static void PpuDrawMode7Upsampled(Ppu *ppu, uint y) {
 #undef DRAW_PIXEL
 }
 
+// Stanze buie con la Lanterna: BG1 sullo schermo secondario ha i quattro coni
+// (su, giu', sinistra, destra), uno per quadrante 256x256 della mappa. Il gioco
+// mostra solo 256 pixel e sceglie il quadrante con lo scorrimento; con le fasce
+// del widescreen (o le 16 righe in piu') si vedrebbe anche un cono vicino.
+// Fuori dal quadrante scelto BG1 resta trasparente: si sottrae il colore
+// fisso, cioe' il buio pieno, come attorno al cono nel gioco originale.
+static void PpuClipLampCone(Ppu *ppu, int y, const PpuZbufType *before) {
+  int q = ppu->bg1ConeQuadrant;
+  BgLayer *bg = &ppu->bgLayer[0];
+  PpuZbufType *dst = ppu->bgBuffers[1].data + kPpuExtraLeftRight;
+  before += kPpuExtraLeftRight;
+  bool row_ok = ((y + bg->vScroll + BG_BIAS_Y(ppu, 0)) >> 8 & 1) == (q >> 1);
+  for (int x = -ppu->extraLeftCur, x1 = 256 + ppu->extraRightCur; x < x1; x++) {
+    if (!row_ok || ((x + bg->hScroll + BG_BIAS_X(ppu, 0)) >> 8 & 1) != (q & 1))
+      dst[x] = before[x];
+  }
+}
+
 static void PpuDrawBackgrounds(Ppu *ppu, int y, bool sub) {
 // Top 4 bits contain the prio level, and bottom 4 bits the layer type.
 // SPRITE_PRIO_TO_PRIO can be used to convert from obj prio to this prio.
@@ -838,10 +876,16 @@ static void PpuDrawBackgrounds(Ppu *ppu, int y, bool sub) {
     if (ppu->lineHasSprites)
       PpuDrawSprites(ppu, y, sub, true);
 
+    bool cone = sub && ppu->bg1ConeQuadrant >= 0 && IS_SCREEN_ENABLED(ppu, sub, 0);
+    PpuZbufType before[kPpuXPixels];
+    if (cone)
+      memcpy(before, ppu->bgBuffers[1].data, sizeof(before));
     if (IS_MOSAIC_ENABLED(ppu, 0))
       PpuDrawBackground_4bpp_mosaic(ppu, y, sub, 0, 0xc000, 0x8000);
     else
       PpuDrawBackground_4bpp(ppu, y, sub, 0, 0xc000, 0x8000);
+    if (cone)
+      PpuClipLampCone(ppu, y, before);
 
     if (IS_MOSAIC_ENABLED(ppu, 1))
       PpuDrawBackground_4bpp_mosaic(ppu, y, sub, 1, 0xb100, 0x7100);
@@ -1276,6 +1320,12 @@ static bool ppu_evaluateSprites(Ppu* ppu, int line) {
   if (ppu->renderFlags & kPpuRenderFlags_NoSpriteLimits)
     spritesLeft = tilesLeft = 1024;
   int tilesLeftOrg = tilesLeft;
+  // Pixel della riga coperti dall'ombra del gioco (SpriteDraw_Shadow: casella
+  // 0x6c o 0x38, palette 4): l'ombra resta sotto tutti gli altri sprite.
+  // Nell'ordine OAM l'ombra di uno sprite puo' venire prima del corpo di un
+  // altro (fate che si sovrappongono) e lo copriva.
+  uint8 game_shadow[kPpuXPixels];
+  memset(game_shadow, 0, sizeof(game_shadow));
 
   do {
     int yy = ppu->oam[index] >> 8;
@@ -1325,6 +1375,7 @@ static bool ppu_evaluateSprites(Ppu* ppu, int line) {
     int prio = SPRITE_PRIO_TO_PRIO(ppu->objOnTop ? 3 : (oam1 & 0x3000) >> 12, (oam1 & 0x800) == 0);
     PpuZbufType z = paletteBase + (prio << 8);
     uint8 cast = ppu->objCastShadow[(index >> 1) & 127];
+    bool is_shadow = (oam1 >> 9 & 7) == 4 && ((oam1 & 0x1ff) == 0x6c || (oam1 & 0x1ff) == 0x38);
     const uint8 *ice = NULL;
     if (ppu->objIce[(index >> 1) & 127]) {
       ice = ppu->iceRemap;
@@ -1352,9 +1403,11 @@ static bool ppu_evaluateSprites(Ppu* ppu, int line) {
           uint32 bits = plane >> shift;
           int pixel = (bits >> 0) & 1 | (bits >> 7) & 2 | (bits >> 14) & 4 | (bits >> 21) & 8;
           // draw it in the buffer if there is a pixel here, and the buffer there is still empty
-          if (pixel != 0 && (dst[0] & 0xff) == 0) {
+          int bx = (int)(dst - ppu->objBuffer.data);
+          if (pixel != 0 && ((dst[0] & 0xff) == 0 || (game_shadow[bx] && !is_shadow))) {
             dst[0] = z + (ice ? ice[pixel] : pixel);
-            ppu->objShadowLine[dst - ppu->objBuffer.data] = cast;
+            ppu->objShadowLine[bx] = cast;
+            game_shadow[bx] = is_shadow;
           }
         }
       }

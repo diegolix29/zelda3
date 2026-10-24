@@ -308,13 +308,44 @@ void HdWorld_SpriteSpawned(int k) {
   spr_disturbed[k] = 0;
 }
 
+// Nemici tolti da ResetEnemy: tornano a casa solo quando la telecamera non
+// inquadra la casa (prima ricomparivano subito, anche sotto gli occhi di
+// Link: il corvo che scappa tornava al suo posto e attaccava di nuovo)
+static uint8 g_hold[128][0x200];
+
 // Toglie il nemico: Sprite_OverworldLoadAllEnemies lo ricarica al suo posto
 // con la vita piena
 static void ResetEnemy(int k) {
   uint16 blk = sprite_N_word[k];
+  uint8 bit = 0x80 >> (blk & 7);
   sprite_state[k] = 0;
   spr_disturbed[k] = 0;
-  overworld_sprite_was_loaded[blk >> 3] &= ~(0x80 >> (blk & 7));
+  overworld_sprite_was_loaded[blk >> 3] &= ~bit;
+  g_hold[BYTE(overworld_screen_index) & 0x7f][blk >> 3] |= bit;
+}
+
+// Sprite_OverworldLoadAllEnemies: vero se il nemico tolto deve ancora
+// aspettare (la sua casa e' nella vista, con 32 pixel di margine)
+bool HdWorld_HoldReload(uint16 blk) {
+  uint8 *hold = &g_hold[BYTE(overworld_screen_index) & 0x7f][blk >> 3], bit = 0x80 >> (blk & 7);
+  if (!(*hold & bit))
+    return false;
+  int hx = (sprcoll_x_base & 0xff00) + ((blk >> 8 & 3) << 8) + (blk << 4 & 0xf0);
+  int hy = (sprcoll_y_base & 0xff00) + ((blk >> 10) << 8) + (blk & 0xf0);
+  int ext = g_zenv.ppu->extraLeftRight;
+  if (hx + 16 + 32 > g_view_wx - ext && hx - 32 < g_view_wx + 256 + ext &&
+      hy + 16 + 32 > g_view_wy && hy - 32 < g_view_wy + 240)
+    return true;
+  *hold &= ~bit;
+  return false;
+}
+
+// Corvo che scappa e avvoltoio sveglio: come nell'originale volano finche'
+// escono dalla vista, poi spariscono (l'avvoltoio sveglio lontano da Link
+// sparisce subito e torna a dormire a casa)
+static bool FliesUntilOffscreen(int k) {
+  return (sprite_type[k] == 0x00 && sprite_ai_state[k] == 3) ||
+         (sprite_type[k] == 0x01 && sprite_ai_state[k] == 1);
 }
 
 void HdWorld_SpriteBegin(int k) {
@@ -331,6 +362,12 @@ void HdWorld_SpriteBegin(int k) {
     int dx = abs(g_sight_px + 8 - lx), dy = abs(g_sight_py + 8 - ly);
     g_sight_sees = (dx > dy ? dx : dy) <= kBorderSight;
   }
+  // il corvo che scappa (Sprite_Raven, stato 3) continua a volare via da
+  // Link e l'avvoltoio sveglio (Sprite_01_Vulture_bounce, stato 1)
+  // continua a girargli attorno, anche fuori dalla loro schermata, finche'
+  // escono dalla vista
+  if (FliesUntilOffscreen(k))
+    g_sight_sees = true;
   if (g_sight_sees) {
     spr_disturbed[k] = 3;
     return;
@@ -368,9 +405,21 @@ void HdWorld_SpriteEnd(int k, bool offscreen) {
   }
   if (!sprite_state[k])
     return;
+  // l'avvoltoio si sveglia 160 fotogrammi dopo essere comparso: qui conta
+  // solo il tempo con Link nella sua schermata
+  if (sprite_type[k] == 0x01 && sprite_ai_state[k] == 0 && !g_sight_sees)
+    sprite_subtype2[k] = 0;
+  // corvo o avvoltoio fuori dalla vista: sparisce come nell'originale e
+  // torna al suo posto quando la telecamera non lo inquadra (HdWorld_HoldReload)
+  if (offscreen && FliesUntilOffscreen(k)) {
+    ResetEnemy(k);
+    return;
+  }
   if (g_sight_state == 9 && sprite_state[k] == 9 && sprite_health[k] < g_sight_hp)
     spr_disturbed[k] |= 1;
-  if (!g_sight_sees && (g_sight_lost || (SpriteWorldX(k) > g_sight_px && SpriteWorldY(k) > g_sight_py))) {
+  // (non il primo passo: SpritePrep sposta molti nemici di 8 pixel in basso a
+  // destra, per esempio le statue del Deserto della Pazzia)
+  if (!g_sight_sees && (g_sight_lost || (g_sight_state != 8 && SpriteWorldX(k) > g_sight_px && SpriteWorldY(k) > g_sight_py))) {
     // ha perso Link (resta dov'e') o va verso il Link finto
     Sprite_SetX(k, g_sight_px);
     Sprite_SetY(k, g_sight_py);
@@ -404,10 +453,34 @@ bool HdWorld_LeashWall(int k, uint16 x, uint16 y) {
          d > Dist2(SpriteWorldX(k) + 8, SpriteWorldY(k) + 8, hx, hy);
 }
 
+// Sprite_SpawnProbeAlways: le sonde dei soldati (che "vedono" Link quando lo
+// toccano) usano solo i posti 0-9. Col mondo tutto attivo un'area con molti
+// nemici li occupa tutti (0x75 nel Mondo delle Tenebre ne ha 14) e i soldati
+// non vedevano mai Link: chi lo vede puo' usare anche i posti 10-14 (il 15
+// resta ai colpi dei nemici)
+bool HdWorld_ProbeMoreSlots(int k) {
+  return g_sight_k == k && g_sight_sees;
+}
+
 // Nemici sconfitti gia' fatti ricomparire mentre Link era lontano: alcuni
 // (legati agli eventi) il gioco li toglie appena caricati, e senza questo
 // ricomparirebbero a ogni frame. Si libera quando Link torna vicino.
 static uint8 g_revived[128][0x200];
+
+// Nemici che hanno perso Link fuori dalla loro area e aspettano di tornare a
+// casa (HdWorld_CarriedLost): restano sconfitti finche' Link e' nella loro area
+enum { kMaxHoming = 32 };
+static struct { uint8 area; uint16 blk; } g_homing[kMaxHoming];
+static int g_n_homing;
+static void ReturnHome(int a, uint16 blk);
+static void ReturnHomeWhenAway(void);
+
+static bool IsHoming(int a, uint16 blk) {
+  for (int i = 0; i < g_n_homing; i++)
+    if (g_homing[i].area == a && g_homing[i].blk == blk)
+      return true;
+  return false;
+}
 
 static bool FarFromLink(int x, int y, int lx, int ly) {
   int dx = abs(x - (lx + 8)), dy = abs(y - (ly + 12));
@@ -450,11 +523,75 @@ static void ResetFarEnemies(int lx, int ly, const uint8 *main_ram) {
     bool active = false;
     for (int k = 0; k < 16 && !active; k++)
       active = sprite_state[k] && sprite_N_word[k] == blk;
-    if (!active && !CarriedFrom(main_ram, area, blk)) {
+    if (!active && !CarriedFrom(main_ram, area, blk) && !IsHoming(area, blk)) {
       overworld_sprite_was_loaded[blk >> 3] &= ~bit;
       revived[blk >> 3] |= bit;
     }
   }
+}
+
+// Le tabelle del gioco hanno 16 posti e i nemici dell'area ne usano al
+// massimo 14 (0-13); alcune aree, soprattutto nel Mondo delle Tenebre, ne
+// hanno di piu' (0x75 ne ha 15) e con tutti i nemici caricati qualcuno
+// restava fuori. Quando non c'e' posto, il nemico non caricato con la casa
+// piu' vicina a Link, dentro la schermata di Link, prende il posto del nemico
+// tranquillo (non disturbato) piu' lontano, oltre una volta e mezza la
+// schermata: quello tolto torna a casa quando c'e' di nuovo posto. Uno
+// scambio per frame, dopo Sprite_OverworldLoadAllEnemies.
+static void MakeRoomNearLink(void) {
+  int lx = link_x_coord + 8, ly = link_y_coord + 12;
+  int bx = sprcoll_x_base & 0xff00, by = sprcoll_y_base & 0xff00;
+  int best = -1, best_d = kSightLimit + 1;
+  for (int blk = 0; blk < 0x1000; blk++) {
+    uint8 t = sprite_where_in_overworld[blk];
+    if (!t || t >= 0xf4 || (overworld_sprite_was_loaded[blk >> 3] & (0x80 >> (blk & 7))))
+      continue;
+    int hx = bx + ((blk >> 8 & 3) << 8) + (blk << 4 & 0xf0) + 8;
+    int hy = by + ((blk >> 10) << 8) + (blk & 0xf0) + 8;
+    int d = Dist2(hx, hy, lx, ly);
+    if (d < best_d)
+      best = blk, best_d = d;
+  }
+  if (best < 0)
+    return;
+  // stessi posti di Overworld_AllocSprite
+  uint8 type = sprite_where_in_overworld[best] - 1;
+  int last = type == 0x58 ? 4 : type == 0xd0 ? 5 : (type == 0xeb || type == 0x53 || type == 0xf3) ? 14 : 13;
+  int far = -1, far_d = kSightLimit * 3 / 2;
+  for (int k = 0; k <= last; k++) {
+    if (sprite_state[k] != 9 || spr_disturbed[k] || !IsAreaEnemy(k))
+      continue;
+    int d = Dist2(SpriteWorldX(k) + 8, SpriteWorldY(k) + 8, lx, ly);
+    if (d > far_d)
+      far = k, far_d = d;
+  }
+  if (far < 0)
+    return;
+  ResetEnemy(far);
+  Overworld_LoadProximaSpriteIfAlive(best);
+}
+
+// Con tutti i nemici dell'area caricati i posti 0-13 possono essere tutti
+// occupati, e i colpi che nascono solo li' non partivano mai (la palla di
+// fuoco degli Zora, Sprite_SpawnFireball). Sprite_SpawnDynamicallyEx senza
+// posto libero: si toglie il nemico tranquillo piu' lontano da Link, oltre
+// una volta e mezza la schermata, fra i posti 0-last (torna a casa quando
+// c'e' di nuovo posto). -1 se non ce n'e'.
+int HdWorld_FreeSlot(int k, int last) {
+  if (!FeatureOn() || BYTE(overworld_screen_index) >= 0x80 || player_is_indoors || main_module_index != 9)
+    return -1;
+  int lx = link_x_coord + 8, ly = link_y_coord + 12;
+  int far = -1, far_d = kSightLimit * 3 / 2;
+  for (int j = 0; j <= last; j++) {
+    if (j == k || sprite_state[j] != 9 || spr_disturbed[j] || !IsAreaEnemy(j))
+      continue;
+    int d = Dist2(SpriteWorldX(j) + 8, SpriteWorldY(j) + 8, lx, ly);
+    if (d > far_d)
+      far = j, far_d = d;
+  }
+  if (far >= 0)
+    ResetEnemy(far);
+  return far;
 }
 
 static void MarkCarried(int k, int area, uint16 blk) {
@@ -493,6 +630,25 @@ static bool PersistOn(void) {
   return FeatureOn() && BYTE(overworld_screen_index) < 0x80;
 }
 
+// Gioco normale (senza il mondo continuo), all'aperto: frecce piantate e
+// oggetti caduti restano anche qui, fino al cambio d'area (NormalGameArrows)
+static bool KeepInNormalGame(void) {
+  return !FeatureOn() && BYTE(overworld_screen_index) < 0x80 && !player_is_indoors;
+}
+
+// Oggetto caduto che sparisce da solo (cuori, rupie, bombe, frecce, magia,
+// fata: sprite_stunned e' il suo tempo), non messo dalla tabella dell'area
+static bool IsTimedDrop(int k) {
+  return sprite_type[k] >= 0xd8 && sprite_type[k] <= 0xe6 && sprite_stunned[k] && sprite_N_word[k] >= 0x1000;
+}
+
+// Al chiuso (dungeon e case) le frecce piantate restano nella stanza
+// corrente e si dimenticano cambiando stanza (HdWorld_Composite): sono solo
+// un disegno, senza effetti sul gioco. Non nelle stanze buie, dove
+// resterebbero illuminate
+static ArrowRec g_room_arrows[kMaxArrows];
+static int g_room_n_arrows, g_room_arrows_room = -1;
+
 static void ForgetEnemies(int i) {
   g_states[i].n_killed = g_states[i].n_alive = 0;
   for (int j = 0; j < kMaxAlive; j++)
@@ -506,9 +662,11 @@ void HdWorld_ResetStates(void) {
   // anche i cespugli bruciati ricrescono: niente macchie all'uscita
   HdBurn_Reset();
   LiveDropAll();
+  g_n_homing = 0;  // il mondo riparte: tutti i nemici tornano a casa
   if (!g_any_state)
     return;
   memset(g_states, 0, sizeof(g_states));
+  memset(g_hold, 0, sizeof(g_hold));
   for (int i = 0; i < 128; i++)
     ForgetEnemies(i);
   g_state_epoch++;
@@ -547,9 +705,19 @@ static bool IsAreaEnemy(int k) {
 }
 
 // Mondo vivo: un nemico dell'area che esce dalla vista resta fermo dov'e'
-// (sprite_pause) invece di sparire e ricomparire al punto di partenza
+// (sprite_pause) invece di sparire e ricomparire al punto di partenza.
+// Anche gli oggetti caduti che spariscono da soli (IsTimedDrop) restano
+// finche' il tempo non scade, invece di sparire appena escono dalla vista
 bool HdWorld_KeepOffscreen(int k) {
-  return PersistOn() && !player_is_indoors && IsAreaEnemy(k);
+  if (!PersistOn() || player_is_indoors)
+    return false;
+  return IsTimedDrop(k) || IsAreaEnemy(k);
+}
+
+// Lo stesso per gli oggetti caduti nel gioco normale (fuori dalla telecamera
+// del gioco)
+bool HdWorld_KeepDropNormal(int k) {
+  return KeepInNormalGame() && IsTimedDrop(k);
 }
 
 // I nemici dell'area di Link restano nella loro area: il bordo fa da muro
@@ -620,9 +788,12 @@ static void SnapshotEnemies(void) {
     bool alive = false;
     for (int i = 0; i < st->n_alive && !alive; i++)
       alive = st->alive[i].blk == blk;
+    // l'oggetto lasciato dal nemico sconfitto (cuore, rupia...) prende il suo
+    // posto e il suo numero: conta solo uno sprite del tipo del nemico,
+    // altrimenti uscendo dall'area il nemico tornava subito
     bool active = alive;
     for (int k = 0; k < 16 && !active; k++)
-      active = sprite_state[k] && sprite_N_word[k] == blk;
+      active = sprite_state[k] && sprite_N_word[k] == blk && sprite_type[k] == (uint8)(t - 1);
     if (!active)
       st->killed[st->n_killed++] = blk;
   }
@@ -673,23 +844,79 @@ static bool RememberExtraIn(AreaState *st, uint16 pos, uint16 value) {
   return true;
 }
 
-bool HdWorld_KeepArrow(int k) {
-  if (!PersistOn() || player_is_indoors || g_hd_neighbor_tick)
-    return false;
-  AreaState *st = &g_states[BYTE(overworld_screen_index) & 0x7f];
-  if (st->n_arrows == kMaxArrows) {
-    // la freccia piu' vecchia lascia il posto
-    memmove(st->arrows, st->arrows + 1, (kMaxArrows - 1) * sizeof(ArrowRec));
-    st->n_arrows--;
+// Il gioco mostra la stanza: dungeon, o dialoghi e menu aperti sopra di essa
+static bool ShowsRoom(void) {
+  int sub = submodule_index;
+  return main_module_index == 7 ||
+         (main_module_index == 14 && saved_module_for_menu == 7 &&
+          (sub == 1 || sub == 2 || sub == 4 || sub == 8 || sub == 9 || sub == 11));
+}
+
+static bool ArrowsKept(void) {
+  if (player_is_indoors)
+    return main_module_index == 7 && !dung_want_lights_out;
+  return PersistOn() || KeepInNormalGame();
+}
+
+// Lista delle frecce (di Link e dei nemici insieme) della stanza o dell'area
+// corrente
+static ArrowRec *ArrowList(int **n) {
+  if (player_is_indoors) {
+    if (g_room_arrows_room != dungeon_room_index)
+      g_room_n_arrows = 0, g_room_arrows_room = dungeon_room_index;
+    *n = &g_room_n_arrows;
+    return g_room_arrows;
   }
-  ArrowRec *r = &st->arrows[st->n_arrows];
+  AreaState *st = &g_states[BYTE(overworld_screen_index) & 0x7f];
+  *n = &st->n_arrows;
+  return st->arrows;
+}
+
+// Posto per una freccia nella lista: la piu' vecchia lascia il posto
+static ArrowRec *NewArrow(void) {
+  int *n;
+  ArrowRec *list = ArrowList(&n);
+  if (*n == kMaxArrows) {
+    memmove(list, list + 1, (kMaxArrows - 1) * sizeof(ArrowRec));
+    (*n)--;
+  }
+  return &list[*n];
+}
+
+static void AddArrow(void) {
+  int *n;
+  ArrowList(&n);
+  (*n)++;
+  if (!player_is_indoors) {
+    g_states[BYTE(overworld_screen_index) & 0x7f].used = true;
+    g_any_state = true;
+  }
+}
+
+bool HdWorld_KeepArrow(int k) {
+  if (!ArrowsKept() || g_hd_neighbor_tick)
+    return false;
+  ArrowRec *r = NewArrow();
   r->n = Arrow_StuckPieces(k, r->chr, r->flags, r->dx, r->dy);
   if (!r->n)
     return false;
   r->x = Ancilla_GetX(k), r->y = Ancilla_GetY(k);
-  st->n_arrows++;
-  st->used = true;
-  g_any_state = true;
+  AddArrow();
+  return true;
+}
+
+// Freccia di un nemico (Sprite_1B_Arrow) piantata in un muro: invece di
+// sparire resta come quelle di Link, nella stessa lista. Anche nelle copie
+// dal vivo delle aree vicine (g_states non e' nella RAM del gioco)
+bool HdWorld_KeepEnemyArrow(int k, const uint8 *chr, const uint8 *flags, const int8 *dx, const int8 *dy) {
+  if (!ArrowsKept())
+    return false;
+  ArrowRec *r = NewArrow();
+  r->n = 2;
+  for (int p = 0; p < 2; p++)
+    r->chr[p] = chr[p], r->flags[p] = flags[p], r->dx[p] = dx[p], r->dy[p] = dy[p];
+  r->x = Sprite_GetX(k), r->y = Sprite_GetY(k) - sprite_z[k];
+  AddArrow();
   return true;
 }
 
@@ -907,9 +1134,10 @@ void HdWorld_UpdateCamera(int *cam_x, int *cam_y) {
   }
   int prev_module = g_prev_module;
   g_prev_module = main_module_index;
-  // fase 10: Link esce dalla porta dopo il cerchio che si apre
+  // fase 10: Link esce dalla porta dopo il cerchio che si apre; fase 9: prima
+  // si apre il portone (chiesa, castello): la vista resta su Link
   int mode = !HdWorld_Active() ? 0 : InFluteArrival() || InSoftIris() ? 1 : main_module_index != 9 ? 0 :
-             submodule_index == 0 || submodule_index == 10 || InMapReturn() ? 1 : InTransition() ? 2 :
+             submodule_index == 0 || submodule_index == 9 || submodule_index == 10 || InMapReturn() ? 1 : InTransition() ? 2 :
              InMosaicTransition() ? 3 : 0;
   int prev_mode = g_prev_mode;
   g_prev_mode = mode;
@@ -1097,7 +1325,7 @@ static void DrawLoadedArea(AreaImage *img) {
         const uint16 *t = &ppu->vram[(chr_base + tile * 16) & 0x7fff];
         uint8 at = attr8[e & 0x1ff];
         bool water = (at == 0x08 || at == 0x09);
-        bool cloud_tile = mountain && (pal == 3 || pal == 7);
+        bool cloud_tile = mountain && HdFx_IsCloudTile(e);
         if (tile >= kAnimTileFirst && tile < kAnimTileEnd) {
           if (img->n_anim == img->cap_anim) {
             int cap = img->cap_anim ? img->cap_anim * 2 : 256;
@@ -1111,7 +1339,7 @@ static void DrawLoadedArea(AreaImage *img) {
             ac->color[0] = water && !backdrop_scene ? (backdrop & 0xffffff) | 7u << 24 : backdrop;
             for (int v = 1; v < 16; v++)
               ac->color[v] = Bgr15ToPixel(main_palette_buffer[pal * 16 + v],
-                                          water || (cloud_tile && HdFx_IsCloudColor(pal, v)) ? 7 : 1);
+                                          water || (cloud_tile && HdFx_IsCloudColor(e, v)) ? 7 : 1);
           }
         }
         for (int row = 0; row < 8; row++) {
@@ -1125,7 +1353,7 @@ static void DrawLoadedArea(AreaImage *img) {
             // sulla montagna lo sfondo e' il cielo anche nelle caselle che per
             // il gioco sono acqua profonda (il vuoto oltre i dirupi)
             dst[col] = v ? Bgr15ToPixel(main_palette_buffer[pal * 16 + v],
-                                        water || (cloud_tile && HdFx_IsCloudColor(pal, v)) ? 7 : 1) :
+                                        water || (cloud_tile && HdFx_IsCloudColor(e, v)) ? 7 : 1) :
                        water && !backdrop_scene ? (backdrop & 0xffffff) | 7u << 24 : backdrop;
           }
         }
@@ -1431,6 +1659,12 @@ static void DrawAnimatedCells(uint8 *pixels, int pitch, int width, int height, i
                               const OverlayCtx *ov) {
   Ppu *ppu = g_zenv.ppu;
   uint16 chr_base = ppu->bgLayer[1].tileAdr;
+  // colonne in cui disegna il gioco (come in HdWorld_Composite): con la
+  // telecamera morbida la vista va qualche pixel oltre, e li' anche le celle
+  // dell'area corrente vengono dall'immagine (con il disegno di quando e'
+  // stata fatta: sui bordi della palude restavano pezzi marroni)
+  int ext = (width - 256) / 2;
+  int in_x0 = (int16)BG2HOFS_copy - ext, in_x1 = (int16)BG2HOFS_copy + 256 + ext;
   for (int i = 0; i < kMaxImages; i++) {
     AreaImage *img = &g_images[i];
     if (!img->key || !img->n_anim || ((img->key ^ BYTE(overworld_screen_index)) & 0x40) ||
@@ -1444,13 +1678,19 @@ static void DrawAnimatedCells(uint8 *pixels, int pitch, int width, int height, i
       int sx0 = img->x + ac->x - cam_x, sy0 = img->y + ac->y - cam_y;
       if (sx0 + 8 <= 0 || sy0 + 8 <= 0 || sx0 >= width || sy0 >= height)
         continue;
-      if (ac->y + 8 > img->size - kHiddenRows)
-        continue;  // ultime righe nascoste: lasciate come sono
+      // ultime righe nascoste: ripetono l'ultima riga visibile della cella,
+      // con il fotogramma d'animazione attuale (come fa HdWorld_Composite con
+      // il resto dell'immagine; prima restava il fotogramma dell'immagine, che
+      // sulle sponde dei fiumi faceva una riga diversa sul confine)
+      int last = img->size - kHiddenRows - 1 - ac->y;
+      bool hidden = last < 7;
       // celle allineate a 8 pixel e aree a 512: questi controlli valgono per
       // tutta la cella
       int cwx = img->x + ac->x, cwy = img->y + ac->y;
-      if (!all && HdWorld_InsideCurrentArea(cwx, cwy))
-        continue;  // qui disegna gia' il gioco
+      bool by_game = !all && HdWorld_InsideCurrentArea(cwx, cwy);
+      bool part = by_game && (cwx < in_x0 || cwx + 8 > in_x1);  // in parte oltre le colonne del gioco
+      if (by_game && !hidden && !part)
+        continue;  // qui disegna gia' il gioco (tranne le righe nascoste)
       if (HeadAt(cwx, cwy) != (img->key & 0x7f))
         continue;  // coperta da un'altra area (o fuori dalla mappa)
       int e = ac->entry, tile = e & 0x3ff;
@@ -1460,12 +1700,20 @@ static void DrawAnimatedCells(uint8 *pixels, int pitch, int width, int height, i
         int sy = sy0 + row;
         if ((unsigned)sy >= (unsigned)height)
           continue;
+        int src = row;
+        bool game_row = by_game;
+        if (hidden && row > last)
+          src = last, game_row = false;
+        else if (by_game && !part)
+          continue;
         uint32 *dst = (uint32 *)(pixels + sy * pitch);
-        int rr = vf ? 7 - row : row;
+        int rr = vf ? 7 - src : src;
         uint16 p01 = t[rr], p23 = t[rr + 8];
         for (int col = 0; col < 8; col++) {
           int sx = sx0 + col;
           if ((unsigned)sx >= (unsigned)width)
+            continue;
+          if (game_row && cwx + col >= in_x0 && cwx + col < in_x1)
             continue;
           uint32 l = dst[sx] >> 24;
           if (l == 2 || l == 4 || l == 6)
@@ -1746,6 +1994,7 @@ static void TrackMain(void) {
   SaveGfx(&g_area_gfx, g_zenv.ppu);
   g_area_gfx_valid = true;
   g_last_head = BYTE(overworld_screen_index);
+  ReturnHomeWhenAway();
   ResetFarEnemies(link_x_coord, link_y_coord, g_ram);
   UpdateWorldMap();
 }
@@ -1826,6 +2075,7 @@ static void InsertPending(void) {
 // Dopo il caricamento di un salvataggio (il mondo persistente e' ripartito
 // da zero): chi seguiva Link resta sconfitto nella sua area
 void HdWorld_AfterLoad(void) {
+  g_room_n_arrows = 0;  // le frecce della stanza non vengono dal salvataggio
   memset(g_guests, 0, sizeof(g_guests));
   memset(g_carried, 0, sizeof(g_carried));
   g_n_pending = 0;
@@ -2074,7 +2324,9 @@ static void LiveDropArea(int a) {
 
 // Un nemico che seguiva Link e lo ha perso di vista (il gioco lo toglie)
 // torna alla sua area: li' non conta piu' come sconfitto e ricompare al
-// punto di partenza, invece di sparire per sempre
+// punto di partenza, invece di sparire per sempre. Ma solo quando Link non
+// e' nell'area della sua casa (ReturnHomeWhenAway): altrimenti ricomparirebbe
+// davanti a Link, che lo ha appena lasciato in un'altra area
 void HdWorld_CarriedLost(int k) {
   if (!PersistOn() || g_hd_neighbor_tick || !IsMarkedCarried(k))
     return;
@@ -2082,6 +2334,27 @@ void HdWorld_CarriedLost(int k) {
   uint16 blk = carried_blk[k];
   carried_area[k] = 0;
   g_carried[k] = false;
+  if (IsHoming(a, blk))
+    return;
+  if (g_n_homing < kMaxHoming)
+    g_homing[g_n_homing].area = a, g_homing[g_n_homing].blk = blk, g_n_homing++;
+  else
+    ReturnHome(a, blk);
+}
+
+// Ritorni a casa in attesa: si fanno quando Link e' in un'altra area
+static void ReturnHomeWhenAway(void) {
+  int cur = BYTE(overworld_screen_index) & 0x7f, j = 0;
+  for (int i = 0; i < g_n_homing; i++) {
+    if (g_homing[i].area != cur)
+      ReturnHome(g_homing[i].area, g_homing[i].blk);
+    else
+      g_homing[j++] = g_homing[i];
+  }
+  g_n_homing = j;
+}
+
+static void ReturnHome(int a, uint16 blk) {
   AreaState *st = &g_states[a];
   int j = 0;
   for (int i = 0; i < st->n_killed; i++)
@@ -2236,6 +2509,7 @@ static void LiveTick(LiveArea *la, int vx, int vy, const LiveLink *m) {
   SetLiveCamera(vx, vy);
   Sprite_ActivateAllProxima();
   Sprite_OverworldLoadAllEnemies();
+  MakeRoomNearLink();
   uint8 was[16];
   uint16 px[16], py[16];
   for (int k = 0; k < 16; k++)
@@ -2329,6 +2603,7 @@ void HdWorld_TickNeighbors(void) {
   // anche nell'area di Link tutti i nemici sono presenti, non solo quelli
   // vicini alla telecamera
   Sprite_OverworldLoadAllEnemies();
+  MakeRoomNearLink();
   int cur = BYTE(overworld_screen_index);
   int vx = BG2HOFS_copy2 + g_cam_dx, vy = BG2VOFS_copy2 + g_cam_dy;
   int ext = g_zenv.ppu->extraLeftRight;
@@ -2497,15 +2772,12 @@ static void DrawLive(uint8 *pixels, int pitch, int width, int height, const Over
 
 // Frecce piantate nei muri (mondo persistente), dietro all'HUD e agli sprite.
 // Seguono il fondale (anche la sua posizione interpolata), come i muri.
-static void DrawArrows(uint8 *pixels, int pitch, int width, int height, int cam_x, int cam_y) {
+static void DrawArrowList(uint8 *pixels, int pitch, int width, int height, int cam_x, int cam_y,
+                          const ArrowRec *list, int n) {
   Ppu *ppu = g_zenv.ppu;
-  int cur = BYTE(overworld_screen_index);
-  for (int a = 0; a < 128; a++) {
-    AreaState *st = &g_states[a];
-    if (!st->n_arrows || ((a ^ cur) & 0x40))
-      continue;
-    for (int i = 0; i < st->n_arrows; i++) {
-      const ArrowRec *r = &st->arrows[i];
+  {
+    for (int i = 0; i < n; i++) {
+      const ArrowRec *r = &list[i];
       for (int p = 0; p < r->n; p++) {
         // gli sprite compaiono una riga sotto la loro coordinata
         int sx0 = r->x + r->dx[p] - cam_x, sy0 = r->y + r->dy[p] - cam_y + 1;
@@ -2541,6 +2813,15 @@ static void DrawArrows(uint8 *pixels, int pitch, int width, int height, int cam_
   }
 }
 
+static void DrawArrows(uint8 *pixels, int pitch, int width, int height, int cam_x, int cam_y) {
+  int cur = BYTE(overworld_screen_index);
+  for (int a = 0; a < 128; a++) {
+    AreaState *st = &g_states[a];
+    if (st->n_arrows && !((a ^ cur) & 0x40))
+      DrawArrowList(pixels, pitch, width, height, cam_x, cam_y, st->arrows, st->n_arrows);
+  }
+}
+
 // Tutto quello che il mondo persistente aggiunge al fotogramma
 static void DrawPersistent(uint8 *pixels, int pitch, int width, int height, int cam_x, int cam_y,
                            const OverlayCtx *ov) {
@@ -2554,14 +2835,52 @@ static void DrawPersistent(uint8 *pixels, int pitch, int width, int height, int 
   DrawArrows(pixels, pitch, width, height, cam_x, cam_y);
 }
 
+// Gioco normale: le frecce piantate dell'area si disegnano sopra lo schermo
+// del gioco e si dimenticano al cambio d'area (anche entrando in una casa)
+static int g_normal_arrows_area = -1;
+
+static void NormalGameArrows(uint8 *pixels, int pitch, int width, int height) {
+  Ppu *ppu = g_zenv.ppu;
+  if (player_is_indoors) {
+    // al chiuso: le frecce della stanza (anche col mondo continuo)
+    if (!g_room_n_arrows || g_room_arrows_room != dungeon_room_index || !ShowsRoom())
+      return;
+    g_bright = ppu->forcedBlank ? 0 : ppu->brightness;
+    int ext = (width - 256) / 2;
+    DrawArrowList(pixels, pitch, width, height, (int16)BG2HOFS_copy + ppu->bgBiasX - ext,
+                  (int16)BG2VOFS_copy + ppu->bgBiasY + 1, g_room_arrows, g_room_n_arrows);
+    return;
+  }
+  if (FeatureOn())
+    return;  // col mondo continuo le frecce restano (DrawPersistent)
+  int a = KeepInNormalGame() ? BYTE(overworld_screen_index) & 0x7f : -1;
+  if (a != g_normal_arrows_area) {
+    if (g_normal_arrows_area >= 0)
+      g_states[g_normal_arrows_area].n_arrows = 0;
+    g_normal_arrows_area = a;
+  }
+  if (a < 0 || !g_states[a].n_arrows || (main_module_index != 9 && !InMenuOverWorld()) || ppu->mode == 7)
+    return;
+  g_bright = ppu->forcedBlank ? 0 : ppu->brightness;
+  int ext = (width - 256) / 2;
+  DrawArrows(pixels, pitch, width, height, (int16)BG2HOFS_copy + ppu->bgBiasX - ext,
+             (int16)BG2VOFS_copy + ppu->bgBiasY + 1);
+}
+
 // ---------------------------------------------------------------------------
 // Composizione del frame
 
 void HdWorld_Composite(uint8 *pixels, int pitch, int width, int height) {
   g_renders_this_frame = 0;
   GuestRestoreOam();
-  if (!HdWorld_Active())
+  // frecce della stanza dimenticate cambiando stanza o uscendo
+  int room = player_is_indoors ? dungeon_room_index : -1;
+  if (room != g_room_arrows_room)
+    g_room_n_arrows = 0, g_room_arrows_room = room;
+  if (!HdWorld_Active()) {
+    NormalGameArrows(pixels, pitch, width, height);
     return;
+  }
   Ppu *ppu = g_zenv.ppu;
   g_bright = ppu->forcedBlank ? 0 : ppu->brightness;
   bool mosaic = InMosaicTransition();

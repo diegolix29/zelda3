@@ -57,7 +57,9 @@ enum {
   kFeatures0_DimFlashes = 65536,
 
   // Migliorie "HD"
-  // Scorrimento tra aree e stanze a velocita' doppia
+  // Passaggio tra aree e stanze rapido e fluido (36 frame): le fasi di
+  // caricamento si fanno in un frame, Link si disegna mentre cammina a
+  // velocita' costante e la telecamera parte e frena dolcemente (hd_trans.c)
   kFeatures0_FastTransitions = 1 << 17,
   // Mostra nell'HUD gli oggetti assegnati a X/L/R
   kFeatures0_ShowXLRItemsInHud = 1 << 18,

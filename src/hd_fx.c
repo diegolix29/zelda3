@@ -521,12 +521,26 @@ static bool IsMountainScene(void) {
   return a < 0x80 && (sc == 0x03 || sc == 0x05 || sc == 0x07);
 }
 
-// Colore v della palette pal sulla montagna: le caselle con la palette 3
-// sono il bordo delle nuvole (tutta la casella); in quelle con la palette 7
-// l'interno delle nuvole sono solo i due rosa (colori 13 e 15), gli altri
-// colori sono ponti, pilastri e dirupi
-bool HdFx_IsCloudColor(int pal, int v) {
-  return pal == 3 || (pal == 7 && (v == 13 || v == 15));
+// Colore v della casella e (della mappa) sulla montagna: le caselle con la
+// palette 3 sono il bordo delle nuvole (tutta la casella); in quelle con la
+// palette 7 l'interno delle nuvole sono solo i due rosa (colori 13 e 15), gli
+// altri colori sono ponti, pilastri e dirupi. Nel Mondo delle Tenebre le
+// nuvole grigie sono le stesse caselle dell'interno (0x165, 0x175) con la
+// palette 4, e il loro bordo (l'ombra) sono le caselle del bordo rosa
+// (0x1c6-0x1cd) con la palette 7, tutta la casella
+static bool IsGreyCloudBorder(uint16 e) {
+  int t = e & 0x3ff;
+  return (e >> 10 & 7) == 7 && t >= 0x1c6 && t <= 0x1cd;
+}
+
+bool HdFx_IsCloudTile(uint16 e) {
+  int pal = e >> 10 & 7, t = e & 0x3ff;
+  return pal == 3 || pal == 7 || (pal == 4 && (t == 0x165 || t == 0x175));
+}
+
+bool HdFx_IsCloudColor(uint16 e, int v) {
+  int pal = e >> 10 & 7;
+  return HdFx_IsCloudTile(e) && (pal == 3 || IsGreyCloudBorder(e) || v == 13 || v == 15);
 }
 
 // Pixel di nuvola nella riga row della casella e della mappa (bit 7 = primo
@@ -535,7 +549,7 @@ static uint8 CloudRowMask(uint16 e, int row) {
   int pal = e >> 10 & 7;
   if (pal == 3)
     return 0xff;
-  if (pal != 7)
+  if (!HdFx_IsCloudTile(e))
     return 0;
   Ppu *ppu = g_zenv.ppu;
   const uint16 *t = &ppu->vram[(ppu->bgLayer[1].tileAdr + (e & 0x3ff) * 16) & 0x7fff];
@@ -546,7 +560,7 @@ static uint8 CloudRowMask(uint16 e, int row) {
     int bit = (e & 0x4000) ? col : 7 - col;
     int v = (p01 >> bit & 1) | (p01 >> (8 + bit) & 1) << 1 |
             (p23 >> bit & 1) << 2 | (p23 >> (8 + bit) & 1) << 3;
-    if (HdFx_IsCloudColor(pal, v))
+    if (HdFx_IsCloudColor(e, v))
       mask |= 0x80 >> col;
   }
   return mask;
@@ -614,7 +628,7 @@ void HdFx_MarkWater(uint8 *pixels, int pitch, int width, int height, int bias_x,
           attr = Overworld_GetTileAttributeAtLocation((uint16)wx >> 3, (uint16)wy);
           if (mountain) {
             uint16 e = Overworld_GetMap8AtLocation((uint16)wx >> 3, (uint16)wy);
-            if ((e >> 10 & 7) == 3 || (e >> 10 & 7) == 7)
+            if (HdFx_IsCloudTile(e))
               cloud_e = e;
           }
         }
@@ -1204,10 +1218,28 @@ static bool IsNotWalkingType(uint8 t) {
     0x54, 0x55, 0x59, 0x5b, 0x5c, 0x61, 0x6f, 0x72, 0x79, 0x7d, 0x7e, 0x7f, 0x81,
     0x82, 0x88, 0x8a, 0x8c, 0x90, 0x95, 0x96, 0x97, 0x98, 0x9a, 0xa0, 0xa2, 0xa3,
     0xa4, 0xa8, 0xa9, 0xb2, 0xb3, 0xbe, 0xc5, 0xc6, 0xc8, 0xcf, 0xe3,
+    0x14, 0x21,  // oggetti: grata della Citta' dei Ladri, leva dell'acqua
+    0xba,        // vortice che porta Link nell'acqua
   };
   for (int i = 0; i < (int)sizeof(kTypes); i++)
     if (kTypes[i] == t)
       return true;
+  return false;
+}
+
+// Nemici travestiti o nascosti: finche' sembrano un oggetto o non sono usciti
+// non fanno ombra morbida, altrimenti l'ombra li tradirebbe (restano col
+// disegno originale); la fanno solo da attivi
+static bool HiddenEnemy(int k) {
+  int ai = sprite_ai_state[k];
+  switch (sprite_type[k]) {
+  case 0x17: case 0x3e: return ai == 0;  // Hoarder sotto un cespuglio o una roccia
+  case 0xd3: return ai == 0;             // Stal, il sasso a teschio, mentre dorme
+  case 0x8f: return ai < 2;              // Zol: nascosto o mentre esce dal pavimento
+  case 0x64: return ai != 2;             // Debirando: fuori solo quando sputa fuoco
+  case 0xa1: return ai < 2;              // Freezor: statua nel muro finche' non si stacca
+  case 0x73: return sprite_E[k] == 2;    // non e' un nemico: il blocco del Santuario
+  }
   return false;
 }
 
@@ -1259,6 +1291,7 @@ void HdFx_ShadowsBeforeRender(Ppu *ppu, int width, int height) {
   for (int k = 0; k < 16; k++)
     ground[k] = (sprite_state[k] == 9 || sprite_state[k] == 11) && sprite_type[k] < 0xd8 &&
                 !IsNotWalkingType(sprite_type[k]) && sprite_z[k] == 0 &&
+                !HiddenEnemy(k) &&
                 (shadow_top[k] == (1 << 20) || shadow_top[k] <= body_bottom[k] + 2);
   for (int i = 0; i < 128; i++) {
     bool shadow = IsGameShadowTile(ppu->oam[i * 2 + 1]);

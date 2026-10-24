@@ -78,6 +78,12 @@ struct Ppu {
   float mode7PerspectiveLow, mode7PerspectiveHigh;
   // Spostamento visivo della telecamera fluida (non tocca la logica di gioco)
   int16_t bgBiasX, bgBiasY, objBiasX, objBiasY;
+  // Cono della Lanterna: quadrante (0-3) della mappa di BG1 da tenere sullo
+  // schermo secondario, -1 = nessun cono (vedi PpuClipLampCone)
+  int8_t bg1ConeQuadrant;
+  // Mappa del mondo (Mode 7): fuori dalla mappa di 512x512 invece del nero si
+  // ripete la fascia di nuvole in alto (righe di caselle 0-7), vedi ppu.c
+  bool m7CloudFill;
 
   // TMW / TSW etc
   uint8 screenEnabled[2];

@@ -356,7 +356,8 @@ int main(int argc, char** argv) {
 
   ZeldaInitialize();
   g_zenv.ppu->extraLeftRight = UintMin(g_config.extended_aspect_ratio, kPpuExtraLeftRight);
-  g_snes_width = (g_config.extended_aspect_ratio * 2 + 256);
+  // le fasce si limitano a kPpuExtraLeftRight anche per la finestra (18:9 con extend_y)
+  g_snes_width = (g_zenv.ppu->extraLeftRight * 2 + 256);
   g_snes_height = (g_config.extend_y ? 240 : 224);
 
 
@@ -776,6 +777,15 @@ static void HandleInput(int keyCode, int keyMod, bool pressed) {
   int j = FindCmdForSdlKey(keyCode, keyMod);
   if (j != 0)
     HandleCommand(j, pressed);
+  // Un tasto di gioco lasciato mentre si tiene Ctrl, Alt o Maiusc (per
+  // esempio dopo Ctrl+E del no clip) si legge come "Ctrl+tasto" e non
+  // corrisponde piu' al tasto premuto: restava premuto e Link continuava a
+  // camminare da solo. Al rilascio il tasto senza modificatori si lascia sempre.
+  if (!pressed && (keyMod & (KMOD_CTRL | KMOD_ALT | KMOD_SHIFT))) {
+    int k = FindCmdForSdlKey(keyCode, 0);
+    if (k != 0 && k != j && k <= kKeys_Controls_Last)
+      HandleCommand(k, false);
+  }
 }
 
 static void OpenOneGamepad(int i) {

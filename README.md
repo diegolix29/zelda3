@@ -8,7 +8,7 @@ Everything is optional and can be turned on or off from the new in-game options 
 ## What's new
 
 **Gameplay and comfort**
-- Fast transitions between areas and rooms.
+- Quick and smooth transitions between areas and rooms: no loading pauses, Link keeps walking and the camera starts and stops gently.
 - **Continuous world** (optional, outdoors): beyond the edge of an area you see the neighbouring areas, the camera follows Link past the edges and area changes are instant. Cut bushes and grass, lifted rocks, shovel holes and defeated enemies stay as you left them while you remain outdoors. Death Mountain fades into mist toward the lowlands, and the Lost Woods fog covers the whole screen.
   - The whole world is active: every area of the current world moves at the same time, also far away and off screen, and all its enemies are present from the start (only the areas near the view are drawn).
   - Every enemy lives in its own "screen", as on the SNES (192 pixels to the sides, 176 above and below): it notices Link only inside it, and without Link it never strays farther than that from its starting point. Enemies that lose Link off screen go back to their place; when Link is more than 3 screens away, enemies he hurt or alerted are back at full health and defeated enemies come back.
@@ -57,7 +57,7 @@ Fork di [snesrev/zelda3](https://github.com/snesrev/zelda3) con una serie di mig
 - **Fuoco e ghiaccio** (facoltativo): Lanterna e Bacchetta del Fuoco incendiano cespugli ed erba alta e il fuoco si propaga; il Medaglione della Fiamma brucia tutto lo schermo. La Bacchetta del Ghiaccio e il Medaglione dell'Etere congelano cespugli ed erba (l'erba congelata è ghiaccio che fa scivolare); fuoco e ghiaccio si annullano.
 - **Nomi dei dungeon** (facoltativo): entrando dalla porta principale compare il nome del dungeon, come su GBA (con "Livello N" nel Mondo delle Tenebre).
 - Facoltativi: fino a 10 bombe insieme e un punto di volo in più (9) in cima alla Montagna della Morte. Più posto sullo schermo per armi e oggetti di Link.
-- **Gioco:** transizioni veloci tra le aree, telecamera fluida, menu opzioni con rimappatura di tastiera e pad, salvataggi automatici e rapidi, mappa del mondo interattiva con segnalini, nome del labirinto sulla mappa, oggetti X/L/R nell'HUD, testo più veloce.
+- **Gioco:** transizioni rapide e fluide tra aree e stanze (Link non si ferma), telecamera fluida, menu opzioni con rimappatura di tastiera e pad, salvataggi automatici e rapidi, mappa del mondo interattiva con segnalini, nome del labirinto sulla mappa, oggetti X/L/R nell'HUD, testo più veloce.
 - **Grafica:** testo nitido nei dialoghi, illuminazione dinamica, braci, raggi dalle finestre, bagliore degli oggetti ricevuti, calore sopra la lava, pioggia e lampi migliorati, sfocatura dietro menu e dialoghi, ombre di personaggi e nemici, cerchio di transizione morbido, suggerimenti dei tasti, HUD che scivola via nei dialoghi, icona del salvataggio automatico, e lo shader in stile **Four Swords Adventures** (pennellate, ombre morbide, ombre di nuvole di tre forme diverse).
 - **Italiano:** font con le lettere accentate e menu Start tradotto (nomi degli oggetti, azioni, intestazioni); la traduzione è nel repository [zelda3-italiano](https://github.com/ghost19880/zelda3-italiano) e la scarica il launcher.
 

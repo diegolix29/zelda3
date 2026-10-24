@@ -3371,6 +3371,7 @@ void LinkItem_CaneOfSomaria() {  // 87aec0
   if (!(button_mask_b_y & 0x40)) {
     if (player_on_somaria_platform || is_standing_in_doorway || !CheckYButtonPress())
       return;
+    SomariaBlock_RemoveOffscreen();
     int i = kAncilla_LinkSlots - 1;
     bool did_charge_magic = false;
 
