@@ -98,4 +98,17 @@ bool HdWorld_Carried(int k);
 // diversa si disegnano a parte, con la grafica della loro area
 void HdWorld_BeforeRender(int width, int height);
 
+// Specchio e caselle di teletrasporto: il fondale ondeggia riga per riga e si
+// schiarisce fino al bianco. La PPU disegna senza onda e con i colori veri
+// (BeforeRender, Line dopo l'HDMA di ogni riga, AfterRender); Mask dopo la
+// composizione, Post dopo tutte le aggiunte HD: onda e bianco su tutto
+void HdWorld_WarpBeforeRender(void);
+void HdWorld_WarpLine(int line);
+void HdWorld_WarpAfterRender(void);
+void HdWorld_WarpMask(uint8 *pixels, int pitch, int width, int height);
+void HdWorld_WarpPost(uint8 *pixels, int pitch, int width, int height);
+// Per lo shader: quanto e' bianco lo schermo (0-1) e l'onda di ogni riga (240)
+float HdWorld_WarpWhite(void);
+const float *HdWorld_WarpRowDx(void);
+
 #endif  // ZELDA3_HD_WORLD_H_

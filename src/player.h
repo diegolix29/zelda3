@@ -3,6 +3,7 @@
 
 extern const uint8 kSwimmingTab1[4];
 extern const uint8 kSwimmingTab2[2];
+extern uint8 g_link_dive_timer;
 
 enum {
   kPlayerState_Ground = 0,

@@ -42,6 +42,10 @@ uint8 Overworld_GetTileAttributeAtLocation(uint16 x, uint16 y) {  // 80882e
   t = GetMap16toMap8Table()[t];
 
   uint8 rv = GetMap8toTileAttr()[t & 0x1ff];
+  // acqua congelata (hd_burn.c): ghiaccio come quello del Palazzo del
+  // Ghiaccio, per Link, i nemici e gli oggetti
+  if ((rv == 0x08 || rv == 0x09) && HdBurn_IsFrozenAt(x << 3, y))
+    rv = 0x0f;
   if (rv >= 0x10 && rv < 0x1C) {
     rv |= (t >> 14) & 1;
   }

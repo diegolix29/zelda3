@@ -318,6 +318,7 @@ static void SdlRenderer_EndDraw() {
     }
     if (g_sdl_overlay) {
       SDL_UpdateTexture(g_sdl_overlay, NULL, g_sdl_overlay_pixels, g_sdl_overlay_w * 4);
+      SDL_SetTextureBlendMode(g_sdl_overlay, SDL_BLENDMODE_BLEND);
       SDL_Rect dst = { rx, ry, rw, rh };
       if (g_config.ignore_aspect_ratio) {
         int ow, oh;
@@ -1051,6 +1052,11 @@ void Host_AdjustVolume(int step) {
 
 bool Host_IsOpenGL() {
   return g_config.output_method == kOutputMethod_OpenGL || g_config.output_method == kOutputMethod_OpenGL_ES;
+}
+
+bool OpenGLRenderer_HasShader(void);
+bool Host_HasShader() {
+  return Host_IsOpenGL() && OpenGLRenderer_HasShader();
 }
 
 uint32 Host_GetPpuRenderFlags() {

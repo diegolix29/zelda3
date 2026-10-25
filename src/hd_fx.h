@@ -5,8 +5,10 @@
 
 #include "types.h"
 
-extern bool g_fx_embers, g_fx_window_rays, g_fx_item_glow, g_fx_heat_haze, g_fx_rain;
+extern bool g_fx_heat, g_fx_window_rays, g_fx_item_glow, g_fx_rain;
 extern bool g_fx_menu_blur, g_fx_sprite_shadows, g_fx_soft_iris, g_fx_button_hints;
+// Bagliori magici bianchi sopra i vortici di teletrasporto ("Distingui vortici da Zora")
+extern bool g_fx_whirlpool;
 // Frame di gioco dall'avvio (per le animazioni: frame_counter si azzera ogni 256)
 extern uint32 g_fx_frames;
 
@@ -20,6 +22,14 @@ void HdFx_AfterLight(uint8 *pixels, int pitch, int width, int height, int bias_x
 int HdFx_SceneModule(void);
 // Marca i pixel d'acqua (layer 7) per lo shader
 void HdFx_MarkWater(uint8 *pixels, int pitch, int width, int height, int bias_x, int bias_y);
+bool HdFx_FloodWindowShows(int sx, int sy);
+// Disegna l'acqua ghiacciata dalla Bacchetta del Ghiaccio (hd_burn.c), sopra
+// l'acqua di hd_water.c
+void HdFx_FrozenWater(uint8 *pixels, int pitch, int width, int height, int bias_x, int bias_y);
+// Schiarimento del lampo, dopo l'acqua HD e il ghiaccio
+void HdFx_Lightning(uint8 *pixels, int pitch, int width, int height);
+// Quanto e' acceso il lampo (0-1), per lo shader
+float HdFx_LightningWhite(void);
 // All'aperto con il sole (per le ombre delle nuvole dello shader)
 bool HdFx_SunnyOutdoors(void);
 // Sfoca e scurisce il gioco dietro inventario, dialoghi e menu
@@ -31,6 +41,8 @@ typedef struct Ppu Ppu;
 void HdFx_IrisBeforeRender(Ppu *ppu);
 void HdFx_IrisAfterRender(Ppu *ppu);
 void HdFx_SoftIris(uint8 *pixels, int pitch, int width, int height);
+// Mosaico del gioco anche sulle aggiunte HD (stessi quadrati della PPU)
+void HdFx_Mosaic(uint8 *pixels, int pitch, int width, int height);
 // Cielo e nuvole dietro la Piramide e sul Monte della Morte: lo shader non li dipinge
 void HdFx_MarkBackdrop(uint8 *pixels, int pitch, int width, int height);
 // Ombre morbide sotto Link e i nemici che camminano a terra
@@ -42,6 +54,8 @@ void HdFx_ShadowsAfterRender(Ppu *ppu);
 // Cespugli congelati sollevati o lanciati e i loro pezzi (hd_burn.c): la PPU
 // li disegna con i blu dei nemici congelati
 void HdFx_IceBeforeRender(Ppu *ppu);
+// Super bomba che si gonfia e si sgonfia come su GBA (scala della sua voce OAM)
+void HdFx_SuperBombBeforeRender(Ppu *ppu);
 // Piove nell'area esterna attuale
 bool HdFx_IsRainingOutdoors(void);
 // Sulla Montagna della Morte: la casella e (della mappa) puo' essere nuvola,

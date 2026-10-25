@@ -102,11 +102,19 @@ void SelectFile_Func17(int k) {
     dst++;
   }
   int health = sram[kSrmOffs_Health] >> 3;
+  // Salva stato cuori e magia: in mezzi cuori arrotondati in su come l'HUD,
+  // pieni i cuori salvati, gli altri neri (casella 0x122: bordo bianco,
+  // interno colore 3 = nero); il mezzo cuore e' quello dell'HUD (casella
+  // 0x121, uguale alla 0xA1 dell'HUD: cuoricino rosso dentro il cuore vuoto)
+  int halves = health * 2;
+  if (enhanced_features0 & kFeatures0_SaveHeartsAndMagic)
+    halves = (sram[kSrmOffs_Health + 1] + 3) >> 2;
   dst = vram_upload_data + kSelectFile_DrawName_HealthVramOffs[k] / 2;
   uint16 *dst_org = dst;
   int row = 10;
   do {
-    *dst++ = 0x520;
+    *dst++ = halves >= 2 ? 0x520 : halves == 1 ? 0x521 : 0x522;
+    halves -= 2;
     if (--row == 0)
       dst = dst_org + 21;
   } while (--health);
@@ -605,6 +613,7 @@ void CopyFile_HandleConfirmation() {  // 8cd371
       memcpy(g_zenv.sram + (selectfile_R18 >> 1) * 0x500, g_zenv.sram + (selectfile_R20 >> 1) * 0x500, 0x500);
       selectfile_arr1[(selectfile_R18 >> 1)] = 1;
       ZeldaWriteSram();
+      MapFog_CopyFile((selectfile_R20 >> 1) + 1, (selectfile_R18 >> 1) + 1);
     }
     ReturnToFileSelect();
     selectfile_R16 = 0;
@@ -854,6 +863,7 @@ void NameFile_DoTheNaming() {  // 8cda4d
     }
   }
   srm_var1 = selectfile_R16 * 2 + 2;
+  MapFog_NewFile(selectfile_R16 + 1);
   uint8 *sram = &g_zenv.sram[selectfile_R16 * 0x500];
   WORD(sram[0x3e5]) = 0x55aa;
   WORD(sram[0x20c]) = 0xf000;

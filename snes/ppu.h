@@ -63,6 +63,9 @@ struct Ppu {
   uint8_t objShowF0[128];
   // Sprite sempre davanti agli strati (mentre il fondale arriva da altrove)
   bool objOnTop;
+  // Cifre al massimo dell'HUD (BG3, palette 5, caselle 0x90-0x99): il colore 2
+  // diventa il colore cgram[0x10], che nessuno strato mostra (vedi zelda_rtl.c)
+  bool bg3MaxDigits;
   int16_t objY[128], objX[128];
   // Ombre morbide (hd_fx.c): per ogni voce OAM se fa ombra e, per ogni pixel
   // del fotogramma (objShadowStride per riga), se lo sprite disegnato li'
@@ -75,6 +78,9 @@ struct Ppu {
   // nemici congelati (palette 2), ogni colore v sostituito da iceRemap[v]
   uint8_t objIce[128];
   uint8_t iceRemap[16];
+  // Scala delle voci OAM in 1/256 (0 = normale): lo sprite si disegna
+  // ingrandito o rimpicciolito attorno al suo centro (super bomba, hd_fx.c)
+  uint16_t objScale[128];
   float mode7PerspectiveLow, mode7PerspectiveHigh;
   // Spostamento visivo della telecamera fluida (non tocca la logica di gioco)
   int16_t bgBiasX, bgBiasY, objBiasX, objBiasY;
@@ -84,6 +90,13 @@ struct Ppu {
   // Mappa del mondo (Mode 7): fuori dalla mappa di 512x512 invece del nero si
   // ripete la fascia di nuvole in alto (righe di caselle 0-7), vedi ppu.c
   bool m7CloudFill;
+  // Mappa progressiva: maschera 512x512, un byte per pixel della mappa: 0 =
+  // visibile, 1 = nuvola, 2 = contorno della nuvola (piu' scuro). NULL = mappa
+  // tutta visibile (messaging.c, MapFog_BuildMask)
+  const uint8 *m7Fog;
+  // Mappa progressiva: fascia di nuvole di 16x64 caselle che si ripete senza
+  // cuciture (MapFog_CloudTiles); NULL = le prime 8 righe della mappa
+  const uint8 *m7FogClouds;
 
   // TMW / TSW etc
   uint8 screenEnabled[2];

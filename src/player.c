@@ -13,6 +13,7 @@
 #include "player_oam.h"
 #include "sprite_main.h"
 #include "hd_burn.h"
+#include "hd_world.h"
 
 static bool g_ApplyLinksMovementToCamera_called;
 
@@ -132,6 +133,46 @@ void CheckAbilityToSwim() {  // 81ffb6
   submodule_index = player_is_indoors ? 20 : 42;
 }
 
+// Acqua congelata dalla Bacchetta del Ghiaccio (hd_burn.c): se il ghiaccio si
+// scioglie sotto Link (da solo o col fuoco) Link finisce in acqua, come
+// quando ci entra con un salto: nuota, o senza pinne (Ancilla15_JumpSplash ->
+// CheckAbilityToSwim) torna all'ultimo punto di terra: sul ghiaccio
+// LinkState_Default non aggiorna la posizione di ritorno
+static bool g_link_on_frozen_water;
+
+static void Link_CheckMeltedIce(void) {
+  bool was = g_link_on_frozen_water;
+  g_link_on_frozen_water = false;
+  if (player_is_indoors || link_is_in_deep_water || link_player_handler_state != kPlayerState_Ground ||
+      link_auxiliary_state)
+    return;
+  uint16 x = link_x_coord + 8, y = link_y_coord + 12;
+  uint8 attr = Overworld_GetTileAttributeAtLocation(x >> 3, y);
+  if (attr == 0x0f && HdBurn_IsFrozenAt(x, y)) {
+    g_link_on_frozen_water = true;
+    return;
+  }
+  if (!was || attr != 0x08)
+    return;
+  Link_ResetSwordAndItemUsage();
+  Link_CancelDash();
+  link_is_in_deep_water = 1;
+  link_some_direction_bits = link_direction_last;
+  Link_ResetSwimmingState();
+  AncillaAdd_Splash(0x15, 0);
+  link_state_bits = 0;
+  link_picking_throw_state = 0;
+  link_grabbing_wall = 0;
+  link_speed_setting = 0;
+  Link_ForceUnequipCape_quietly();
+  link_player_handler_state = kPlayerState_Swimming;
+}
+
+// Immersione con le pinne (Spada e oggetti, come su GBA): fotogrammi che
+// restano sott'acqua e pausa prima della prossima immersione
+uint8 g_link_dive_timer;
+static uint8 g_link_dive_wait;
+
 void Link_Main() {  // 878000
 //  RunEmulatedFunc(0x878000, 0, 0, 0, true, true, -2, 0);
 //  return;
@@ -141,8 +182,10 @@ void Link_Main() {  // 878000
   link_x_coord_prev = link_x_coord;
   link_y_coord_prev = link_y_coord;
   flag_unk1 = 0;
-  if (!flag_is_link_immobilized)
+  if (!flag_is_link_immobilized) {
+    Link_CheckMeltedIce();
     Link_ControlHandler();
+  }
   HandleSomariaAndGraves();
 }
 
@@ -179,13 +222,17 @@ void Link_ControlHandler() {  // 87807f
       }
     }
   }
+  // come su GBA (0x809e75a) fuori dall'acqua l'immersione finisce
+  if (link_player_handler_state != kPlayerState_Swimming)
+    g_link_dive_timer = 0;
   if (link_player_handler_state)
     Player_CheckHandleCapeStuff();
   kPlayerHandlers[link_player_handler_state]();
 }
 
 void LinkState_Default() {  // 878109
-  CacheCameraPropertiesIfOutdoors();
+  if (!g_link_on_frozen_water)
+    CacheCameraPropertiesIfOutdoors();
   if (Link_HandleBunnyTransformation()) {
     if (link_player_handler_state == 23)
       PlayerHandler_17_Bunny();
@@ -1662,6 +1709,23 @@ void PlayerHandler_04_Swimming() {  // 87963b
   if (!link_item_flippers)
     return;
 
+  // Spada e oggetti: come su GBA (0x8098bae) B fa immergere Link per 32
+  // fotogrammi con uno spruzzo; riemerso, la prossima volta solo dopo 64.
+  // Sott'acqua si vede solo l'ombra (al chiuso Link passa dietro l'acqua,
+  // player_oam.c); si nuota e si fanno le bracciate come prima
+  if (enhanced_features0 & kFeatures0_SwordAndItems) {
+    if (g_link_dive_timer == 0) {
+      if ((g_link_dive_wait == 0 || --g_link_dive_wait == 0) && (filtered_joypad_H & kJoypadH_B)) {
+        g_link_dive_timer = 32;
+        AncillaAdd_Splash(0x15, 0);
+      }
+    } else if (--g_link_dive_timer == 0) {
+      g_link_dive_wait = 64;
+    }
+  } else {
+    g_link_dive_timer = 0;
+  }
+
   if (!(swimcoll_var7[0] | swimcoll_var7[1])) {
     if ((uint8)swimcoll_var5[0] != 2 && (uint8)swimcoll_var5[1] != 2)
       ResetAllAcceleration();
@@ -2501,44 +2565,16 @@ fail:
   }
 }
 
-// La fiamma della Lanterna ("Spada e oggetti interazione ambiente") ferisce i
-// nemici che tocca come la spada di livello 1 (classe di danno 1: un soldato
-// blu muore al terzo colpo) e li spinge indietro; nel riquadro della fiamma,
-// davanti a Link (AncillaAdd_LampFlame)
-static void LampFlame_DamageSprites(void) {
-  static const int8 kLampFlame_X[4] = {0, 0, -20, 18};
-  static const int8 kLampFlame_Y[4] = {-16, 24, 4, 4};
-  if (!(enhanced_features0 & kFeatures0_SwordAndItems))
-    return;
-  int d = link_direction_facing >> 1;
-  uint16 x = link_x_coord + kLampFlame_X[d], y = link_y_coord + kLampFlame_Y[d];
-  for (int j = 15; j >= 0; j--) {
-    if (sprite_state[j] < 9 || sprite_ignore_projectile[j] || sprite_pause[j] || sprite_hit_timer[j] ||
-        sprite_floor[j] != link_is_on_lower_level)
-      continue;
-    SpriteHitBox hb;
-    hb.r0_xlo = x, hb.r8_xhi = x >> 8;
-    hb.r1_ylo = y, hb.r9_yhi = y >> 8;
-    hb.r2 = hb.r3 = 16;
-    Sprite_SetupHitBox(j, &hb);
-    if (!CheckIfHitBoxesOverlap(&hb))
-      continue;
-    ProjectSpeedRet pt = Sprite_ProjectSpeedTowardsLink(j, 0x40);
-    sprite_x_recoil[j] = -pt.x;
-    sprite_y_recoil[j] = -pt.y;
-    damage_type_determiner = 1;
-    Sprite_ApplyCalculatedDamage(j, 0x9d);
-  }
-}
-
 void LinkItem_Lamp() {  // 87a24d
   if (is_standing_in_doorway || !CheckYButtonPress())
     return;
   if (link_item_torch && LinkCheckMagicCost(6)) {
     AncillaAdd_MagicPowder(0x1a, 0);
     Dungeon_LightTorch();
+    // come su GBA (0x808709c) la fiamma taglia le tende davanti a Link
+    if (enhanced_features0 & kFeatures0_SwordAndItems)
+      Dungeon_SlashAhead(link_x_coord, link_y_coord);
     AncillaAdd_LampFlame(0x2f, 2);
-    LampFlame_DamageSprites();
     // incendia il cespuglio o l'erba davanti a Link (una sola tile: poi il
     // fuoco passa da solo a quelle vicine)
     if (!player_is_indoors) {
@@ -2553,26 +2589,6 @@ void LinkItem_Lamp() {  // 87a24d
   link_cant_change_direction = 0;
   if (button_b_frames == 9)
     link_speed_setting = 0;
-}
-
-// Polvere Magica ("Spada e oggetti interazione ambiente"): finita la nuvola
-// rompe il cespuglio o il vaso davanti a Link, uno solo, nel punto che usa la
-// spada (kDoSwordInteractionWithTiles) e con la stessa animazione: foglie e
-// vaso in pezzi, senza lo sbuffo di AncillaAdd_BushPoof, che compare solo con
-// la polvere in mano
-static void MagicPowder_SmashTile(void) {
-  static const int8 kSwordTile_X[4] = { 6, 8, -1, 22 }, kSwordTile_Y[4] = { 4, 28, 16, 16 };
-  if (!(enhanced_features0 & kFeatures0_SwordAndItems))
-    return;
-  int d = link_direction_facing >> 1 & 3;
-  uint16 x = link_x_coord + kSwordTile_X[d], y = link_y_coord + kSwordTile_Y[d];
-  uint8 in_hand = link_item_in_hand;
-  link_item_in_hand = 0;
-  if (player_is_indoors)
-    Dungeon_SmashPotAtPos((link_is_on_lower_level ? 0x1000 : 0) + ((x & 0x1f8) >> 3) + ((y & 0x1f8) << 3));
-  else
-    Overworld_PowderSmash(x, y);
-  link_item_in_hand = in_hand;
 }
 
 void LinkItem_Powder() {  // 87a293
@@ -2605,10 +2621,8 @@ void LinkItem_Powder() {  // 87a293
     AncillaAdd_MagicPowder(26, 0);
   if (player_handler_timer != 9)
     return;
-  if (submodule_index == 0) {
-    MagicPowder_SmashTile();
+  if (submodule_index == 0)
     TileDetect_MainHandler(1);
-  }
 out:
   link_item_in_hand = 0;
   player_handler_timer = 0;
@@ -3551,10 +3565,13 @@ void Link_PerformThrow() {  // 87b11c
     Link_ResetSwordAndItemUsage();
     bitfield_for_a_button = 0;
     int i = 15;
-    while (sprite_state[i] != 0) {
-      if (--i < 0)
-        return;
-    }
+    while (i >= 0 && sprite_state[i] != 0)
+      i--;
+    // col mondo continuo i nemici delle aree vicine possono occupare tutti i
+    // posti, e Link non sollevava piu' niente: si libera quello di un nemico
+    // tranquillo lontano (torna a casa quando c'e' di nuovo posto)
+    if (i < 0 && HdWorld_FreeSlot(-1, 15) < 0)
+      return;
 
     if (interacting_with_liftable_tile_x1 == 5 || interacting_with_liftable_tile_x1 == 6) {
       player_handler_timer = 1;
@@ -4505,7 +4522,8 @@ void StartMovementCollisionChecks_Y_HandleOutdoors() {  // 87beaf
       HandlePushingBonkingSnaps_Y();
       return;
     }
-    if ((tiledetect_stair_tile & 7) == 7 || (tiledetect_normal_tiles & 7) == 7) {
+    // l'acqua congelata (ghiaccio 0x0f, solo all'aperto) e' una riva
+    if ((tiledetect_stair_tile & 7) == 7 || ((tiledetect_normal_tiles | tiledetect_icy_floor >> 4) & 7) == 7) {
       Link_CancelDash();
       link_is_in_deep_water = 0;
       if (link_auxiliary_state == 0) {
@@ -5145,7 +5163,8 @@ void StartMovementCollisionChecks_X_HandleOutdoors() {  // 87c8e9
     return;
   } // endif_3
 
-  if ((tiledetect_normal_tiles & 7) == 7 && link_is_in_deep_water) {
+  // l'acqua congelata (ghiaccio 0x0f, solo all'aperto) e' una riva
+  if (((tiledetect_normal_tiles | tiledetect_icy_floor >> 4) & 7) == 7 && link_is_in_deep_water) {
     Link_CancelDash();
     if (!link_auxiliary_state) {
       link_direction_last = link_some_direction_bits;
@@ -5391,6 +5410,17 @@ void TileDetect_MainHandler(uint8 item) {  // 87d077
 
   if (item == 5)
     return;
+
+  // all'aperto il ghiaccio e' l'acqua o l'erba congelata (hd_burn.c), accanto
+  // ad acqua ed erba alta: i ritorni qui sotto per l'acqua e l'erba saltavano
+  // la fine dello scivolamento (in fondo alla funzione) e Link scivolava ancora
+  if (!player_is_indoors && link_flag_moving && !(tiledetect_icy_floor & 0x11)) {
+    if (link_player_handler_state != 4) {
+      link_direction_last = link_some_direction_bits;
+      Link_ResetSwimmingState();
+    }
+    link_flag_moving = 0;
+  }
 
   if (tiledetect_thick_grass & 0x10) {
     uint8 tx = (link_x_coord + 0) & 0xf;

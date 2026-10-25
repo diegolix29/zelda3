@@ -30,3 +30,5 @@ void Kiki_RevertToSprite(int k);
 int Kiki_SpawnHandlerMonke(int k);
 void Kiki_SpawnHandler_A(int k);
 void Kiki_SpawnHandler_B(int k);
+// Voce OAM della super bomba disegnata da Tagalong_Draw (vedi hd_fx.c)
+extern uint8 g_super_bomb_oam;

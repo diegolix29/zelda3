@@ -5,10 +5,10 @@
 #include "messaging.h"
 #include "hud_it.h"
 
-enum {
-  kNewStyleInventory = 1,
-  kHudItemCount = kNewStyleInventory ? 24 : 20,
-};
+// Inventario esteso a 6 colonne (opzione ExtendedInventory), altrimenti
+// quello originale a 5 colonne
+#define kNewStyleInventory ((enhanced_features0 & kFeatures0_ExtendedInventory) != 0)
+#define kHudItemCount (kNewStyleInventory ? 24 : 20)
 
 typedef struct ItemBoxGfx {
   uint16 v[4];
@@ -23,6 +23,7 @@ static void Hud_ReorderItem(int direction);
 static void Hud_Update_Magic();
 static void Hud_Update_Inventory();
 static void Hud_Update_Hearts();
+static void Hud_UpdateItemBox();
 
 const uint8 kMaxBombsForLevel[] = { 10, 15, 20, 25, 30, 35, 40, 50 };
 const uint8 kMaxArrowsForLevel[] = { 30, 35, 40, 45, 50, 55, 60, 70 };
@@ -267,8 +268,8 @@ uint8 CheckPalaceItemPosession() {
 }
 
 // Disposizione predefinita dell'inventario a 6 colonne: le 5 colonne
-// originali (con la pala al posto della vecchia bottiglia) e a destra una
-// colonna con le quattro bottiglie.
+// originali e a destra una colonna con le quattro bottiglie. Come su GBA
+// il flauto resta al suo posto e la pala va dove c'era la vecchia bottiglia.
 static const uint8 kDefaultInventoryOrder[24] = {
    1,  2,  3,  4,  5, 21,
    6,  7,  8,  9, 10, 22,
@@ -700,6 +701,47 @@ uint8 Hud_LookupInventoryItem(uint8 item) {
     19, 20,11, 11, 11, 11, // 11 means bottle
   };
   return kNewStyleInventory ? kHudItemToItemNew[item] : kHudItemToItemOrg[item];
+}
+
+bool Hud_ExtendedInventory() {
+  return kNewStyleInventory;
+}
+
+// Cambio di inventario a partita in corso: gli oggetti dei tasti passano da
+// una disposizione all'altra (la 16 e' la bottiglia nell'originale, la pala
+// in quello esteso; le bottiglie estese sono 21-24) e il riordino si azzera
+static uint8 Hud_ConvertItem(uint8 item, bool extended, bool is_y) {
+  if (extended) {
+    if (item == kHudItem_BottleOld)
+      return kHudItem_Bottle1 + (link_item_bottle_index >= 1 && link_item_bottle_index <= 4 ? link_item_bottle_index - 1 : 0);
+    if (item == kHudItem_Flute && link_item_flute == 1)
+      return kHudItem_Shovel;
+  } else {
+    if (item >= kHudItem_Bottle1 && item <= kHudItem_Bottle4) {
+      if (is_y)
+        link_item_bottle_index = item - kHudItem_Bottle1 + 1;
+      return kHudItem_BottleOld;
+    }
+    if (item == kHudItem_Shovel)
+      return kHudItem_Flute;
+  }
+  return item;
+}
+
+void Hud_ChangeInventoryStyle(bool extended) {
+  hud_inventory_order[0] = 0;
+  hud_cur_item_x = Hud_ConvertItem(hud_cur_item_x, extended, false);
+  hud_cur_item_l = Hud_ConvertItem(hud_cur_item_l, extended, false);
+  hud_cur_item_r = Hud_ConvertItem(hud_cur_item_r, extended, false);
+  uint8 item = Hud_ConvertItem(hud_cur_item, extended, true);
+  if (item != hud_cur_item && (main_module_index == 7 || main_module_index == 9)) {
+    hud_cur_item = item;
+    Hud_UpdateEquippedItem();
+    Hud_UpdateItemBox();
+    flag_update_hud_in_nmi++;
+  } else {
+    hud_cur_item = item;
+  }
 }
 
 void Hud_UpdateEquippedItem() {  // 8ddfaf
@@ -1513,7 +1555,8 @@ static void Hud_Update_Inventory() {  // 8dfc09
   }
 
   // Offset everything if we have many coins?
-  int base_tile = base_tiles[link_rupees_actual == MaxRupees()];
+  // come su GBA (0x80a8230) il colore segue le rupie da raggiungere
+  int base_tile = base_tiles[link_rupees_goal == MaxRupees()];
   if (inv_offs == 0) {
     dst++;
     dst[HUDXY(-1, 1)] = base_tile | d[0];

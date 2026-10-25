@@ -16,6 +16,8 @@
 #include "messaging.h"
 #include "assets.h"
 #include "hd_trans.h"
+#include "hd_water.h"
+#include "hd_menu.h"
 
 // todo: move to config
 static const uint16 kBossRooms[] = {
@@ -4945,9 +4947,10 @@ void RoomTag_Holes2(int k) {  // 81cc89
   submodule_index = 3;
 }
 
-void RoomTag_OperateWaterFlooring() {  // 81cc95
+static void WaterFlooring(bool draw) {
   dung_load_ptr_offs = 0;
   const uint8 *layoutsrc = kWatergateLayout;
+  HdWater_ClearFlood();
   for (;;) {
     dung_draw_width_indicator = 0;
     dung_draw_height_indicator = 0;
@@ -4965,14 +4968,18 @@ void RoomTag_OperateWaterFlooring() {  // 81cc95
       do {
         int nn = 2;
         do {
-          dung_bg1[dsto + XY(0, 0)] = src[0];
-          dung_bg1[dsto + XY(1, 0)] = src[1];
-          dung_bg1[dsto + XY(2, 0)] = src[2];
-          dung_bg1[dsto + XY(3, 0)] = src[3];
-          dung_bg1[dsto + XY(0, 1)] = src[4];
-          dung_bg1[dsto + XY(1, 1)] = src[5];
-          dung_bg1[dsto + XY(2, 1)] = src[6];
-          dung_bg1[dsto + XY(3, 1)] = src[7];
+          if (draw) {
+            dung_bg1[dsto + XY(0, 0)] = src[0];
+            dung_bg1[dsto + XY(1, 0)] = src[1];
+            dung_bg1[dsto + XY(2, 0)] = src[2];
+            dung_bg1[dsto + XY(3, 0)] = src[3];
+            dung_bg1[dsto + XY(0, 1)] = src[4];
+            dung_bg1[dsto + XY(1, 1)] = src[5];
+            dung_bg1[dsto + XY(2, 1)] = src[6];
+            dung_bg1[dsto + XY(3, 1)] = src[7];
+          }
+          for (int c = 0; c < 4; c++)
+            HdWater_MarkFlood(dsto + XY(c, 0)), HdWater_MarkFlood(dsto + XY(c, 1));
           dsto += XY(0, 2);
         } while (--nn);
         dsto += XY(4, -4);
@@ -4981,6 +4988,19 @@ void RoomTag_OperateWaterFlooring() {  // 81cc95
     } while (--dung_draw_height_indicator);
   }
 }
+void RoomTag_OperateWaterFlooring() {  // 81cc95
+  WaterFlooring(true);
+}
+
+// Solo le caselle dell'acqua per l'effetto HD (HdWater_IsFlood), senza
+// toccare lo stato del gioco
+void Dungeon_MarkWaterFlooring() {
+  uint16 offs = dung_load_ptr_offs;
+  uint16 w = dung_draw_width_indicator, h = dung_draw_height_indicator;
+  WaterFlooring(false);
+  dung_load_ptr_offs = offs, dung_draw_width_indicator = w, dung_draw_height_indicator = h;
+}
+
 
 bool RoomTag_MaybeCheckShutters(uint8 *attr_out) {  // 81cd39
   int p, t;
@@ -5040,6 +5060,8 @@ done:
   word_7E04B6 = p;
   return true;
 }
+
+static void Dungeon_SlashAt(int pos);
 
 void Dungeon_ProcessTorchesAndDoors() {  // 81ce70
   static const int16 kDungLinkOffs1X[] = { 0, 0, -1, 17 };
@@ -5135,6 +5157,24 @@ not_openable:
 
   int pos = ((link_y_coord + (int8)player_oam_y_offset) & 0x1f8) << 3;
   pos |= ((link_x_coord + (int8)player_oam_x_offset) & 0x1f8) >> 3;
+  Dungeon_SlashAt(pos);
+}
+
+// Lanterna e Bacchetta del Fuoco (Spada e oggetti): come su GBA (0x808709c,
+// 0x8087310) tagliano le tende e le tele (0x6c) come la spada, nella casella
+// davanti al punto x, y nella direzione in cui guarda Link (la lanterna dal
+// punto di Link, la fiammata dal suo)
+void Dungeon_SlashAhead(uint16 x, uint16 y) {
+  static const int8 kSlash_Y[4] = { -16, 24, 8, 8 }, kSlash_X[4] = { 0, 0, -16, 16 };
+  if (!player_is_indoors)
+    return;
+  int d = link_direction_facing >> 1 & 3;
+  int pos = ((y + kSlash_Y[d]) & 0x1f8) << 3;
+  pos |= ((x + kSlash_X[d]) & 0x1f8) >> 3;
+  Dungeon_SlashAt(pos);
+}
+
+static void Dungeon_SlashAt(int pos) {
   uint8 attr, y;
 
 #define is_6c_fx(yv,x) (y=yv, ((attr = (dung_bg2_attr_table[x] & 0xfc)) == 0x6c || (attr & 0xf0) == 0xf0))
@@ -5572,8 +5612,9 @@ uint8 ThievesAttic_DrawLightenedHole(uint16 pos6, uint16 a, Point16U *pt) {  // 
 
 uint8 HandleItemTileAction_Dungeon(uint16 x, uint16 y) {  // 81dabb
   if (!(link_item_in_hand & 2)) {
-    // Con la spada solo la Spada d'Oro (livello 4) rompe i vasi
-    if (!(enhanced_features0 & kFeatures0_SwordAndItems) || button_b_frames == 0 || link_sword_type != 4)
+    // Con la Spada d'Oro (livello 4) i vasi si rompono come su GBA
+    // (0x8082618): solo con Link a terra, con ogni azione sulla casella
+    if (!(enhanced_features0 & kFeatures0_SwordAndItems) || link_sword_type != 4 || link_position_mode != 0)
       return 0;
   }
   uint16 pos = (y & 0x1f8) * 8 + x + (link_is_on_lower_level ? 0x1000 : 0);
@@ -6502,6 +6543,9 @@ void Module_PreDungeon() {  // 82821e
   saved_module_for_menu = 7;
   main_module_index = 7;
   submodule_index = 15;
+  // come su GBA il nome del dungeon compare quando finisce l'apertura a
+  // cerchio (submodule 15), a ogni caricamento che passa di qui
+  HdMenu_ShowDungeonName();
   Dungeon_LoadSongBankIfNeeded();
   Module_PreDungeon_setAmbientSfx();
 }

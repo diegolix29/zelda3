@@ -8,6 +8,7 @@
 #include "hd_world.h"
 #include "hd_menu.h"
 #include "ancilla.h"
+#include "hd_burn.h"
 #include "player.h"
 #include "misc.h"
 #include "messaging.h"
@@ -2939,6 +2940,21 @@ void DecompressEnemyDamageSubclasses() {  // 82fe71
     enemy_damage_data[i + 0] = t >> 4;
     enemy_damage_data[i + 1] = t & 0xf;
   }
+  // Spada e oggetti: i valori che la versione GBA ha cambiato (tabella nemico x
+  // classe a 0x817f18c), senza le Bacchette del Fuoco e del Ghiaccio
+  if (enhanced_features0 & kFeatures0_SwordAndItems) {
+    static const uint16 kGbaDamage[][2] = {
+      {0x0ee, 2}, {0x13e, 2}, {0x22e, 2}, {0x8be, 2}, {0x8ee, 2},  // Etere: 64 invece di congelare
+      {0x4cd, 3}, {0x64d, 3}, {0x81d, 2}, {0xa1d, 2},  // Bombos
+      {0x647, 1},  // Rampino: stordisce Debirando
+      {0x64f, 3}, {0x71f, 3}, {0x85f, 3},  // Terremoto
+      {0x85a, 0},  // Polvere: non trasforma lo Stalfos giallo
+      // Mothula e la Spada d'Oro (0x884/0x885): c'e' gia' in MiscBugFixes
+      {0xc9d, 1}, {0xc9e, 3}, {0xc9f, 1},  // medaglioni sui Tektite
+    };
+    for (int i = 0; i < (int)(sizeof(kGbaDamage) / sizeof(kGbaDamage[0])); i++)
+      enemy_damage_data[kGbaDamage[i][0]] = (uint8)kGbaDamage[i][1];
+  }
 }
 
 int Decompress_bank02(uint8 *dst, const uint8 *src) {  // 82febb
@@ -2995,7 +3011,11 @@ uint8 Overworld_ReadTileAttribute(uint16 x, uint16 y) {  // 85faa2
   int t = ((x - overworld_offset_base_x) & overworld_offset_mask_x);
   t |= ((y - overworld_offset_base_y) & overworld_offset_mask_y) << 3;
   int w = HdWorld_WorldTile(x << 3, y);  // mondo unico: fuori dall'area corrente
-  return kSomeTileAttr[w >= 0 ? w : dung_bg2[t >> 1]];
+  uint8 rv = kSomeTileAttr[w >= 0 ? w : dung_bg2[t >> 1]];
+  // acqua congelata (hd_burn.c): ghiaccio, come in Overworld_GetTileAttributeAtLocation
+  if ((rv == 0x08 || rv == 0x09) && HdBurn_IsFrozenAt(x << 3, y))
+    rv = 0x0f;
+  return rv;
 }
 
 void Overworld_SetFixedColAndScroll() {  // 8bfe70
@@ -3632,7 +3652,6 @@ after:
     link_incapacitated_timer = 0;
     main_module_index = 15;
     saved_module_for_menu = 6;
-    HdMenu_ShowDungeonName();
     submodule_index = 0;
     subsubmodule_index = 0;
   }
@@ -3675,8 +3694,7 @@ static int Overworld_SmashSmallObj(uint16 x, uint16 y, uint16 pos, uint16 attr, 
   return rv;
 }
 
-// Boomerang Magico e Polvere Magica: tagliano il cespuglio (e il boomerang
-// anche l'erba alta, con grass) nel punto px, py (in pixel), come la spada, con resti, segreti e oggetti nascosti.
+// Boomerang Magico: taglia il cespuglio (e l'erba alta, con grass) nel punto px, py (in pixel), come la spada, con resti, segreti e oggetti nascosti.
 // -1 se non c'e' niente da tagliare, 1 se sotto c'era qualcosa (un oggetto o
 // un segreto: il boomerang torna indietro), altrimenti 0.
 static int CutBushOrGrass(uint16 px, uint16 py, bool grass) {
@@ -3713,12 +3731,17 @@ static int CutBushOrGrass(uint16 px, uint16 py, bool grass) {
 }
 
 int Overworld_BoomerangCut(uint16 px, uint16 py) {
-  return CutBushOrGrass(px, py, true);
-}
-
-// Polvere Magica: taglia il cespuglio nel punto px, py (in pixel) come la spada
-void Overworld_PowderSmash(uint16 px, uint16 py) {
-  CutBushOrGrass(px, py, false);
+  int r = CutBushOrGrass(px, py, true);
+  uint16 dx = px - overworld_offset_base_x * 8, dy = py - overworld_offset_base_y;
+  if (r >= 0 || dx > (overworld_offset_mask_x * 8 | 0xf) || dy > (overworld_offset_mask_y | 0xf))
+    return r;
+  // cartelli: come la spada a mano vuota (Overworld_ToolAndTileInteraction)
+  if (link_item_in_hand != 0 || link_position_mode == 1 || link_sword_type < 2 || link_sword_type > 4)
+    return -1;
+  uint16 x = px >> 3, y = py;
+  uint16 pos = ((y - overworld_offset_base_y) & overworld_offset_mask_y) * 8 +
+    ((x - overworld_offset_base_x) & overworld_offset_mask_x);
+  return Overworld_SmashSmallObj(x, y, pos, overworld_tileattr[pos >> 1], kSmash_Sign) >= 0 ? 0 : -1;
 }
 
 uint16 Overworld_ToolAndTileInteraction(uint16 x, uint16 y) {  // 9bbd82
@@ -3733,7 +3756,9 @@ uint16 Overworld_ToolAndTileInteraction(uint16 x, uint16 y) {  // 9bbd82
 
   if (!(link_item_in_hand & 2)) {
     if (!(link_item_in_hand & 0x40)) {
-      if (attr == 0x34 || attr == 0x71 || attr == 0x35 || attr == 0x10d ||
+      // 0x20: fiamma della Lanterna (Spada e oggetti), solo erba e cespugli
+      if (link_item_in_hand & 0x20) {
+      } else if (attr == 0x34 || attr == 0x71 || attr == 0x35 || attr == 0x10d ||
           attr == 0x10f || attr == 0xe1 || attr == 0xe2 || attr == 0xda ||
           attr == 0xf8 || attr == 0x10e) {  // shovelable
         if (link_position_mode != 1)
@@ -3742,7 +3767,8 @@ uint16 Overworld_ToolAndTileInteraction(uint16 x, uint16 y) {  // 9bbd82
           word_7E04B2 = pos;
         yv = 0xdc9;
         goto check_secret;
-      } else if (attr == 0x37e) {  // isThickGrass
+      }
+      if (attr == 0x37e) {  // isThickGrass
         if (link_position_mode == 1)
           return attr;
         scratch_0 = x * 8 - 8;

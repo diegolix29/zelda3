@@ -33,6 +33,14 @@ uniform COMPAT_PRECISION vec2 ScrollOffset;
 uniform COMPAT_PRECISION float GameModule;
 // 1 = all'aperto con il sole (niente pioggia, nebbia o nuvole basse)
 uniform COMPAT_PRECISION float Sunny;
+// Animazione dello specchio: quanto e' bianco lo schermo (0-1; 0 anche con
+// un eseguibile vecchio che non lo valorizza) e di quanto e' spostata ogni
+// riga del fondale dall'onda
+uniform COMPAT_PRECISION float MirrorWarp;
+uniform COMPAT_PRECISION float MirrorDx[240];
+// 1 = "Filtro lineare" attivo nelle impostazioni (LinearFiltering): pixel
+// morbidi come senza shader invece che nitidi
+uniform COMPAT_PRECISION float LinearFilter;
 
 #ifdef PARAMETER_UNIFORM
 uniform COMPAT_PRECISION float FSA_PIXEL_SHARP;
@@ -165,8 +173,24 @@ vec3 sample_sharp(vec2 uv, vec2 sz, float sharp)
     return COMPAT_TEXTURE(OrigTexture, (i + 0.5 + f) / sz).rgb;
 }
 
-// Menu (intro, selezione file, inventario, scelta del punto di partenza)
-// e morte di Link (modulo 18, lo schermo rosso): escono intatti.
+// Filtro lineare: media dei quattro pixel vicini (calcolata qui, cosi' non
+// dipende dal filtro con cui e' caricata la texture)
+vec3 sample_linear(vec2 uv, vec2 sz)
+{
+    vec2 p = uv * sz - 0.5;
+    vec2 i = floor(p);
+    vec2 f = p - i;
+    vec2 base = (i + 0.5) / sz;
+    vec2 tx = vec2(1.0 / sz.x, 0.0);
+    vec2 ty = vec2(0.0, 1.0 / sz.y);
+    return mix(mix(COMPAT_TEXTURE(OrigTexture, base).rgb, COMPAT_TEXTURE(OrigTexture, base + tx).rgb, f.x),
+               mix(COMPAT_TEXTURE(OrigTexture, base + ty).rgb, COMPAT_TEXTURE(OrigTexture, base + tx + ty).rgb, f.x), f.y);
+}
+
+// Menu (intro, selezione file, inventario, scelta del punto di partenza),
+// morte di Link (modulo 18, lo schermo rosso) e prologo (modulo 20: le
+// immagini della storia e la mappa in Mode 7; per le stanze del prologo il
+// gioco manda 7): escono intatti.
 // GameModule arriva incrementato di 1.
 float menu_amount()
 {
@@ -175,6 +199,7 @@ float menu_amount()
     float menu = step(m, 6.5)
                + step(14.5, m) * step(m, 15.5)
                + step(18.5, m) * step(m, 19.5)
+               + step(20.5, m) * step(m, 21.5)
                + step(27.5, m) * step(m, 28.5);
     return known * clamp(menu, 0.0, 1.0) * FSA_SKIP_MENUS;
 }
@@ -310,6 +335,8 @@ void main()
     vec2 src = max(OrigTextureSize, vec2(1.0));
     vec2 px = uv * src;                 // pixel SNES sullo schermo
     vec2 world = px + ScrollOffset;     // pixel SNES nel mondo
+    // specchio: pennellate e nuvole ondeggiano con il fondale
+    world.x += MirrorDx[int(clamp(px.y, 0.0, 239.0))];
 
     vec2 prot = protect_mask(uv, src);
     float sprite = prot.x * FSA_KEEP_SPRITES;
@@ -317,7 +344,7 @@ void main()
     float scene = 1.0 - clamp(sprite + hud, 0.0, 1.0);   // fondale
     float menu = menu_amount();
 
-    vec3 orig = sample_sharp(uv, src, FSA_PIXEL_SHARP);
+    vec3 orig = LinearFilter > 0.5 ? sample_linear(uv, src) : sample_sharp(uv, src, FSA_PIXEL_SHARP);
     vec3 color = orig;
     float luma = dot(color, vec3(0.299, 0.587, 0.114));
 
@@ -354,8 +381,9 @@ void main()
     color = clamp(color, 0.0, 1.0);
     color = mix(color, color * color * (3.0 - 2.0 * color), FSA_CONTRAST);
 
-    // HUD e menu escono intatti
-    color = mix(color, orig, max(hud, menu));
+    // HUD e menu escono intatti; durante lo specchio l'effetto si schiarisce
+    // insieme allo schermo (il gioco aggiunge il bianco dopo tutto il resto)
+    color = mix(color, orig, max(max(hud, menu), clamp(MirrorWarp, 0.0, 1.0)));
     FragColor = vec4(clamp(color, 0.0, 1.0), 1.0);
 }
 

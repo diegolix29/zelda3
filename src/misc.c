@@ -13,6 +13,7 @@
 #include "player_oam.h"
 #include "messaging.h"
 #include "ending.h"
+#include "hd_fx.h"
 #include "attract.h"
 #include "snes/snes_regs.h"
 #include "assets.h"
@@ -423,10 +424,10 @@ void NMI_PrepareSprites() {  // 8085fc
   dma_source_addr_15 = dma_source_addr_10 + 0x100;
 
   if (--bg_tile_animation_countdown == 0) {
-    // Al chiuso (fiamme di torce e bracieri) a meta' velocita': 18 frame
-    // invece di 9
+    // Con l'effetto calore e fiamme, al chiuso (fiamme di torce e bracieri)
+    // a meta' velocita': 18 frame invece di 9
     bg_tile_animation_countdown = (BYTE(overlay_index) == 0xb5 || BYTE(overlay_index) == 0xbc) ? 0x17 :
-                                  player_is_indoors ? 18 : 9;
+                                  (player_is_indoors && g_fx_heat) ? 18 : 9;
 
     uint16 t = word_7EC00F + 0x400;
     if (t == 0xc00)
@@ -714,16 +715,15 @@ void TriforceRoom_LinkApproachTriforce() {  // 87f49c
   }
 }
 
-// Oggetti che usano la magia: la prima volta che si ricevono la barra della
-// magia si riempie, come regalo (Spada e oggetti interazione ambiente)
+// Oggetti che riempiono la barra della magia quando si ricevono, come su GBA
+// (Spada e oggetti interazione ambiente). Elenco preso dalla ROM GBA europea
+// (0x80ad5ee): la Polvere Magica e i medaglioni no; la Spada Suprema (0x01)
+// riempie anche i cuori (0x80ab3cc)
 static bool IsMagicItemReceipt(int j) {
   switch (j) {
+  case 0x01:  // Spada Suprema
   case 0x07:  // Bacchetta del Fuoco
   case 0x08:  // Bacchetta del Ghiaccio
-  case 0x0d:  // Polvere Magica (il fungo, 0x29, non conta)
-  case 0x0f:  // Medaglione Bombos
-  case 0x10:  // Medaglione Etere
-  case 0x11:  // Medaglione Terremoto
   case 0x12:  // Lanterna
   case 0x15:  // Bastone di Somaria
   case 0x18:  // Bastone di Byrna
@@ -748,10 +748,15 @@ void AncillaAdd_ItemReceipt(uint8 ain, uint8 yin, int chest_pos) {  // 8985e8
 
   uint8 v = kValueToGiveItemTo[j];
   uint8 *p = &g_ram[kMemoryLocationToGiveItemTo[j]];
-  // prima volta: l'oggetto non c'era ancora (per la Polvere Magica il fungo
-  // vale 1 e la polvere 2: conta solo l'arrivo della polvere)
-  if ((enhanced_features0 & kFeatures0_SwordAndItems) && IsMagicItemReceipt(j) && !sign8(v) && *p < v)
+  // come su GBA a ogni consegna (questi oggetti si ricevono una volta sola)
+  if ((enhanced_features0 & kFeatures0_SwordAndItems) && IsMagicItemReceipt(j)) {
     link_magic_filler = 0x80;
+    if (j == 1 && link_health_current < link_health_capacity)
+      link_hearts_filler = 0xa0;
+  }
+  // l'Arco arriva con 10 frecce, come su GBA (0x80ad638)
+  if ((enhanced_features0 & kFeatures0_SwordAndItems) && j == 0x0b)
+    link_arrow_filler = 10;
   if (!sign8(v))
     *p = v;
 

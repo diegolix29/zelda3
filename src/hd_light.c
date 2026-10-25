@@ -13,12 +13,13 @@
 
 bool g_dynamic_light;
 
-enum { kMaxLights = 220, kMaxDecor = 24 };
+enum { kMaxLights = 480, kMaxDecor = 24 };
 
 // Torce a muro e bracieri decorativi trovati nella mappa della stanza
 typedef struct DecorLight {
   uint16 x, y;   // centro della fiamma, in pixel dentro la stanza (0-511)
   uint8 phase;   // sfasamento della pulsazione
+  int8 dir;      // verso della fiamma e delle braci: -1 sinistra, 1 destra (pareti laterali), 2 in basso (parete sud)
 } DecorLight;
 
 static DecorLight g_decor[kMaxDecor];
@@ -41,6 +42,10 @@ static int g_num_lights;
 // stessa, chiara, e con il raggio piccolo
 enum { kMaxFairies = 16 };
 static float g_fairy_x[kMaxFairies], g_fairy_y[kMaxFairies], g_fairy_m[kMaxFairies];
+// raggio dell'alone (9 la fata piccola, 24 la grande fata: circa 2,7 volte piu'
+// grande) e meta' lato del riquadro in cui si controlla che si veda
+static float g_fairy_r[kMaxFairies];
+static int g_fairy_box[kMaxFairies];
 static int g_num_fairies;
  // Luce ambiente delle stanze buie: come nel gioco originale la stanza resta
 // leggibile anche senza Lanterna, le fiamme e la Lanterna fanno il resto
@@ -52,15 +57,21 @@ static float g_ambient = 1.0f;        // luce ambiente attuale (si avvicina grad
 static float g_ambient_sub = 0.0f;
 static int g_ambient_place = -1;      // stanza (o -2 all'aperto) a cui si riferisce g_ambient
 static bool g_dark_override;          // buio originale sospeso durante il disegno
+static bool g_lit_dark_room;          // stanza buia gia' illuminata del tutto dalle torce
 static uint8 g_saved_fixed[3], g_saved_sub_enabled;
 static float *g_factor;               // fattori di luce per pixel (3 canali)
 static int g_factor_cap;
+int g_hd_light_sub;
 
 static bool InGameplay(int *mod_out) {
   int mod = main_module_index;
   if (mod == 14) {
     int sub = submodule_index;
-    if (sub != 1 && sub != 2 && sub != 11)
+    // mappa del labirinto (Module0E_03): nelle dissolvenze di apertura (fase 0)
+    // e di chiusura (fasi 7-8) si vede ancora la stanza. Senza luci tornava per
+    // un attimo il cono della Lanterna del gioco
+    bool dung_map_fade = sub == 3 && (overworld_map_state == 0 || overworld_map_state >= 7);
+    if (sub != 1 && sub != 2 && sub != 11 && !dung_map_fade)
       return false;  // mappe e altri menu: niente luci
     mod = saved_module_for_menu;
   }
@@ -74,6 +85,21 @@ static bool InGameplay(int *mod_out) {
 // Stanza buia del gioco (serve la Lanterna o le torce)
 static bool IsDarkRoom(int mod) {
   return mod == 7 && dung_want_lights_out;
+}
+
+// Passaggio con dissolvenza fra le stanze (Module07_02, da e verso le stanze
+// buie): il gioco carica subito la stanza nuova, buio compreso, mentre quella
+// vecchia sta ancora sfumando (fasi 0-2, la 2 e' Module07_02_FadedFilter, un
+// filtro della palette). Fino al nero la stanza vecchia tiene la sua luce
+// (prima diventava nera al primo fotogramma)
+static bool g_fade_dark;              // stanza buia, quella di prima durante la dissolvenza
+
+static bool FadeHoldsOldRoom(void) {
+  return main_module_index == 7 && submodule_index == 2 && subsubmodule_index <= 2;
+}
+
+static bool RoomLooksDark(int mod) {
+  return FadeHoldsOldRoom() ? g_fade_dark : IsDarkRoom(mod);
 }
 
 // Torce accendibili della stanza. Il gioco azzera la fine dell'elenco subito
@@ -111,13 +137,15 @@ typedef struct DecorShape {
   uint8 dx1, dy1;        // posizione del secondo tile rispetto al primo
   uint8 cx, cy;          // centro della fiamma in pixel rispetto al primo tile
   uint16 t0, t1;
+  bool side;             // torcia su una parete laterale (vedi DecorLight.dir)
+  bool down;             // torcia sulla parete sud, fiamma rivolta in basso
 } DecorShape;
 
 static const DecorShape kDecorShapes[] = {
   { 1, 0x55, 0, 1, 1, 0, 16, 8 },   // torce a muro sulle pareti nord/sud (4x2 tile)
-  { 1, 0x56, 0, 1, 1, 0, 16, 8 },
-  { 1, 0x7f, 0, 4, 1, 0, 8, 16 },   // torce a muro sulle pareti ovest/est (2x4 tile)
-  { 1, 0x80, 0, 4, 1, 0, 8, 16 },
+  { 1, 0x56, 0, 1, 1, 0, 16, 8, 0, 0, false, true },  // parete sud: caselle ribaltate, fiamma in basso
+  { 1, 0x7f, 0, 4, 1, 0, 8, 16, 0, 0, true },   // torce a muro sulle pareti ovest/est (2x4 tile)
+  { 1, 0x80, 0, 4, 1, 0, 8, 16, 0, 0, true },
   { 3, 0x20, 0, 2, 1, 0, 8, 8 },    // torcia sempre accesa (2x2 tile)
   // Braciere (come quelli del Santuario): 2x4 tile, fiamma nei due tile in alto
   { 0, 0, 0, 0, 1, 0, 8, 8, 0x2dc2, 0x6dc2 },
@@ -127,14 +155,14 @@ static const DecorShape kDecorShapes[] = {
 // stessa torcia puo' essere disegnata sopra o sotto gli sprite
 #define TILE_KEY(t) ((t) & ~0x3c00)
 
-static void AddDecor(int x, int y) {
+static void AddDecor(int x, int y, int dir) {
   for (int i = 0; i < g_num_decor; i++)
     if (abs(g_decor[i].x - x) < 12 && abs(g_decor[i].y - y) < 12)
       return;  // stessa fiamma trovata in entrambi i livelli
   if (g_num_decor >= kMaxDecor)
     return;
   DecorLight *d = &g_decor[g_num_decor++];
-  d->x = x, d->y = y, d->phase = (uint8)(x * 7 + y * 13);
+  d->x = x, d->y = y, d->phase = (uint8)(x * 7 + y * 13), d->dir = (int8)dir;
 }
 
 // Cerca torce e bracieri decorativi nella mappa della stanza (in memoria, quindi
@@ -156,8 +184,10 @@ static void ScanDecorLights() {
       const uint16 *tm = layer ? dung_bg1 : dung_bg2;
       for (int row = 0; row < 64 - sh->dy1; row++) {
         for (int col = 0; col < 64 - sh->dx1; col++) {
+          // la torcia della parete est e' quella della parete ovest ribaltata
+          // (Palazzo della Palude): la fiamma e' disegnata a destra
           if (TILE_KEY(tm[row * 64 + col]) == t0 && TILE_KEY(tm[(row + sh->dy1) * 64 + col + sh->dx1]) == t1)
-            AddDecor(col * 8 + sh->cx, row * 8 + sh->cy);
+            AddDecor(col * 8 + sh->cx, row * 8 + sh->cy, sh->down ? 2 : !sh->side ? 0 : (tm[row * 64 + col] & 0x4000) ? 1 : -1);
         }
       }
     }
@@ -175,12 +205,16 @@ static void AddLight(float x, float y, float radius, float r, float g, float b) 
 HdFire g_hd_fire[kHdMaxFire];
 int g_hd_num_fire;
 
-static void AddFireLight(float x, float y, float radius, float r, float g, float b, float strength) {
+static void AddFireLightDir(float x, float y, float radius, float r, float g, float b, float strength, int dir) {
   AddLight(x, y, radius, r, g, b);
   if (g_hd_num_fire < kHdMaxFire) {
     HdFire *f = &g_hd_fire[g_hd_num_fire++];
-    f->x = x, f->y = y, f->strength = strength;
+    f->x = x, f->y = y, f->strength = strength, f->dir = (int8)dir;
   }
+}
+
+static void AddFireLight(float x, float y, float radius, float r, float g, float b, float strength) {
+  AddFireLightDir(x, y, radius, r, g, b, strength, 0);
 }
 
 static bool IsFireAncilla(int type, float *radius) {
@@ -273,9 +307,9 @@ static void CollectLights(const uint8 *pixels, int pitch, int height, int mod, b
       float ph = d->phase * 0.1f;
       float pulse = 0.82f + 0.12f * sinf(tf * 1.6f + ph) + 0.06f * sinf(tf * 4.1f + ph * 2.0f);
       if (dark)
-        AddFireLight(x, y, 100 * pulse, 1.30f * pulse, 1.05f * pulse, 0.72f * pulse, 0.8f);
+        AddFireLightDir(x, y, 100 * pulse, 1.30f * pulse, 1.05f * pulse, 0.72f * pulse, 0.8f, d->dir);
       else
-        AddFireLight(x, y, 40 * (0.92f + 0.08f * pulse), 0.68f * pulse, 0.44f * pulse, 0.16f * pulse, 0.8f);
+        AddFireLightDir(x, y, 40 * (0.92f + 0.08f * pulse), 0.68f * pulse, 0.44f * pulse, 0.16f * pulse, 0.8f, d->dir);
     }
     // Link con la Lanterna (nelle stanze buie); senza Lanterna una luce minima
     if (dark) {
@@ -365,7 +399,10 @@ static void CollectSpriteLights(bool dark, int ext, int cam_x, int cam_y, float 
   // Fate: un bagliore appena piu' piccolo dello sprite che pulsa come le torce
   // (stessa formula: intensita' e grandezza insieme, due onde sovrapposte)
   for (int k = 0; k < 16; k++) {
-    if (!sprite_state[k] || sprite_type[k] != 0xe3)
+    // 0xe3 fata piccola, 0xc8 grande fata (non la sua nuvola che cura Link,
+    // stesso tipo con sprite_head_dir 1)
+    bool big = sprite_type[k] == 0xc8 && !sprite_head_dir[k];
+    if (!sprite_state[k] || (sprite_type[k] != 0xe3 && !big))
       continue;
     float x = (sprite_x_hi[k] << 8 | sprite_x_lo[k]) + 8 - cam_x + ext;
     float y = (sprite_y_hi[k] << 8 | sprite_y_lo[k]) + 8 - (int8)sprite_z[k] - cam_y;
@@ -373,6 +410,8 @@ static void CollectSpriteLights(bool dark, int ext, int cam_x, int cam_y, float 
     float pulse = 0.82f + 0.12f * sinf(tf * 1.6f + ph) + 0.06f * sinf(tf * 4.1f + ph * 2.0f);
     if (g_num_fairies < kMaxFairies) {
       g_fairy_x[g_num_fairies] = x, g_fairy_y[g_num_fairies] = y;
+      g_fairy_r[g_num_fairies] = big ? 24.0f : 9.0f;
+      g_fairy_box[g_num_fairies] = big ? 11 : 6;
       g_fairy_m[g_num_fairies++] = pulse;
     }
   }
@@ -429,12 +468,47 @@ static bool IsLavaCell(const uint8 *pixels, int pitch, int width, int height, co
   return true;
 }
 
+// Lava visibile sullo schermo nei due tile a partire da (sx-4, sy-4). Gli
+// sprite non contano (Link su un tubo sopra la lava coperta la faceva
+// accendere e spegnere mentre camminava). Si ricorda per la stanza: una
+// cella vista rossa resta visibile (anche nei fotogrammi scuri
+// dell'animazione), una mai vista rossa e' coperta; non ancora vista (fuori
+// dallo schermo o sotto uno sprite) fa luce
+static uint8 g_lava_vis[2][64 * 64];  // 0 non vista, 1 visibile, 2 coperta
+
+static bool LavaShows(const uint8 *pixels, int pitch, int width, int height, int sx, int sy,
+                      int layer, int row, int col) {
+  static const int8 kPts[5][2] = { {4,4},{0,0},{12,0},{0,12},{12,12} };
+  uint8 *vis = &g_lava_vis[layer][row * 64 + col];
+  if (*vis == 1)
+    return true;
+  bool seen = false;
+  for (int i = 0; i < 5; i++) {
+    int x = sx - 4 + kPts[i][0] + 2, y = sy - 4 + kPts[i][1] + 2;
+    if (x < 0 || y < 0 || x >= width || y >= height)
+      continue;
+    uint32 c = ((const uint32 *)(pixels + y * pitch))[x];
+    int l = c >> 24, r = c >> 16 & 255, g = c >> 8 & 255, b = c & 255;
+    if (l == 2 || l == 4 || l == 6)
+      continue;
+    seen = true;
+    if (r > 120 && r > g + 30 && b < r / 2) {
+      *vis = 1;
+      return true;
+    }
+  }
+  if (seen)
+    *vis = 2;
+  return *vis != 2;
+}
+
 static void CollectLavaLights(const uint8 *pixels, int pitch, int width, int height,
                               bool dark, int ext, int cam_x, int cam_y, float t) {
   int ox = BG2HOFS_copy2 & ~0x1ff, oy = BG2VOFS_copy2 & ~0x1ff;  // la telecamera sta sempre dentro la stanza
   if (g_lava_room != dungeon_room_index) {
     g_lava_room = dungeon_room_index;
     memset(g_lava_known, 0, sizeof(g_lava_known));
+    memset(g_lava_vis, 0, sizeof(g_lava_vis));
   }
   for (int layer = 0; layer < 2; layer++) {
     const uint16 *tm = layer ? dung_bg1 : dung_bg2;
@@ -443,6 +517,15 @@ static void CollectLavaLights(const uint8 *pixels, int pitch, int width, int hei
         if (!IsLavaCell(pixels, pitch, width, height, tm, row, col, ox, oy, cam_x, cam_y, ext))
           continue;
         int sx = ox + col * 8 + 4 - cam_x + ext, sy = oy + row * 8 + 4 - cam_y;
+        // solo vicino allo schermo: in alcune stanze (Rocca Tartaruga) la lava
+        // riempie tutta la mappa 64x64 e le prime file esaurivano le luci e le
+        // sorgenti delle braci (braci solo a nord, lava piu' scura in basso)
+        if (sx < -40 || sx > width + 40 || sy < -40 || sy > height + 40)
+          continue;
+        // lava coperta (tubi, pedane, muri del piano di sopra): nessuno dei
+        // punti visibili e' rosso-arancio
+        if (!LavaShows(pixels, pitch, width, height, sx, sy, layer, row, col))
+          continue;
         // vicini a due tile di distanza: quanti sono lava e da che parte
         int n = 0, dx = 0, dy = 0;
         for (int k = 0; k < 8; k++) {
@@ -471,10 +554,11 @@ static void CollectLavaLights(const uint8 *pixels, int pitch, int width, int hei
           continue;
         }
         float pulse = 0.85f + 0.15f * sinf(t * 0.9f + (col + row) * 0.6f);
+        // le luci a due tile di distanza si sommano (circa quattro per punto)
         float m = (dark ? 1.4f : 1.0f) * (0.35f + 0.65f * inner);
         float lx = sx + 4 + (n ? dx * 8.0f / n : 0), ly = sy + 4 + (n ? dy * 8.0f / n : 0);
         AddFireLight(lx, ly, 26 * (0.5f + 0.5f * inner) * (dark ? 1.4f : 1.0f),
-                     0.55f * pulse * m, 0.28f * pulse * m, 0.08f * pulse * m, 0.25f);
+                     0.26f * pulse * m, 0.12f * pulse * m, 0.03f * pulse * m, 0.25f);
       }
     }
   }
@@ -483,7 +567,12 @@ static void CollectLavaLights(const uint8 *pixels, int pitch, int width, int hei
 void HdLight_BeforeRender(Ppu *ppu) {
   g_dark_override = false;
   int mod;
-  if (!g_dynamic_light || !InGameplay(&mod) || !IsDarkRoom(mod))
+  if (!g_dynamic_light)
+    return;
+  // Uscendo da una stanza buia illuminata del tutto (Module0F) il buio del
+  // gioco tornerebbe per la durata della dissolvenza: resta sospeso
+  bool leaving_lit = main_module_index == 15 && g_lit_dark_room && dung_want_lights_out;
+  if (!leaving_lit && (!InGameplay(&mod) || !RoomLooksDark(mod)))
     return;
   // Si sospende il buio originale: sottrazione del colore fisso e cono della
   // Lanterna (BG1 sullo schermo secondario). Lo sostituisce HdLight_Apply.
@@ -503,25 +592,27 @@ void HdLight_AfterRender(Ppu *ppu) {
 
 // Bagliore delle fate: alone rosa chiaro solo sullo sfondo attorno alla fata
 // (i pixel degli sprite, livello 4 e 6, restano con i loro colori), raggio fino
-// a 9 pixel, che cresce e cala con la pulsazione
+// a 9 pixel (24 per la grande fata), che cresce e cala con la pulsazione
 static void ApplyFairyGlow(uint8 *pixels, int pitch, int width, int height) {
-  enum { kRadius = 9 };
   for (int i = 0; i < g_num_fairies; i++) {
     int cx = (int)g_fairy_x[i], cy = (int)g_fairy_y[i];
     float m = g_fairy_m[i];
-    float rad = kRadius * m, inv_r2 = 1.0f / (rad * rad);
+    int kRadius = (int)g_fairy_r[i] + 1, box = g_fairy_box[i];
+    float rad = g_fairy_r[i] * m, inv_r2 = 1.0f / (rad * rad);
+    // l'alone grande, piu' esteso, e' appena meno intenso al centro
+    float peak = box > 6 ? m * 0.9f : m;
     // solo se la fata si vede: nascosta (per esempio sotto la chioma di un
     // albero, che il gioco disegna sopra gli sprite) non fa luce
     int seen = 0;
-    for (int y = cy - 6; y <= cy + 6; y++) {
+    for (int y = cy - box; y <= cy + box; y++) {
       if (y < 0 || y >= height)
         continue;
       const uint32 *row = (const uint32 *)(pixels + y * pitch);
-      for (int x = cx - 6; x <= cx + 6; x++)
+      for (int x = cx - box; x <= cx + box; x++)
         if (x >= 0 && x < width && ((row[x] >> 24) == 4 || (row[x] >> 24) == 6))
           seen++;
     }
-    if (seen < 12)
+    if (seen < (box > 6 ? 40 : 12))
       continue;
     for (int y = cy - kRadius; y <= cy + kRadius; y++) {
       if (y < 0 || y >= height)
@@ -534,7 +625,7 @@ static void ApplyFairyGlow(uint8 *pixels, int pitch, int width, int height) {
         float d2 = (float)((x - cx) * (x - cx) + (y - cy) * (y - cy)) * inv_r2;
         if (d2 >= 1.0f)
           continue;
-        float a = (1.0f - d2) * m;
+        float a = (1.0f - d2) * peak;
         uint32 c = row[x];
         int r = ((c >> 16) & 0xff) + (int)(85 * a), g = ((c >> 8) & 0xff) + (int)(65 * a), b = (c & 0xff) + (int)(90 * a);
         row[x] = (c & 0xff000000) | (r > 255 ? 255 : r) << 16 | (g > 255 ? 255 : g) << 8 | (b > 255 ? 255 : b);
@@ -547,6 +638,11 @@ static void ApplyLights(uint8 *pixels, int pitch, int width, int height, int bia
 
 void HdLight_Apply(uint8 *pixels, int pitch, int width, int height, int bias_x, int bias_y) {
   ApplyLights(pixels, pitch, width, height, bias_x, bias_y);
+}
+
+// L'alone delle fate va dopo l'acqua HD (hd_water.c): fatto prima, sui pixel
+// schiariti l'acqua HD non si disegnava e si vedeva quella del gioco
+void HdLight_FairyGlow(uint8 *pixels, int pitch, int width, int height) {
   if (g_dynamic_light)
     ApplyFairyGlow(pixels, pitch, width, height);
   g_num_fairies = 0;
@@ -555,22 +651,54 @@ void HdLight_Apply(uint8 *pixels, int pitch, int width, int height, int bias_x, 
 static void ApplyLights(uint8 *pixels, int pitch, int width, int height, int bias_x, int bias_y) {
   int mod;
   g_hd_num_fire = 0;
-  if (!InGameplay(&mod) || (!g_dynamic_light && !g_fx_embers)) {
+  g_hd_light_sub = 0;
+  if (!InGameplay(&mod) || (!g_dynamic_light && !g_fx_heat)) {
     g_ambient = 1.0f;
     g_ambient_sub = 0.0f;
     g_ambient_place = -1;
     return;
   }
   bool dark = IsDarkRoom(mod);
+  bool hold_old = FadeHoldsOldRoom();
+  if (hold_old)
+    dark = g_fade_dark;
+  else
+    g_fade_dark = dark;
   // Le stanze buie da Lanterna (nel gioco si vede solo il cono di luce) sono
   // completamente al buio; le altre (per esempio il passaggio segreto sotto
   // il castello) restano solo in penombra
   float dark_ambient = hdr_dungeon_dark_with_lantern ? 0.0f : kDarkAmbient;
+  // Durante i passaggi fra le stanze (scale, porte) il gioco azzera per un
+  // po' hdr_dungeon_dark_with_lantern anche se la stanza e' buia: la stanza
+  // da Lanterna saliva alla penombra mentre Link usciva. Si tiene il valore
+  // di prima finche' il passaggio non e' finito
+  static float g_dark_hold;
+  static bool g_snap_pending;
+  // Entrando in una stanza da Lanterna il valore arriva gia' durante la
+  // dissolvenza: vale il piu' buio dei due (la stanza compariva in penombra
+  // e diventava nera di colpo a passaggio finito)
+  bool passing = main_module_index == 7 && submodule_index != 0;
+  if (passing) {
+    if (dark_ambient < g_dark_hold)
+      g_dark_hold = dark_ambient;
+    dark_ambient = g_dark_hold;
+  } else {
+    g_dark_hold = dark_ambient;
+  }
   // Luce ambiente desiderata
   float target = 1.0f, target_sub = 0.0f;
   if (dark) {
     int total, lit;
     CountTorches(&total, &lit);
+    // Torce sempre accese (oggetto 0x20, per esempio nella bottega delle pozioni):
+    // il gioco le conta in dung_num_lit_torches ma non sono fra quelle accendibili.
+    // Contano come accese, e se tutte le torce della stanza sono accese la
+    // stanza e' illuminata del tutto
+    int fixed = dung_num_lit_torches - lit;
+    if (fixed > 0) {
+      lit += fixed;
+      total += fixed;
+    }
     // Come nel gioco ogni torcia accesa, fino a 3, schiarisce un po' tutta la
     // stanza (colore fisso sottratto 31, 8, 4, 0: kLitTorchesColorPlus). In una
     // stanza con meno di 3 torce accenderle tutte la illumina del tutto.
@@ -589,8 +717,19 @@ static void ApplyLights(uint8 *pixels, int pitch, int width, int height, int bia
   // solo dentro la stessa stanza, accendendo le torce: entrando in una stanza
   // o in una grotta la luce e' subito quella giusta (una stanza buia parte buia)
   int place = mod == 7 ? dungeon_room_index : -2;
+  if (hold_old) {
+    target = g_ambient, target_sub = g_ambient_sub;
+    place = g_ambient_place;
+  }
   if (place != g_ambient_place) {
     g_ambient_place = place;
+    g_ambient = target;
+    g_ambient_sub = target_sub;
+    g_snap_pending = passing;
+  }
+  // nella stanza nuova la luce e' subito quella giusta, anche durante il passaggio
+  if (g_snap_pending) {
+    g_snap_pending = passing;
     g_ambient = target;
     g_ambient_sub = target_sub;
   }
@@ -600,6 +739,7 @@ static void ApplyLights(uint8 *pixels, int pitch, int width, int height, int bia
   g_ambient_sub += (target_sub - g_ambient_sub) * 0.06f;
   if (fabsf(target_sub - g_ambient_sub) < 0.5f)
     g_ambient_sub = target_sub;
+  g_lit_dark_room = dark && g_ambient >= 0.999f && g_ambient_sub == 0.0f;
 
   CollectLights(pixels, pitch, height, mod, dark, width, bias_x, bias_y);
   {
@@ -622,6 +762,7 @@ static void ApplyLights(uint8 *pixels, int pitch, int width, int height, int bia
   // torcia (sub 100) un colore 100 diventa 25 e uno 140 diventa 75
   float extra = g_ambient_sub * (0.85f / 100.0f);
   int sub = (int)(g_ambient_sub + 0.5f);
+  g_hd_light_sub = sub;
   int n = width * height;
   if (n * 3 > g_factor_cap) {
     free(g_factor);
@@ -638,14 +779,26 @@ static void ApplyLights(uint8 *pixels, int pitch, int width, int height, int bia
     float k = (g_ambient - dark_ambient) / (1.0f - dark_ambient);
     light_scale = 1.0f - (k < 0 ? 0 : k > 1 ? 1 : k) * 0.75f;
   }
+  // Nelle stanze buie la luce resta nella stanza (512x512 nel mondo) al centro
+  // dello schermo, come il cono della Lanterna del gioco: passando da una porta
+  // le fasce dello schermo largo mostrano gia' la stanza vicina, che la luce
+  // illuminava (si vedeva un pezzo dell'altra stanza)
+  int box_x0 = 0, box_y0 = 0, box_x1 = width - 1, box_y1 = height - 1;
+  if (dark) {
+    int ext = (width - 256) / 2;
+    int cam_x = BG2HOFS_copy2 + bias_x, cam_y = BG2VOFS_copy2 + bias_y;
+    int rx = (cam_x + 128) & ~511, ry = (cam_y + 112) & ~511;
+    box_x0 = IntMax(rx - cam_x + ext, 0), box_x1 = IntMin(rx + 511 - cam_x + ext, width - 1);
+    box_y0 = IntMax(ry - cam_y, 0), box_y1 = IntMin(ry + 511 - cam_y, height - 1);
+  }
   for (int li = 0; li < g_num_lights; li++) {
     Light *l = &g_lights[li];
     int x0 = (int)(l->x - l->radius), x1 = (int)(l->x + l->radius);
     int y0 = (int)(l->y - l->radius), y1 = (int)(l->y + l->radius);
-    if (x0 < 0) x0 = 0;
-    if (y0 < 0) y0 = 0;
-    if (x1 > width - 1) x1 = width - 1;
-    if (y1 > height - 1) y1 = height - 1;
+    if (x0 < box_x0) x0 = box_x0;
+    if (y0 < box_y0) y0 = box_y0;
+    if (x1 > box_x1) x1 = box_x1;
+    if (y1 > box_y1) y1 = box_y1;
     float inv_r2 = 1.0f / (l->radius * l->radius);
     for (int y = y0; y <= y1; y++) {
       float dy = y - l->y;

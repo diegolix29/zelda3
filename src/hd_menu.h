@@ -13,6 +13,8 @@ void Host_SetDisplayPerf(bool on);
 int Host_GetVolume();
 void Host_AdjustVolume(int step);
 bool Host_IsOpenGL();
+// Disegno con uno shader GLSL (per esempio Four Swords)
+bool Host_HasShader();
 uint32 Host_GetPpuRenderFlags();
 void Host_SetPpuRenderFlags(uint32 flags);
 void Host_ClearInputs();

@@ -1613,6 +1613,11 @@ void FloodDam_PrepFloodHDMA() {  // 80f734
       hdma_table_dynamic[a >> 1] = r12 == 0xffff ? 0xff : r12;
     }
   } while (++r4 < 225);
+  // schermo alto 240 righe: le righe 225-239 (che sullo SNES non si vedono)
+  // restavano con la tabella di prima, aperta, e l'acqua compariva in basso
+  // prima che ci arrivasse il getto. Continuano l'ultima riga
+  for (r4 = 225; r4 < 240; r4++)
+    hdma_table_dynamic[r4] = hdma_table_dynamic[224];
 }
 
 void ResetStarTileGraphics() {  // 80fda4

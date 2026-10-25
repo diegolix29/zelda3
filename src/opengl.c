@@ -286,7 +286,10 @@ static void OpenGLRenderer_EndDraw() {
     glViewport(x0, y0, x1 - x0, y1 - y0);
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, g_overlay_texture);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);  // i trasparenti sono neri: colori premoltiplicati
     DrawQuad();
+    glDisable(GL_BLEND);
     glBindTexture(GL_TEXTURE_2D, g_texture.gl_texture);
   }
 
@@ -299,6 +302,11 @@ static const struct RendererFuncs kOpenGLRendererFuncs = {
   &OpenGLRenderer_BeginDraw,
   &OpenGLRenderer_EndDraw,
 };
+
+// Shader GLSL caricato (per esempio Four Swords)
+bool OpenGLRenderer_HasShader(void) {
+  return g_glsl_shader != NULL;
+}
 
 void OpenGLRenderer_Create(struct RendererFuncs *funcs, bool use_opengl_es) {
   g_opengl_es = use_opengl_es;

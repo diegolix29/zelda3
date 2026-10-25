@@ -35,14 +35,30 @@ static bool ModernHudOn(void) {
   return (enhanced_features0 & kFeatures0_ModernHud) != 0;
 }
 
+// Moduli di gioco: labirinti (7), esterno (9) e aree speciali (11: Dominio
+// di Zora, sotto il ponte, Piedistallo...)
+static bool IsPlayModule(int mod) {
+  return mod == 7 || mod == 9 || mod == 11;
+}
+
+// Mappa del labirinto (14/3) e del mondo (14/7): mentre lo schermo si scurisce
+// e (labirinto) si riaccende si vede ancora il gioco; li' tornava l'HUD originale
+static bool MapFadeShowsGame(void) {
+  if (main_module_index != 14 || !IsPlayModule(saved_module_for_menu))
+    return false;
+  if (submodule_index == 3)
+    return overworld_map_state == 0 || overworld_map_state >= 6;
+  return submodule_index == 7 && overworld_map_state == 0;
+}
+
 // Durante il gioco e nei dialoghi (non nei menu, sulla mappa o nei titoli)
 static bool HudContext(bool *in_dialog) {
   int mod = main_module_index;
   *in_dialog = false;
   // 15 e 16: il cerchio che si chiude e si riapre entrando e uscendo
-  if (mod == 7 || mod == 9 || mod == 15 || mod == 16)
+  if (IsPlayModule(mod) || mod == 15 || mod == 16 || MapFadeShowsGame())
     return true;
-  if (mod == 14 && submodule_index == 2 && (saved_module_for_menu == 7 || saved_module_for_menu == 9)) {
+  if (mod == 14 && submodule_index == 2 && IsPlayModule(saved_module_for_menu)) {
     *in_dialog = true;
     return true;
   }
@@ -53,7 +69,7 @@ static bool HudContext(bool *in_dialog) {
 // scorrerebbe insieme ai riquadri, quindi resta nascosto anche li'
 static bool InGameMenu(void) {
   return main_module_index == 14 && (submodule_index == 1 || submodule_index == 11) &&
-         (saved_module_for_menu == 7 || saved_module_for_menu == 9);
+         IsPlayModule(saved_module_for_menu);
 }
 
 void HdHud_BeforeRender(Ppu *ppu) {
@@ -80,7 +96,7 @@ void HdHud_CanTalk(void) {
 // Azione del tasto A, calcolata senza cambiare lo stato del gioco
 
 static int ComputeAction(void) {
-  if (main_module_index != 7 && main_module_index != 9)
+  if (!IsPlayModule(main_module_index))
     return kAction_None;
   if (link_player_handler_state == kPlayerState_Swimming)
     return link_item_flippers ? kAction_Swim : kAction_None;
@@ -161,10 +177,16 @@ typedef struct Canvas {
   int oy;  // spostamento verticale (HUD che scivola fuori dallo schermo)
 } Canvas;
 
+// Luminosita' dello schermo (0-15): l'HUD si scurisce con le dissolvenze del
+// gioco (scale, mappa) invece di restare acceso sullo schermo nero
+static int g_hud_bri = 15;
+
 static void Px(Canvas *cv, int x, int y, uint32 color) {
   y += cv->oy;
   if ((unsigned)x >= (unsigned)cv->width || (unsigned)y >= (unsigned)cv->height)
     return;
+  if (g_hud_bri < 15)
+    color = ((color >> 16 & 0xff) * g_hud_bri / 15) << 16 | ((color >> 8 & 0xff) * g_hud_bri / 15) << 8 | (color & 0xff) * g_hud_bri / 15;
   int s = cv->scale;
   for (int yy = 0; yy < s; yy++) {
     uint32 *row = (uint32 *)(cv->pixels + (y * s + yy) * cv->pitch);
@@ -183,6 +205,8 @@ static void DrawTile(Canvas *cv, int x, int y, uint16 entry) {
   Ppu *ppu = g_zenv.ppu;
   int tile = entry & 0x3ff, pal = entry >> 10 & 7;
   bool hf = entry & 0x4000, vf = entry & 0x8000;
+  // cifra al massimo (0x3490 + cifra): il giallo della versione GBA
+  bool max_digit = pal == 5 && (uint16)(tile - 0x90) < 10;
   uint16 base = ppu->bgLayer[2].tileAdr + tile * 8;
   for (int r = 0; r < 8; r++) {
     uint16 w = ppu->vram[(base + (vf ? 7 - r : r)) & 0x7fff];
@@ -190,7 +214,7 @@ static void DrawTile(Canvas *cv, int x, int y, uint16 entry) {
       int bit = hf ? c : 7 - c;
       int v = (w >> bit & 1) | (w >> (8 + bit) & 1) << 1;
       if (v)
-        Px(cv, x + c, y + r, Bgr15ToRgb(ppu->cgram[pal * 4 + v]));
+        Px(cv, x + c, y + r, (max_digit && v == 2) ? 0xffde52 : Bgr15ToRgb(ppu->cgram[pal * 4 + v]));
     }
   }
 }
@@ -214,8 +238,10 @@ static void DecodeTile(uint16 entry, uint32 *out, int stride) {
 // Icona 16x16 di un oggetto (caselle: su-sx, su-dx, giu'-sx, giu'-dx). Il nero
 // e' lo sfondo del riquadro dell'HUD: diventa tutto trasparente, anche quello
 // chiuso dentro l'icona (per esempio fra l'arco e la corda o nel vetro della
-// lanterna), e solo all'esterno dell'icona si aggiunge un contorno nero di 1
-// pixel che la tiene leggibile: i buchi interni restano trasparenti.
+// lanterna). Attorno a ogni pixel dell'icona, fuori e dentro, si aggiunge un
+// contorno nero di 1 pixel che la tiene leggibile: senza, nei buchi piccoli
+// (il collo del sacchetto delle bombe) il colore del tasto sembrava una
+// macchia dentro l'oggetto. Nei buchi grandi resta il colore del tasto al centro.
 static void DrawIcon(Canvas *cv, int x, int y, const uint16 *t) {
   uint32 img[16 * 16];
   DecodeTile(t[0], img, 16);
@@ -227,28 +253,9 @@ static void DrawIcon(Canvas *cv, int x, int y, const uint16 *t) {
     if (((c >> 16 & 0xff) + (c >> 8 & 0xff) + (c & 0xff)) < 40)
       img[i] = 0;
   }
-  // esterno: pixel trasparenti raggiungibili dal bordo (griglia 18x18 con cornice)
-  // (ogni pixel entra nella pila una sola volta: viene segnato quando ci entra)
-  uint8 outside[18 * 18] = { 0 };
-  int stack[18 * 18], n = 0;
-  outside[0] = 1, stack[n++] = 0;
-  while (n) {
-    int i = stack[--n];
-    int nb[4] = { i >= 18 ? i - 18 : -1, i < 17 * 18 ? i + 18 : -1,
-                  i % 18 > 0 ? i - 1 : -1, i % 18 < 17 ? i + 1 : -1 };
-    for (int k = 0; k < 4; k++) {
-      int j = nb[k];
-      if (j < 0 || outside[j])
-        continue;
-      int r = j / 18 - 1, c = j % 18 - 1;
-      if (r >= 0 && r < 16 && c >= 0 && c < 16 && img[r * 16 + c])
-        continue;
-      outside[j] = 1, stack[n++] = j;
-    }
-  }
   for (int r = -1; r <= 16; r++)
     for (int c = -1; c <= 16; c++) {
-      if (!outside[(r + 1) * 18 + (c + 1)])
+      if (r >= 0 && r < 16 && c >= 0 && c < 16 && img[r * 16 + c])
         continue;
       bool near = false;
       for (int k = 0; k < 4 && !near; k++) {
@@ -371,28 +378,10 @@ static bool ShowMaxInYellow(int value, int max) {
   return (enhanced_features0 & kFeatures0_ShowMaxItemsInYellow) && value == max;
 }
 
-// Il giallo delle cifre del gioco (le rupie al massimo, DrawNumberTiles): il
-// colore piu' chiaro della cifra 8 con la palette gialla, cosi' i numeri
-// piccoli di bombe e frecce hanno lo stesso giallo anche con i colori della mod
+// Il giallo delle cifre al massimo come nella versione GBA (anche per i
+// numeri piccoli di bombe e frecce nei tasti)
 static uint32 YellowDigitColor(void) {
-  Ppu *ppu = g_zenv.ppu;
-  const int pal = 0x3490 >> 10 & 7;
-  uint16 base = ppu->bgLayer[2].tileAdr + 0x98 * 8;
-  uint32 best = 0xf8d828;
-  int best_l = -1;
-  for (int r = 0; r < 8; r++) {
-    uint16 w = ppu->vram[(base + r) & 0x7fff];
-    for (int bit = 0; bit < 8; bit++) {
-      int v = (w >> bit & 1) | (w >> (8 + bit) & 1) << 1;
-      if (!v)
-        continue;
-      uint32 c = Bgr15ToRgb(ppu->cgram[pal * 4 + v]);
-      int l = (c >> 16 & 0xff) * 3 + (c >> 8 & 0xff) * 6 + (c & 0xff);
-      if (l > best_l)
-        best = c, best_l = l;
-    }
-  }
-  return best;
+  return 0xffde52;
 }
 
 // Oggetto dentro un tasto 18x18, con il numero se e' un consumabile; gli
@@ -436,6 +425,9 @@ void HdHud_Draw(uint8 *pixels, int pitch, int width, int height, int scale) {
   Ppu *ppu = g_zenv.ppu;
   if (!(ppu->screenEnabled[0] & 4) || ppu->mode == 7)
     return;  // il gioco stesso non mostra l'HUD (scene, mappa...)
+  g_hud_bri = ppu->forcedBlank ? 0 : ppu->brightness;
+  if (g_hud_bri == 0)
+    return;
   // Nei dialoghi l'HUD scivola fuori dallo schermo (in alto i cuori e i
   // tasti, in basso rupie e chiavi) e rientra quando il dialogo finisce
   static float slide;
@@ -553,7 +545,7 @@ void HdHud_Draw(uint8 *pixels, int pitch, int width, int height, int scale) {
     int ry = H - margin - 8;
     DrawTile(&cvb, x0, ry, 0x3ca8);
     int max_rupees = (enhanced_features0 & kFeatures0_CarryMoreRupees) ? 9999 : 999;  // come MaxRupees (hud.c)
-    DrawNumberTiles(&cvb, x0 + 10, ry, link_rupees_actual, 3, ShowMaxInYellow(link_rupees_actual, max_rupees));
+    DrawNumberTiles(&cvb, x0 + 10, ry, link_rupees_actual, 3, ShowMaxInYellow(link_rupees_goal, max_rupees));
     if (link_num_keys != 0xff) {
       DrawTile(&cvb, x0, ry - 10, 0x2871);
       DrawNumberTiles(&cvb, x0 + 10, ry - 10, link_num_keys, 1, false);

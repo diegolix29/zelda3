@@ -321,6 +321,8 @@ static bool ParseBoolBit(const char *value, uint32 *data, uint32 mask) {
   return true;
 }
 
+static bool g_fx_heat_key_seen;  // l'ini ha gia' FxHeatAndFlames
+
 static bool HandleIniConfig(int section, const char *key, char *value) {
   if (section == 0) {
     for (int i = 0; i < countof(kKeyNameId); i++) {
@@ -387,16 +389,25 @@ static bool HandleIniConfig(int section, const char *key, char *value) {
       return true;
     } else if (StringEqualsNoCase(key, "DimFlashes")) {
       return ParseBoolBit(value, &g_config.features0, kFeatures0_DimFlashes);
-    } else if (StringEqualsNoCase(key, "FxEmbers")) {
-      return ParseBool(value, &g_config.fx_embers);
+    } else if (StringEqualsNoCase(key, "FxHeatAndFlames")) {
+      g_fx_heat_key_seen = true;
+      return ParseBool(value, &g_config.fx_heat);
+    } else if (StringEqualsNoCase(key, "FxEmbers") || StringEqualsNoCase(key, "FxHeatHaze")) {
+      // vecchie opzioni separate, ora dentro FxHeatAndFlames (che vince se c'e')
+      bool on;
+      if (!ParseBool(value, &on))
+        return false;
+      if (!g_fx_heat_key_seen)
+        g_config.fx_heat = on;
+      return true;
     } else if (StringEqualsNoCase(key, "FxWindowRays")) {
       return ParseBool(value, &g_config.fx_window_rays);
     } else if (StringEqualsNoCase(key, "FxItemGlow")) {
       return ParseBool(value, &g_config.fx_item_glow);
-    } else if (StringEqualsNoCase(key, "FxHeatHaze")) {
-      return ParseBool(value, &g_config.fx_heat_haze);
     } else if (StringEqualsNoCase(key, "FxRain")) {
       return ParseBool(value, &g_config.fx_rain);
+    } else if (StringEqualsNoCase(key, "FxWater")) {
+      return ParseBool(value, &g_config.fx_water);
     } else if (StringEqualsNoCase(key, "FxMenuBlur")) {
       return ParseBool(value, &g_config.fx_menu_blur);
     } else if (StringEqualsNoCase(key, "FxSpriteShadows")) {
@@ -405,6 +416,8 @@ static bool HandleIniConfig(int section, const char *key, char *value) {
       return ParseBool(value, &g_config.fx_soft_iris);
     } else if (StringEqualsNoCase(key, "FxButtonHints")) {
       return ParseBool(value, &g_config.fx_button_hints);
+    } else if (StringEqualsNoCase(key, "FxWhirlpoolGlow")) {
+      return ParseBool(value, &g_config.fx_whirlpool);
     } else if (StringEqualsNoCase(key, "DynamicLighting")) {
       return ParseBool(value, &g_config.dynamic_light);
     } else if (StringEqualsNoCase(key, "HighRefreshInterpolation")) {
@@ -506,6 +519,8 @@ static bool HandleIniConfig(int section, const char *key, char *value) {
       return ParseBoolBit(value, &g_config.features0, kFeatures0_SwordAndItems);
     } else if (StringEqualsNoCase(key, "CollectItemsWithSword") || StringEqualsNoCase(key, "BreakPotsWithSword")) {
       return true;  // vecchie opzioni, ora dentro SwordAndItemsInteraction
+    } else if (StringEqualsNoCase(key, "SaveHeartsAndMagic")) {
+      return ParseBoolBit(value, &g_config.features0, kFeatures0_SaveHeartsAndMagic);
     } else if (StringEqualsNoCase(key, "DisableLowHealthBeep")) {
       return ParseBoolBit(value, &g_config.features0, kFeatures0_DisableLowHealthBeep);
     } else if (StringEqualsNoCase(key, "SkipIntroOnKeypress")) {
@@ -532,6 +547,14 @@ static bool HandleIniConfig(int section, const char *key, char *value) {
       return ParseBoolBit(value, &g_config.features0, kFeatures0_ModernHud);
     } else if (StringEqualsNoCase(key, "DungeonNames")) {
       return ParseBoolBit(value, &g_config.features0, kFeatures0_DungeonNames);
+    } else if (StringEqualsNoCase(key, "ExtendedInventory")) {
+      return ParseBoolBit(value, &g_config.features0, kFeatures0_ExtendedInventory);
+    } else if (StringEqualsNoCase(key, "ImprovedWorldMap")) {
+      return ParseBoolBit(value, &g_config.features0, kFeatures0_ImprovedWorldMap);
+    } else if (StringEqualsNoCase(key, "ImprovedDungeonMap")) {
+      return ParseBoolBit(value, &g_config.features0, kFeatures0_ImprovedDungeonMap);
+    } else if (StringEqualsNoCase(key, "ProgressiveMap")) {
+      return ParseBoolBit(value, &g_config.features0, kFeatures0_ProgressiveMap);
     } else if (StringEqualsNoCase(key, "BurnAndFreezeInteraction")) {
       return ParseBoolBit(value, &g_config.features0, kFeatures0_BurnAndFreeze);
     } else if (StringEqualsNoCase(key, "ShowXLRItemsInHud")) {

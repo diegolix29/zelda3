@@ -31,6 +31,8 @@
 #include "ancilla.h"
 #include "misc.h"
 #include "nmi.h"
+#include "hd_menu.h"
+#include "hd_water.h"
 
 uint8 Overworld_AreaHead(int square);
 extern int g_cam_dx, g_cam_dy;          // vista rispetto alla telecamera del gioco (zelda_rtl.c)
@@ -86,7 +88,69 @@ bool HdWorld_Active(void) {
 // suoi pixel; a quelli presi dalle immagini delle aree si applica qui.
 static int g_bright = 15;
 
+// Filtro dei colori del mulinello (Module09_2E_Whirlpool): il gioco aggiunge
+// blu a tutta la palette, poi toglie rosso e verde e li rimette. Non e' una
+// dissolvenza uniforme: per ogni canale si confrontano i colori della palette
+// (aux_palette_buffer, quelli dell'area) con quelli filtrati
+// (main_palette_buffer) e si applica la stessa differenza ai pixel presi dalle
+// immagini delle aree, altrimenti nello schermo largo le colonne oltre il
+// bordo dell'area restano con i colori normali
+static bool g_pal_map_on;
+static int16 g_pal_add[3][32];  // per canale e valore a 5 bit: da aggiungere (0-255)
+
+static void PreparePaletteMap(void) {
+  g_pal_map_on = false;
+  if (main_module_index != 9 || submodule_index != 0x2e)
+    return;
+  int sum[3][32] = { { 0 } }, cnt[3][32] = { { 0 } };
+  bool same = true;
+  for (int i = 0x20; i < 0x100; i++) {
+    uint16 c = main_palette_buffer[i], a = aux_palette_buffer[i];
+    if (c != a)
+      same = false;
+    for (int k = 0; k < 3; k++) {
+      int av = a >> (5 * k) & 31;
+      sum[k][av] += (c >> (5 * k) & 31) - av;
+      cnt[k][av]++;
+    }
+  }
+  if (same)
+    return;
+  for (int k = 0; k < 3; k++) {
+    // differenza media per ogni valore; i valori senza colori nella palette
+    // prendono quella dei vicini (interpolata)
+    int prev = -1;
+    for (int v = 0; v < 32; v++) {
+      if (!cnt[k][v])
+        continue;
+      int d = sum[k][v] * 255 / (31 * cnt[k][v]);
+      g_pal_add[k][v] = d;
+      if (prev < 0) {
+        for (int j = 0; j < v; j++)
+          g_pal_add[k][j] = d;
+      } else {
+        for (int j = prev + 1; j < v; j++)
+          g_pal_add[k][j] = g_pal_add[k][prev] + (d - g_pal_add[k][prev]) * (j - prev) / (v - prev);
+      }
+      prev = v;
+    }
+    for (int j = prev + 1; j < 32; j++)
+      g_pal_add[k][j] = prev < 0 ? 0 : g_pal_add[k][prev];
+  }
+  g_pal_map_on = true;
+}
+
 static inline uint32 Dim(uint32 c) {
+  if (g_pal_map_on) {
+    int ch[3] = { c & 255, c >> 8 & 255, c >> 16 & 255 };  // blu, verde, rosso
+    for (int k = 0; k < 3; k++) {
+      // canale k della palette SNES: 0 rosso, 1 verde, 2 blu
+      int *p = &ch[2 - k];
+      int v = *p + g_pal_add[k][*p >> 3];
+      *p = v < 0 ? 0 : v > 255 ? 255 : v;
+    }
+    c = (c & 0xff000000) | ch[2] << 16 | ch[1] << 8 | ch[0];
+  }
   if (g_bright >= 15)
     return c;
   uint32 r = (c >> 16 & 255) * g_bright / 15, g = (c >> 8 & 255) * g_bright / 15, b = (c & 255) * g_bright / 15;
@@ -101,11 +165,193 @@ static bool InTransition(void) {
 // Perduto): il numero dell'area cambia subito, mentre la memoria video resta
 // quella vecchia fino al buio
 static bool InMosaicTransition(void) {
-  return main_module_index == 9 && submodule_index >= 13 && submodule_index <= 22;
+  // 31: fine dell'uscita da un'area speciale (vedi InSpecialExit)
+  return main_module_index == 9 && (submodule_index >= 13 && submodule_index <= 22 || submodule_index == 31);
+}
+
+// Uscita da un'area speciale (Dominio di Zora...), modulo 11: l'area nuova
+// arriva a schermo nero (37-40), poi il mosaico si scioglie (41). Il mondo
+// continuo e' ancora spento, ma la vista va gia' dove sara' nell'area
+static bool InSpecialExit(void) {
+  return main_module_index == 11 && submodule_index >= 37 && submodule_index <= 41 &&
+         FeatureOn() && BYTE(overworld_screen_index) < 0x80 && g_zenv.ppu->mode != 7;
 }
 
 bool HdWorld_BackgroundFromImages(void) {
   return HdWorld_Active() && (InTransition() || InMosaicTransition());
+}
+
+// ---------------------------------------------------------------------------
+// Specchio e caselle di teletrasporto (Module09_MirrorWarp, sottomoduli 0x23
+// e 0x2c). Il gioco fa ondeggiare il fondale riga per riga (HDMA sullo
+// scorrimento orizzontale di BG1 e BG2) e lo schiarisce fino al bianco
+// avvicinando i colori delle palette al bianco di un passo per volta; il
+// mondo nuovo arriva a schermo tutto bianco (AnimateMirrorWarp, fase 8).
+// Regola fissa per le aggiunte HD: la PPU disegna il frame senza onda e con i
+// colori veri, tutte le aggiunte (mondo continuo, acqua, luci, ombre) lavorano
+// su quello come sempre, e alla fine HdWorld_WarpPost applica onda e bianco a
+// tutto insieme, come avrebbe fatto il gioco (HUD escluso, sprite non
+// ondeggiano). Lo shader riceve l'onda di ogni riga e quanto e' bianco lo
+// schermo (HdWorld_WarpRowDx, HdWorld_WarpWhite): le aggiunte restano
+// visibili per tutta l'animazione e la seguono.
+static int16 g_warp_line_hofs[241];
+static int8 g_warp_dx[240];   // spostamento di ogni riga dello schermo
+static float g_warp_dxf[240]; // lo stesso per lo shader
+static int g_warp_white;      // 0-31: quanto il gioco ha aggiunto ai colori
+static int g_warp_floor;      // 0-31: livello sotto cui nessun colore scende
+static bool g_warp_old_world; // prima del cambio: lo schermo mostra il mondo di prima
+static bool g_warp_on;        // animazione in corso in questo frame
+static uint16 g_warp_real_pal[256];  // colori di prima dell'animazione
+static uint16 g_warp_cgram[256];     // colori della PPU durante il disegno
+static uint16 g_warp_bg1, g_warp_bg2;
+static uint8 *g_warp_mask;    // 0 fondale, 1 sprite, 2 HUD (dal frame della PPU)
+static uint32 *g_warp_row;
+static int g_warp_cap;
+
+// Solo con l'acqua realistica o con uno shader: sono loro che ridisegnano lo
+// schermo dopo la PPU. Senza, onda e bianco li fa la PPU come nell'originale.
+static bool InMirrorWarp(void) {
+  return (g_fx_water || Host_HasShader()) && main_module_index == 9 && (submodule_index == 0x23 || submodule_index == 0x2c) &&
+         subsubmodule_index >= 1 && !player_is_indoors && BYTE(overworld_screen_index) < 0x80;
+}
+
+static bool WarpFiltered(int i) {
+  return (i >= 0x20 && i < 0xd8) || (i >= 0xe0 && i < 0xf0);
+}
+
+void HdWorld_WarpBeforeRender(void) {
+  Ppu *ppu = g_zenv.ppu;
+  g_warp_white = g_warp_floor = 0, g_warp_old_world = false;
+  g_warp_on = InMirrorWarp();
+  memset(g_warp_dx, 0, sizeof(g_warp_dx));
+  memset(g_warp_dxf, 0, sizeof(g_warp_dxf));
+  if (!g_warp_on) {
+    memcpy(g_warp_real_pal, main_palette_buffer, sizeof(g_warp_real_pal));
+    return;
+  }
+  bool loaded = overworld_map_state >= 9;
+  if (darkening_or_lightening_screen == 2) {
+    // verso il bianco: ogni colore sale di un passo per palette_filter_countdown
+    g_warp_white = palette_filter_countdown > 31 ? 31 : palette_filter_countdown;
+  } else if (!loaded) {
+    g_warp_floor = 31;  // tutto bianco finche' non arrivano i colori nuovi
+  } else {
+    // dal bianco ai colori nuovi (aux_palette_buffer): ogni colore scende di
+    // un passo e si ferma al suo valore, quindi il colore e' il piu' alto fra
+    // il suo e un livello comune (lo schermo passa per il grigio)
+    for (int i = 0x20; i < 0xd8; i++) {
+      uint16 c = main_palette_buffer[i], a = aux_palette_buffer[i];
+      for (int k = 0; k < 15; k += 5) {
+        int v = c >> k & 31;
+        if (v != (a >> k & 31) && v > g_warp_floor)
+          g_warp_floor = v;
+      }
+    }
+  }
+  g_warp_old_world = overworld_map_state < 7;
+  // la PPU disegna con i colori veri: quelli di prima, poi quelli nuovi
+  const uint16 *real = loaded ? aux_palette_buffer : g_warp_real_pal;
+  memcpy(g_warp_cgram, ppu->cgram, sizeof(g_warp_cgram));
+  for (int i = 0; i < 256; i++)
+    if (WarpFiltered(i))
+      ppu->cgram[i] = real[i];
+  ppu->cgram[0] = real[0x20];  // il fondale segue il colore 0x20 (PaletteFilter_StartBlindingWhite)
+  g_warp_bg1 = BG1HOFS_copy, g_warp_bg2 = BG2HOFS_copy;
+}
+
+// Dopo l'HDMA di ogni riga: si ricorda l'onda e la si toglie
+void HdWorld_WarpLine(int line) {
+  Ppu *ppu = g_zenv.ppu;
+  if ((unsigned)line < 241)
+    g_warp_line_hofs[line] = ppu->bgLayer[1].hScroll;
+  if (g_warp_on && (HDMAEN_copy & 0xc0)) {
+    ppu->bgLayer[0].hScroll = g_warp_bg1;
+    ppu->bgLayer[1].hScroll = g_warp_bg2;
+  }
+}
+
+void HdWorld_WarpAfterRender(void) {
+  if (!g_warp_on)
+    return;
+  memcpy(g_zenv.ppu->cgram, g_warp_cgram, sizeof(g_warp_cgram));
+  if (!(HDMAEN_copy & 0xc0))
+    return;
+  // la riga y dello schermo e' la riga y + 1 della PPU (la riga 0 non si vede)
+  for (int y = 0; y < 240; y++) {
+    int d = (g_warp_line_hofs[y + 1] - BG2HOFS_copy2) & 0x3ff;
+    d = d >= 0x200 ? d - 0x400 : d;
+    d = d < -127 ? -127 : d > 127 ? 127 : d;
+    g_warp_dx[y] = (int8)d;
+    g_warp_dxf[y] = (float)d;
+  }
+}
+
+static bool WarpBuffers(int n, int width) {
+  if (n + width > g_warp_cap) {
+    free(g_warp_mask), free(g_warp_row);
+    g_warp_mask = malloc(n);
+    g_warp_row = malloc((n + width) * 4);
+    g_warp_cap = g_warp_mask && g_warp_row ? n + width : 0;
+  }
+  return g_warp_cap != 0;
+}
+
+// Prima delle aggiunte HD: quali pixel sono sprite e HUD (alcuni effetti poi
+// segnano i loro pixel come sprite, per lo shader)
+void HdWorld_WarpMask(uint8 *pixels, int pitch, int width, int height) {
+  if (!g_warp_on || !WarpBuffers(width * height, width))
+    return;
+  for (int y = 0; y < height; y++) {
+    const uint32 *row = (const uint32 *)(pixels + y * pitch);
+    uint8 *m = g_warp_mask + y * width;
+    for (int x = 0; x < width; x++) {
+      uint32 l = row[x] >> 24;
+      m[x] = l == 2 ? 2 : (l == 4 || l == 6) ? 1 : 0;
+    }
+  }
+}
+
+static inline uint32 WarpWhiten(uint32 c, int add, int lo) {
+  int r = (c >> 16 & 255) + add, g = (c >> 8 & 255) + add, b = (c & 255) + add;
+  r = r > 255 ? 255 : r < lo ? lo : r;
+  g = g > 255 ? 255 : g < lo ? lo : g;
+  b = b > 255 ? 255 : b < lo ? lo : b;
+  return (c & 0xff000000) | r << 16 | g << 8 | b;
+}
+
+void HdWorld_WarpPost(uint8 *pixels, int pitch, int width, int height) {
+  if (!g_warp_on || !g_warp_cap)
+    return;
+  int add = g_warp_white * 255 / 31, lo = g_warp_floor * 255 / 31;
+  bool white = add || lo;
+  for (int y = 0; y < height; y++) {
+    uint32 *row = (uint32 *)(pixels + y * pitch);
+    const uint8 *m = g_warp_mask + y * width;
+    int dx = y < 240 ? g_warp_dx[y] : 0;
+    if (dx)
+      memcpy(g_warp_row, row, width * 4);
+    for (int x = 0; x < width; x++) {
+      if (m[x] == 2)
+        continue;  // l'HUD non ondeggia e non diventa bianco
+      uint32 c = row[x];
+      if (dx && !m[x]) {
+        // il fondale si sposta; dietro gli sprite resta il suo pixel
+        int sx = x + dx;
+        if (sx >= 0 && sx < width && !m[sx])
+          c = g_warp_row[sx];
+      }
+      row[x] = white ? WarpWhiten(c, add, lo) : c;
+    }
+  }
+}
+
+float HdWorld_WarpWhite(void) {
+  int w = g_warp_white > g_warp_floor ? g_warp_white : g_warp_floor;
+  return g_warp_on ? w / 31.0f : 0.0f;
+}
+
+const float *HdWorld_WarpRowDx(void) {
+  return g_warp_dxf;
 }
 
 // ---------------------------------------------------------------------------
@@ -852,7 +1098,11 @@ static bool ShowsRoom(void) {
           (sub == 1 || sub == 2 || sub == 4 || sub == 8 || sub == 9 || sub == 11));
 }
 
+// Le frecce piantate restano solo con "Interazione bruciatura e congelamento"
+// (il mondo reagisce fisicamente); senza, spariscono come nel gioco originale
 static bool ArrowsKept(void) {
+  if (!(enhanced_features0 & kFeatures0_BurnAndFreeze))
+    return false;
   if (player_is_indoors)
     return main_module_index == 7 && !dung_want_lights_out;
   return PersistOn() || KeepInNormalGame();
@@ -1095,7 +1345,8 @@ static int g_last_lx, g_last_ly;   // Link nel frame precedente
 static bool g_vis_valid;
 static int g_prev_mode;
 static int g_prev_module;
-static bool g_vis_glide;           // uscita da una casa: la vista scivola al suo posto
+static int g_prev_area = -1;      // area esterna nel frame precedente
+static bool g_vis_glide;          // uscita da una casa: la vista scivola al suo posto
 
 // Avvicina v a t, muovendosi al massimo quanto Link (m) piu' un quarto di
 // pixel; mentre Link cammina la vista non va mai nel verso opposto al suo,
@@ -1108,6 +1359,8 @@ static float Approach(float v, float t, int m) {
     d = 0;
   return v + d;
 }
+
+static void ClampViewArea(int *cam_x, int *cam_y);
 
 void HdWorld_UpdateCamera(int *cam_x, int *cam_y) {
   int gx = BG2HOFS_copy2, gy = BG2VOFS_copy2;
@@ -1141,9 +1394,21 @@ void HdWorld_UpdateCamera(int *cam_x, int *cam_y) {
              InMosaicTransition() ? 3 : 0;
   int prev_mode = g_prev_mode;
   g_prev_mode = mode;
+  // Col mondo continuo il passaggio fra aree si fa tutto in un frame di gioco
+  // (Overworld_RunScrollTransition): la vista non vede mai la modalita' 2,
+  // il cambio d'area si riconosce dal numero dell'area
+  int area = main_module_index == 9 ? BYTE(overworld_screen_index) : -1;
+  bool area_changed = area >= 0 && g_prev_area >= 0 && area != g_prev_area;
+  g_prev_area = area;
   if (mode == 0) {
     g_vis_valid = false;
     g_world_dx = g_world_dy = 0;
+    if (InSpecialExit()) {
+      int cx = gx, cy = gy;
+      ClampViewArea(&cx, &cy);
+      g_world_dx = cx - gx, g_world_dy = cy - gy;
+      *cam_x = cx, *cam_y = cy;
+    }
     return;
   }
   int z = (allow_scroll_z && link_z_coord != 0xffff) ? link_z_coord : 0;
@@ -1155,6 +1420,15 @@ void HdWorld_UpdateCamera(int *cam_x, int *cam_y) {
     // sposta la sua telecamera nell'area nuova
     if (!g_vis_valid)
       g_vis_x = (float)gx, g_vis_y = (float)gy;
+    // gia' entro i limiti della vista (bordo del mondo, montagna): uscendo
+    // dal Dominio di Zora la telecamera del gioco e' oltre e, finita la
+    // dissolvenza, la vista saltava di 37 pixel
+    if (BYTE(overworld_screen_index) < 0x80) {
+      int cx = (int)floorf(g_vis_x + 0.5f), cy = (int)floorf(g_vis_y + 0.5f), vx = cx, vy = cy;
+      HdWorld_ClampView(&cx, &cy);
+      if (cx != vx) g_vis_x = (float)cx;
+      if (cy != vy) g_vis_y = (float)cy;
+    }
   } else if (mode == 2) {
     // Durante il passaggio fra aree la vista si muove esattamente come Link
     if (g_vis_valid)
@@ -1167,7 +1441,7 @@ void HdWorld_UpdateCamera(int *cam_x, int *cam_y) {
     // lontano da dove Link e' nella vista. Lo si sposta dove Link e' davvero:
     // la vista continua a seguirlo senza recuperi, e la telecamera del gioco
     // riparte quando la vista la raggiunge.
-    if (prev_mode == 2 && g_vis_valid) {
+    if ((prev_mode == 2 || area_changed) && g_vis_valid) {
       int px = lx - (int)floorf(g_vis_x + 0.5f), py = ly - (int)floorf(g_vis_y + 0.5f);
       if (px > 16 && px < 240) {
         camera_x_coord_scroll_hi = gx + px;
@@ -1194,7 +1468,10 @@ void HdWorld_UpdateCamera(int *cam_x, int *cam_y) {
       // scivola dolcemente al suo posto invece di saltare
       g_vis_x = (float)gx, g_vis_y = (float)gy;
       g_vis_glide = true;
-    } else if (!g_vis_valid) {
+    } else if (!g_vis_valid || InFluteArrival()) {
+      // Arrivo con l'uccello: il punto di scorrimento si sistema durante la
+      // discesa, la vista lo segue subito (prima lo recuperava a 1/4 di
+      // pixel per frame e scivolava per secondi dopo l'atterraggio)
       g_vis_x = (float)tx, g_vis_y = (float)ty;
       g_vis_glide = false;
     } else if (g_vis_glide) {
@@ -1244,9 +1521,62 @@ enum { kHiddenRows = 2, kWorldBottom = 4096 - kHiddenRows };
 // gioco mostra qualche riga in piu' (gy), la vista puo' arrivare fin li';
 // in fondo pero' il gioco si ferma contando 224 righe: con 240 la vista sale
 // delle 16 in piu', cosi' l'ultima riga visibile resta quella del gioco.
+// Fra la montagna (0x03, 0x05, 0x07 e le loro parti, anche nel Mondo Oscuro)
+// e la pianura non si passa: il bordo dell'area verso l'altro livello fa da
+// fine del mondo, come per il gioco (nord per le aree sotto la montagna, sud
+// per quelle di montagna, e i lati dove accanto c'e' l'altro livello). Prima la vista mostrava l'altro livello nella
+// nebbia e, uscendo dal Dominio di Zora, partiva dalla telecamera del gioco
+// e poi saltava su
+static bool MountainAbove(int head, int *top) {
+  static const uint8 kMountain[] = { 0x03, 0x04, 0x0b, 0x0c, 0x05, 0x06, 0x0d, 0x0e, 0x07 };
+  int a = head & 0x3f, x, y, s;
+  AreaRect(a, &x, &y, &s);
+  if (y == 0)
+    return false;
+  for (int cx = x; cx < x + s; cx += 512) {
+    int up = ((y - 1) >> 9) * 8 + (cx >> 9);
+    for (int i = 0; i < (int)sizeof(kMountain); i++)
+      if (kMountain[i] == up) {
+        *top = y;
+        return true;
+      }
+  }
+  return false;
+}
+
+static bool IsMountainCell(int cell) {
+  static const uint8 kMountain[] = { 0x03, 0x04, 0x0b, 0x0c, 0x05, 0x06, 0x0d, 0x0e, 0x07 };
+  for (int i = 0; i < (int)sizeof(kMountain); i++)
+    if (kMountain[i] == cell)
+      return true;
+  return false;
+}
+
+// Colonna accanto all'area (cx) con almeno una casella dell'altro livello
+static bool OtherLevelAt(int cx, int y, int s, bool mountain) {
+  if (cx < 0 || cx >= 4096)
+    return false;
+  for (int cy = y; cy < y + s; cy += 512)
+    if (IsMountainCell((cy >> 9) * 8 + (cx >> 9)) != mountain)
+      return true;
+  return false;
+}
+
+static bool PlainBelow(int head, int *bottom) {
+  int a = head & 0x3f, x, y, s;
+  if (a != 0x03 && a != 0x05 && a != 0x07)
+    return false;
+  AreaRect(a, &x, &y, &s);
+  *bottom = y + s;
+  return true;
+}
+
 void HdWorld_ClampView(int *cam_x, int *cam_y) {
-  if (!HdWorld_Active())
-    return;
+  if (HdWorld_Active())
+    ClampViewArea(cam_x, cam_y);
+}
+
+static void ClampViewArea(int *cam_x, int *cam_y) {
   Ppu *ppu = g_zenv.ppu;
   int gx = BG2HOFS_copy2, gy = BG2VOFS_copy2;
   int ext = ppu->extraLeftRight;
@@ -1255,8 +1585,23 @@ void HdWorld_ClampView(int *cam_x, int *cam_y) {
   int rows = (ppu->renderFlags & kPpuRenderFlags_Height240) ? 240 : 224;
   int min_x = ext, max_x = 4096 - 256 - ext;
   int min_y = 0, max_y = kWorldBottom - 1 - rows;
+  int bottom;
+  if (BYTE(overworld_screen_index) < 0x80 && PlainBelow(overworld_screen_index, &bottom))
+    max_y = bottom - kHiddenRows - 1 - rows;
   if (gy < min_y) min_y = gy;
   if (gy - (rows - 224) > max_y) max_y = gy - (rows - 224);
+  int top;
+  if (BYTE(overworld_screen_index) < 0x80 && MountainAbove(overworld_screen_index, &top) && top > min_y && gy >= top)
+    min_y = top;
+  if (BYTE(overworld_screen_index) < 0x80) {
+    int a = overworld_screen_index & 0x3f, x, y, s;
+    AreaRect(a, &x, &y, &s);
+    bool mountain = IsMountainCell(a);
+    if (OtherLevelAt(x - 1, y, s, mountain) && gx >= x && x + ext > min_x)
+      min_x = x + ext;
+    if (OtherLevelAt(x + s, y, s, mountain) && gx <= x + s - 256 && x + s - 256 - ext < max_x)
+      max_x = x + s - 256 - ext;
+  }
   if (*cam_x < min_x) *cam_x = min_x;
   if (*cam_x > max_x) *cam_x = max_x;
   if (*cam_y < min_y) *cam_y = min_y;
@@ -1545,7 +1890,9 @@ static AreaImage *GetAreaImage(int head) {
 static int HeadAt(int wx, int wy) {
   if (wx < 0 || wy < 0 || wx >= 4096 || wy >= kWorldBottom)
     return -1;
-  return Overworld_AreaHead((wy >> 9) * 8 + (wx >> 9)) | (overworld_screen_index & 0x40);
+  // durante lo specchio, prima del cambio, lo schermo mostra il mondo di prima
+  int world = (overworld_screen_index & 0x40) ^ (g_warp_old_world ? 0x40 : 0);
+  return Overworld_AreaHead((wy >> 9) * 8 + (wx >> 9)) | world;
 }
 
 // Prepara in anticipo, una per frame, le aree che confinano con quella
@@ -1649,6 +1996,11 @@ static inline uint32 OverlayBlend(const OverlayCtx *o, uint32 c, int sx, int sy)
     return c;  // trasparente: il terreno resta com'e'
   int r = col & 31, g = col >> 5 & 31, b = col >> 10 & 31;
   r = r << 3 | r >> 2, g = g << 3 | g >> 2, b = b << 3 | b >> 2;
+  // anche lo strato segue la luminosita' del gioco (dissolvenze): senza, con la
+  // pioggia le colonne oltre il bordo dell'area restavano chiare mentre il
+  // resto dello schermo andava al nero (aprendo e chiudendo la mappa)
+  uint32 oc = Dim((uint32)r << 16 | g << 8 | b);
+  r = oc >> 16 & 255, g = oc >> 8 & 255, b = oc & 255;
   return (c & 0xff000000) | (((c >> 16 & 255) + r) >> 1) << 16 | (((c >> 8 & 255) + g) >> 1) << 8 | ((c & 255) + b) >> 1;
 }
 
@@ -1665,6 +2017,10 @@ static void DrawAnimatedCells(uint8 *pixels, int pitch, int width, int height, i
   // stata fatta: sui bordi della palude restavano pezzi marroni)
   int ext = (width - 256) / 2;
   int in_x0 = (int16)BG2HOFS_copy - ext, in_x1 = (int16)BG2HOFS_copy + 256 + ext;
+  // mulinello: all'arrivo il gioco carica solo le 256 colonne normali, le
+  // altre ripetono un pezzo di mappa finche' il passaggio non e' finito
+  if (main_module_index == 9 && submodule_index == 0x2e)
+    in_x0 += ext, in_x1 -= ext;
   for (int i = 0; i < kMaxImages; i++) {
     AreaImage *img = &g_images[i];
     if (!img->key || !img->n_anim || ((img->key ^ BYTE(overworld_screen_index)) & 0x40) ||
@@ -1724,86 +2080,6 @@ static void DrawAnimatedCells(uint8 *pixels, int pitch, int width, int height, i
           dst[sx] = OverlayBlend(ov, Dim(ac->color[v]), sx, sy);
         }
       }
-    }
-  }
-}
-
-// Montagna della Morte (chiara e oscura): e' molto piu' in alto delle aree
-// vicine, che nel gioco non si vedono mai insieme ad essa
-static bool IsMountainArea(int head) {
-  int a = head & 0x3f;
-  return a == 0x03 || a == 0x05 || a == 0x07;
-}
-
-// Nebbia sui confini fra la montagna e la pianura: l'area dell'altro livello
-// sfuma in una foschia allontanandosi dal bordo dell'area in cui sta Link,
-// cosi' si capisce che in mezzo c'e' un dislivello (vale nei due versi)
-static void DrawHeightFog(uint8 *pixels, int pitch, int width, int height, int cam_x, int cam_y) {
-  enum { kFogDist = 128, kFogInside = 5 };  // lunghezza della sfumatura, in pixel
-  const uint32 kFog = Dim(0xc4ccd4);
-  const float kFogStart = 0.6f;  // velatura sul confine
-  bool cur_high = IsMountainArea(overworld_screen_index);
-  int ax, ay, as;
-  AreaRect(overworld_screen_index, &ax, &ay, &as);
-  // Dentro l'area la nebbia comincia gia' 5 pixel prima dei lati che
-  // confinano con l'altro livello. Il vicino si guarda proprio di fronte al
-  // pixel: lungo il lato di un'area grande ci possono essere aree di tutti e
-  // due i livelli. Sopra e sotto: una colonna per volta (in blocchi da 8).
-  enum { kMaxFogCols = 1024 / 8 + 2 };
-  bool col_up[kMaxFogCols], col_down[kMaxFogCols];
-  int ncols = (width + 7) / 8 + 1;
-  if (ncols > kMaxFogCols) ncols = kMaxFogCols;
-  for (int i = 0; i < ncols; i++) {
-    int wx = ((cam_x >> 3) + i) << 3;
-    int hu = HeadAt(wx, ay - 1), hd = HeadAt(wx, ay + as);
-    col_up[i] = hu >= 0 && IsMountainArea(hu) != cur_high;
-    col_down[i] = hd >= 0 && IsMountainArea(hd) != cur_high;
-  }
-  for (int y = 0; y < height; y++) {
-    uint32 *row = (uint32 *)(pixels + y * pitch);
-    int wy = cam_y + y;
-    int dy = wy < ay ? ay - wy : wy >= ay + as ? wy - (ay + as - 1) : 0;
-    int last_head = -2;
-    bool other = false;
-    int hl = HeadAt(ax - 1, wy), hr = HeadAt(ax + as, wy);
-    bool side_left = hl >= 0 && IsMountainArea(hl) != cur_high;
-    bool side_right = hr >= 0 && IsMountainArea(hr) != cur_high;
-    for (int x = 0; x < width; x++) {
-      int wx = cam_x + x;
-      int dx = wx < ax ? ax - wx : wx >= ax + as ? wx - (ax + as - 1) : 0;
-      uint32 c = row[x], l = c >> 24;
-      float f;
-      if (!dx && !dy) {
-        // dentro l'area corrente, vicino a un lato che da' sull'altro livello
-        if (l == 2 || l == 4 || l == 6)
-          continue;  // HUD e sprite restano nitidi
-        int k = kFogInside, ci = (wx >> 3) - (cam_x >> 3);
-        if (ci < 0) ci = 0;
-        if (ci >= ncols) ci = ncols - 1;
-        if (col_up[ci] && wy - ay < k) k = wy - ay;
-        if (col_down[ci] && ay + as - 1 - wy < k) k = ay + as - 1 - wy;
-        if (side_left && wx - ax < k) k = wx - ax;
-        if (side_right && ax + as - 1 - wx < k) k = ax + as - 1 - wx;
-        if (k >= kFogInside)
-          continue;
-        f = kFogStart * (kFogInside - k) / (kFogInside + 1);
-      } else {
-        int head = HeadAt(wx, wy);
-        if (head != last_head)
-          last_head = head, other = head >= 0 && IsMountainArea(head) != cur_high;
-        if (!other || l == 2)
-          continue;
-        f = (float)(dx > dy ? dx : dy) / kFogDist;
-        if (f > 1) f = 1;
-        // gia' velata sul bordo (60%), poi sale con una curva morbida fino
-        // alla nebbia piena: il taglio non sembra un pavimento che continua
-        f = kFogStart + (1 - kFogStart) * f * f * (3 - 2 * f);
-      }
-      int r = (int)(((c >> 16) & 0xff) * (1 - f) + ((kFog >> 16) & 0xff) * f);
-      int g = (int)(((c >> 8) & 0xff) * (1 - f) + ((kFog >> 8) & 0xff) * f);
-      int b = (int)((c & 0xff) * (1 - f) + (kFog & 0xff) * f);
-      // nella nebbia niente shader: fondale (layer 3) che non viene dipinto
-      row[x] = 3u << 24 | r << 16 | g << 8 | b;
     }
   }
 }
@@ -2738,6 +3014,7 @@ static void LiveRender(LiveArea *la, int width, int height) {
   p->objShadowOut = NULL;
   memset(p->objCastShadow, 0, sizeof(p->objCastShadow));
   memset(p->objIce, 0, sizeof(p->objIce));
+  memset(p->objScale, 0, sizeof(p->objScale));
   for (int i = 0; i <= height; i++)
     ppu_runLine(p, i);
   la->fresh = false;
@@ -2883,6 +3160,7 @@ void HdWorld_Composite(uint8 *pixels, int pitch, int width, int height) {
   }
   Ppu *ppu = g_zenv.ppu;
   g_bright = ppu->forcedBlank ? 0 : ppu->brightness;
+  PreparePaletteMap();
   bool mosaic = InMosaicTransition();
   bool all = InTransition() || mosaic;
   // aspetto dei nemici, anche quando la vista coincide con quella del gioco
@@ -2907,6 +3185,10 @@ void HdWorld_Composite(uint8 *pixels, int pitch, int width, int height) {
   // destro del mondo la vista si ferma piu' all'interno (HdWorld_ClampView):
   // le colonne oltre quelle caricate vengono dall'immagine dell'area.
   int in_x0 = (int16)BG2HOFS_copy - ext, in_x1 = (int16)BG2HOFS_copy + 256 + ext;
+  // mulinello: all'arrivo il gioco carica solo le 256 colonne normali, le
+  // altre ripetono un pezzo di mappa finche' il passaggio non e' finito
+  if (main_module_index == 9 && submodule_index == 0x2e)
+    in_x0 += ext, in_x1 -= ext;
   if (in_x0 < ax) in_x0 = ax;
   if (in_x1 > ax + as) in_x1 = ax + as;
   // area vicina non ancora disegnata (al massimo un frame): colore di fondo
@@ -2952,7 +3234,6 @@ void HdWorld_Composite(uint8 *pixels, int pitch, int width, int height) {
     DrawAnimatedCells(pixels, pitch, width, height, cam_x, cam_y, all, &ov);
     DrawPersistent(pixels, pitch, width, height, cam_x, cam_y, &ov);
   }
-  DrawHeightFog(pixels, pitch, width, height, cam_x, cam_y);
   if (mosaic)
     FadeLikeGame(pixels, pitch, width, height);
   PrefetchNeighbors();

@@ -158,6 +158,14 @@ void PpuBeginDrawing(Ppu *ppu, uint8_t *pixels, size_t pitch, uint32_t render_fl
   }
 }
 
+// Colonna dentro il quadrato del mosaico. Con lo schermo largo x puo' essere
+// negativa (colonne a sinistra dei 256): mosaicModulo[x] leggeva fuori dalla
+// tabella e il primo quadrato riempiva mezzo schermo di un colore solo
+static inline int MosaicPhase(Ppu *ppu, int x) {
+  int m = ppu->mosaicSize;
+  return (x % m + m) % m;
+}
+
 static inline void ClearBackdrop(PpuPixelPrioBufs *buf) {
   for (size_t i = 0; i != countof(buf->data); i += 4)
     *(uint64*)&buf->data[i] = 0x0500050005000500;
@@ -484,6 +492,23 @@ static void PpuDrawBackground_2bpp(Ppu *ppu, uint y, bool sub, uint layer, PpuZb
       }
     }
   }
+  // cifre al massimo dell'HUD: il colore 2 della palette 5 (0x16) passa a 0x10
+  if (layer == 2 && ppu->bg3MaxDigits) {
+    for (size_t windex = 0; windex < win.nr; windex++) {
+      if (win.bits & (1 << windex))
+        continue;
+      PpuZbufType *dstz = ppu->bgBuffers[sub].data + kPpuExtraLeftRight;
+      for (int sx = win.edges[windex]; sx < win.edges[windex + 1]; sx++) {
+        PpuZbufType v = dstz[sx];
+        if ((v & 0xff) != 0x16 || (v >> 8 & 0xf) != 2)
+          continue;
+        uint x = sx + bglayer->hScroll + BG_BIAS_X(ppu, layer);
+        uint16 tile = tps[x >> 8 & 1][(x >> 3) & 0x1f];
+        if ((tile & 0x1c00) == 0x1400 && (uint16)((tile & 0x3ff) - 0x90) < 10)
+          dstz[sx] = v - 6;
+      }
+    }
+  }
 #undef NEXT_TP
 #undef READ_BITS
 #undef DO_PIXEL
@@ -522,7 +547,7 @@ static void PpuDrawBackground_4bpp_mosaic(Ppu *ppu, uint y, bool sub, uint layer
     const uint16 *tp = tps[x >> 8 & 1] + ((x >> 3) & 0x1f);
     const uint16 *tp_last = tps[x >> 8 & 1] + 31, *tp_next = tps[(x >> 8 & 1) ^ 1];
     x &= 7;
-    int w = ppu->mosaicSize - (sx - ppu->mosaicModulo[sx]);
+    int w = ppu->mosaicSize - MosaicPhase(ppu, sx);
     do {
       w = IntMin(w, dstz_end - dstz);
       uint32 tile = *tp;
@@ -581,7 +606,7 @@ static void PpuDrawBackground_2bpp_mosaic(Ppu *ppu, int y, bool sub, uint layer,
     const uint16 *tp = tps[x >> 8 & 1] + ((x >> 3) & 0x1f);
     const uint16 *tp_last = tps[x >> 8 & 1] + 31, *tp_next = tps[(x >> 8 & 1) ^ 1];
     x &= 7;
-    int w = ppu->mosaicSize - (sx - ppu->mosaicModulo[sx]);
+    int w = ppu->mosaicSize - MosaicPhase(ppu, sx);
     do {
       w = IntMin(w, dstz_end - dstz);
       uint32 tile = *tp;
@@ -637,6 +662,27 @@ static void PpuDrawSprites(Ppu *ppu, uint y, uint sub, bool clear_backdrop) {
   }
 }
 
+// Mappa progressiva: x, y in pixel della mappa (0-511); 0 visibile, 1 nuvola,
+// 2 contorno della nuvola
+static inline int Mode7Fog(const uint8 *fog, uint32 x, uint32 y) {
+  return fog && x < 512 && y < 512 ? fog[y << 9 | x] : 0;
+}
+
+// Casella di nuvola per la casella (tx, ty) fuori dalla mappa o sotto la
+// nebbia: con la mappa progressiva la fascia di 16x64 caselle senza cuciture
+// (spostata di 23 caselle a ogni ripetizione, cosi' non si vede la griglia),
+// altrimenti le prime 8 righe della mappa
+static inline uint32 Mode7CloudTile(Ppu *ppu, int32 tx, int32 ty) {
+  if (ppu->m7FogClouds)
+    return ppu->m7FogClouds[(ty & 15) << 6 | ((tx + (ty >> 4) * 23) & 63)];
+  return ppu->vram[(ty & 7) * 128 + (tx & 0x3f)] & 0xff;
+}
+
+// colore del contorno delle nuvole: tre quarti della luminosita'
+static inline uint32 Mode7FogShade(uint32 c) {
+  return c - (c >> 2 & 0x3f3f3f);
+}
+
 // Assumes it's drawn on an empty backdrop
 static void PpuDrawBackground_mode7(Ppu *ppu, uint y, bool sub, PpuZbufType z) {
   int layer = 0;
@@ -676,7 +722,7 @@ static void PpuDrawBackground_mode7(Ppu *ppu, uint y, bool sub, PpuZbufType z) {
     uint32 outside_value = ppu->m7largeField ? 0x3ffff : 0xffffffff;
     bool char_fill = ppu->m7charFill;
     if (mosaic_enabled) {
-      int w = ppu->mosaicSize - (x - ppu->mosaicModulo[x]);
+      int w = ppu->mosaicSize - MosaicPhase(ppu, x);
       do {
         w = IntMin(w, dstz_end - dstz);
         if ((uint32)(xpos | ypos) > outside_value) {
@@ -694,8 +740,8 @@ static void PpuDrawBackground_mode7(Ppu *ppu, uint y, bool sub, PpuZbufType z) {
       } while (xpos += dx * w, ypos += dy * w, dstz += w, w = ppu->mosaicSize, dstz_end - dstz != 0);
     } else {
       do {
-        if (ppu->m7CloudFill && ((xpos | ypos) & ~0x1ffff)) {
-          tile = ppu->vram[(ypos >> 11 & 7) * 128 + (xpos >> 11 & 0x3f)] & 0xff;
+        if (ppu->m7CloudFill && (((xpos | ypos) & ~0x1ffff) || Mode7Fog(ppu->m7Fog, xpos >> 8, ypos >> 8))) {
+          tile = Mode7CloudTile(ppu, (int32)xpos >> 11, (int32)ypos >> 11);
         } else if ((uint32)(xpos | ypos) > outside_value) {
           if (!char_fill)
             continue;
@@ -774,18 +820,24 @@ static void PpuDrawMode7Upsampled(Ppu *ppu, uint y) {
     xcur += m0, ycur += m2, dst += 4;
 
 #define DRAW_PIXEL_CLOUD(mode) \
-    if ((xcur | ycur) & 0x80000000) \
-      tile = ppu->vram[(ycur >> 25 & 7) * 128 + (xcur >> 25 & 0x3f)] & 0xff; \
+    fogv = Mode7Fog(fog, xcur >> 22, ycur >> 22); \
+    if (((xcur | ycur) & 0x80000000) || fogv) \
+      tile = Mode7CloudTile(ppu, (int32)xcur >> 25, (int32)ycur >> 25); \
     else \
       tile = ppu->vram[(ycur >> 25 & 0x7f) * 128 + (xcur >> 25 & 0x7f)] & 0xff; \
     pixel = ppu->vram[tile * 64 + (ycur >> 22 & 7) * 8 + (xcur >> 22 & 7)] >> 8; \
-    *(uint32*)dst = (mode ? (ppu->colorMapRgb[pixel] & 0xfefefe) >> 1 : ppu->colorMapRgb[pixel]); \
+    color = fogv == 2 ? Mode7FogShade(ppu->colorMapRgb[pixel]) : ppu->colorMapRgb[pixel]; \
+    *(uint32*)dst = (mode ? (color & 0xfefefe) >> 1 : color); \
     xcur += m0, ycur += m2, dst += 4;
 
     if (ppu->m7CloudFill) {
       // mappa del mondo: oltre i 512 pixel della mappa (anche in negativo) si
       // ripetono le nuvole delle prime 8 righe, con il passo di 512 in orizzontale
+      // (anche sopra le aree non ancora visitate, con la mappa progressiva)
       bool half = ppu->halfColor;
+      const uint8 *fog = ppu->m7Fog;
+      uint32 color;
+      int fogv;
       do {
         DRAW_PIXEL_CLOUD(half);
       } while (dst != dst_end);
@@ -1154,7 +1206,7 @@ static int ppu_getPixel(Ppu *ppu, int x, int y, bool sub, int *r, int *g, int *b
         int lx = x;
         int ly = y;
         if (IS_MOSAIC_ENABLED(ppu, curLayer)) {
-          lx -= lx % ppu->mosaicSize;
+          lx -= MosaicPhase(ppu, lx);
           ly -= (ly - 1) % ppu->mosaicSize;
         }
         if (ppu->mode == 7) {
@@ -1272,7 +1324,7 @@ static void ppu_calculateMode7Starts(Ppu* ppu, int y) {
 
 static int ppu_getPixelForMode7(Ppu* ppu, int x, int layer, bool priority) {
   if (IS_MOSAIC_ENABLED(ppu, layer))
-    x -= x % ppu->mosaicSize;
+    x -= MosaicPhase(ppu, x);
   uint8_t rx = ppu->m7xFlip ? 255 - x : x;
   int xPos = (ppu->m7startX + ppu->m7matrix[0] * rx) >> 8;
   int yPos = (ppu->m7startY + ppu->m7matrix[2] * rx) >> 8;
@@ -1331,12 +1383,19 @@ static bool ppu_evaluateSprites(Ppu* ppu, int line) {
     int yy = ppu->oam[index] >> 8;
     if (yy == 0xf0 && !(ppu->objYValid && ppu->objShowF0[(index >> 1) & 127]))
       continue;  // this works for zelda because sprites are always 8 or 16.
+    int highOam = ppu->oam[0x100 + (index >> 4)] >> (index & 15);
+    int spriteSize = spriteSizes[(highOam >> 1) & 1];
+    // sprite scalato: quanto sporge per lato oltre la sua dimensione
+    int scale = ppu->objScale[(index >> 1) & 127];
+    int ext = scale ? IntMax(((spriteSize * scale >> 8) - spriteSize + 1) >> 1, 0) : 0;
     // check if the sprite is on this line and get the sprite size
     int row;
     // (anche senza spostamento, se la posizione vera e' stata ricostruita:
     // con il mondo continuo un nemico appena sotto lo schermo ricompariva in cima)
     if (ppu->objBiasY == 0 && !ppu->objYValid) {
       row = (line - yy) & 0xff;
+      if (row >= 256 - ext)
+        row -= 256;
     } else {
       // Con lo spostamento della telecamera (fluida o libera) la posizione non
       // deve "fare il giro": uno sprite appena sopra lo schermo (y vicino a
@@ -1344,12 +1403,10 @@ static bool ppu_evaluateSprites(Ppu* ppu, int line) {
       int bottom = (ppu->renderFlags & kPpuRenderFlags_Height240) ? 240 : 224;
       int sy = ppu->objYValid ? ppu->objY[(index >> 1) & 127] : yy >= bottom ? yy - 256 : yy;
       row = line - (sy - ppu->objBiasY);
-      if ((unsigned)row >= 256)
+      if (row < -ext || row >= 256)
         continue;
     }
-    int highOam = ppu->oam[0x100 + (index >> 4)] >> (index & 15);
-    int spriteSize = spriteSizes[(highOam >> 1) & 1];
-    if (row >= spriteSize)
+    if (row >= spriteSize + ext)
       continue;
     // in y-range, get the x location, using the high bit as well
     int x = (ppu->oam[index] & 0xff) + (highOam & 1) * 256;
@@ -1359,7 +1416,7 @@ static bool ppu_evaluateSprites(Ppu* ppu, int line) {
       x -= (x >= 256 + extra_left_right) * 512;
     x -= ppu->objBiasX;
     // if in x-range
-    if (x <= -(spriteSize + extra_left_right))
+    if (x <= -(spriteSize + ext + extra_left_right))
       continue;
     // break if we found 32 sprites already
     if (--spritesLeft == 0) {
@@ -1368,6 +1425,7 @@ static bool ppu_evaluateSprites(Ppu* ppu, int line) {
     // get some data for the sprite and y-flip row if needed
     int oam1 = ppu->oam[index + 1];
     int objAdr = (oam1 & 0x100) ? ppu->objTileAdr2 : ppu->objTileAdr1;
+    int row0 = row;
     if (oam1 & 0x8000)
       row = spriteSize - 1 - row;
     // fetch all tiles in x-range
@@ -1380,6 +1438,39 @@ static bool ppu_evaluateSprites(Ppu* ppu, int line) {
     if (ppu->objIce[(index >> 1) & 127]) {
       ice = ppu->iceRemap;
       z = 0x80 + 16 * 2 + (prio << 8);
+    }
+    if (scale) {
+      // ogni pixel dello schermo prende il pixel dello sprite che gli
+      // corrisponde con la scala attorno al centro (come gli sprite affini GBA)
+      int half = spriteSize << 7;
+      int srow = (half + ((row0 << 8) + 128 - half) * 256 / scale) >> 8;
+      if (srow < 0 || srow >= spriteSize)
+        continue;
+      if (oam1 & 0x8000)
+        srow = spriteSize - 1 - srow;
+      tilesLeft--;
+      for (int c = -ext; c < spriteSize + ext; c++) {
+        int sx = x + c;
+        if (sx < -kPpuExtraLeftRight || sx >= 256 + kPpuExtraLeftRight)
+          continue;
+        int scol = (half + ((c << 8) + 128 - half) * 256 / scale) >> 8;
+        if (scol < 0 || scol >= spriteSize)
+          continue;
+        if (oam1 & 0x4000)
+          scol = spriteSize - 1 - scol;
+        int usedTile = ((((oam1 & 0xff) >> 4) + (srow >> 3)) << 4) | (((oam1 & 0xf) + (scol >> 3)) & 0xf);
+        uint16 *addr = &ppu->vram[(objAdr + usedTile * 16 + (srow & 0x7)) & 0x7fff];
+        uint32 bits = (addr[0] | addr[8] << 16) >> (7 - (scol & 7));
+        int pixel = (bits >> 0) & 1 | (bits >> 7) & 2 | (bits >> 14) & 4 | (bits >> 21) & 8;
+        int bx = sx + kPpuExtraLeftRight;
+        PpuZbufType *dst = ppu->objBuffer.data + bx;
+        if (pixel != 0 && ((dst[0] & 0xff) == 0 || (game_shadow[bx] && !is_shadow))) {
+          dst[0] = z + (ice ? ice[pixel] : pixel);
+          ppu->objShadowLine[bx] = cast;
+          game_shadow[bx] = is_shadow;
+        }
+      }
+      continue;
     }
     
     for (int col = 0; col < spriteSize; col += 8) {

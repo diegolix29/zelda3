@@ -2,11 +2,13 @@
 #include "third_party/gl_core/gl_core_3_1.h"
 #include "glsl_shader.h"
 #include "hd_fx.h"
+#include "hd_world.h"
 #include "util.h"
 #include "config.h"
 #include <stdio.h>
 #include <assert.h>
 #include <string.h>
+#include <math.h>
 // Lo scroll dei BG serve per ancorare al mondo gli effetti degli shader.
 // Non si puo' includere "variables.h" qui: definisce le macro R12 e R14, che
 // collidono con i campi omonimi di _JUMP_BUFFER in <setjmp.h> e fanno fallire
@@ -14,14 +16,33 @@
 extern uint8 g_ram[131072];
 #define ZELDA_BG2HOFS (*(uint16 *)(g_ram + 0xE2))
 #define ZELDA_BG2VOFS (*(uint16 *)(g_ram + 0xE8))
+// Registri veri (quelli che il gioco scrive nella PPU): nel prologo le stanze
+// scorrono cambiando direttamente questi, le copie qui sopra restano ferme
+#define ZELDA_BG2HOFS_REG (*(uint16 *)(g_ram + 0x11E))
+#define ZELDA_BG2VOFS_REG (*(uint16 *)(g_ram + 0x122))
+#define ZELDA_MAIN_MODULE (g_ram[0x10])
 // Spostamento del fondale nel frame disegnato (zelda_rtl.c)
 extern int g_render_bias_x, g_render_bias_y;
 
 // Modulo da comunicare allo shader: quello della scena sullo schermo
 // (HdFx_SceneModule), cosi' l'effetto si accende e si spegne esattamente
 // quando compare o sparisce il mondo di gioco
+// Mosaico del gioco (registro MOSAIC, RAM 0x95): 0 senza, 1 dai quadrati di 4
+static float ZeldaMosaicForShader() {
+  uint8 m = g_ram[0x95];
+  return (m & 15) ? fminf(1.0f, (m >> 4) / 3.0f) : 0.0f;
+}
+
+// Prologo (modulo 20, Module14_Attract): immagini della storia (fase 0) e
+// mappa in Mode 7 (fase 1) escono intatte come i menu; la sala del trono, la
+// prigione di Zelda e l'altare di Agahnim (fasi 2-4, e la dissolvenza finale 5)
+// sono stanze vere del gioco e hanno lo shader come i labirinti
+#define ZELDA_ATTRACT_SEQUENCE (g_ram[0x23])
 static int ZeldaModuleForShader() {
-  return HdFx_SceneModule();
+  int m = HdFx_SceneModule();
+  if (m == 20 && ZELDA_ATTRACT_SEQUENCE >= 2 && ZELDA_ATTRACT_SEQUENCE <= 5)
+    return 7;
+  return m;
 }
 
 #define STB_IMAGE_IMPLEMENTATION
@@ -348,6 +369,9 @@ static void GlslShader_GetUniforms(GlslShader *gs) {
     p->unif.ScrollOffset = glGetUniformLocation(program, "ScrollOffset");
     p->unif.GameModule = glGetUniformLocation(program, "GameModule");
     p->unif.Sunny = glGetUniformLocation(program, "Sunny");
+    p->unif.MirrorWarp = glGetUniformLocation(program, "MirrorWarp");
+    p->unif.LinearFilter = glGetUniformLocation(program, "LinearFilter");
+    p->unif.MirrorDx = glGetUniformLocation(program, "MirrorDx");
     p->unif.LUTTexCoord = glGetAttribLocation(program, "LUTTexCoord");
     p->unif.VertexCoord = glGetAttribLocation(program, "VertexCoord");
     GlslTextureUniform_Read(program, "Orig", -1, &p->unif.Orig);
@@ -561,6 +585,8 @@ static void GlslShader_SetShaderVars(GlslShader *gs, RenderCtx *ctx, int pass) {
   if (p->unif.ScrollOffset >= 0) {
     // Telecamera fluida e interpolazione spostano il fondale disegnato
     float scroll_offset[2] = { (float)(ZELDA_BG2HOFS + g_render_bias_x), (float)(ZELDA_BG2VOFS + g_render_bias_y) };
+    if (ZELDA_MAIN_MODULE == 20)  // prologo: sala del trono che scorre (Attract_ThroneRoom)
+      scroll_offset[0] = (float)ZELDA_BG2HOFS_REG, scroll_offset[1] = (float)ZELDA_BG2VOFS_REG;
     glUniform2fv(p->unif.ScrollOffset, 1, scroll_offset);
   }
   if (p->unif.GameModule >= 0)
@@ -569,6 +595,20 @@ static void GlslShader_SetShaderVars(GlslShader *gs, RenderCtx *ctx, int pass) {
     glUniform1f(p->unif.GameModule, (float)(ZeldaModuleForShader() + 1));
   if (p->unif.Sunny >= 0)
     glUniform1f(p->unif.Sunny, HdFx_SunnyOutdoors() ? 1.0f : 0.0f);
+  if (p->unif.LinearFilter >= 0)
+    // Filtro lineare (LinearFiltering): anche lo shader ammorbidisce i pixel
+    glUniform1f(p->unif.LinearFilter, g_config.linear_filtering ? 1.0f : 0.0f);
+  if (p->unif.MirrorWarp >= 0)
+    // animazione dello specchio: quanto e' bianco lo schermo (0-1)
+    // e il mosaico del gioco (mulinello, specchio nei labirinti): con i
+    // quadrati che crescono lo shader lascia il posto all'immagine del gioco
+    // (le pennellate e la morbidezza toglievano i quadrati)
+    // e il lampo del temporale: le pennellate e le ombre si schiariscono
+    // insieme al terreno invece di restare scure sopra il lampo
+    glUniform1f(p->unif.MirrorWarp, fmaxf(fmaxf(HdWorld_WarpWhite(), ZeldaMosaicForShader()), HdFx_LightningWhite()));
+  if (p->unif.MirrorDx >= 0)
+    // e l'onda di ogni riga, che il fondale ha gia' (HdWorld_WarpPost)
+    glUniform1fv(p->unif.MirrorDx, 240, HdWorld_WarpRowDx());
   RenderCtx_SetTexCoords(ctx, p->unif.LUTTexCoord, ctx->offset);
   RenderCtx_SetTexCoords(ctx, p->unif.VertexCoord, 0);
   RenderCtx_SetGlslTextureUniform(ctx, &p->unif.Orig, gs->pass[0].width, gs->pass[0].height, gs->pass[0].gl_texture);

@@ -1,6 +1,7 @@
 #include "sprite_main.h"
 #include "sprite.h"
 #include "hd_world.h"
+#include "hd_burn.h"
 #include "tagalong.h"
 #include "ancilla.h"
 #include "overworld.h"
@@ -24984,13 +24985,21 @@ void Sprite_BA_Whirlpool(int k) {  // 9eee5a
       last_light_vs_dark_world = overworld_screen_index & 0x40;
     }
   } else {
-    sprite_oam_flags[k] = (sprite_oam_flags[k] & 0x3f) | kWhirlpool_OamFlags[frame_counter >> 3 & 3];
+    // coperto dal ghiaccio (Bacchetta del Ghiaccio, Etere) e' congelato: non
+    // gira e non trasporta. E senza pinne non trasporta mai: nel gioco
+    // originale non ci si arriva, col ghiaccio si (a piedi, o caduto in acqua
+    // quando il ghiaccio si scioglie) e all'arrivo Link finiva in acqua,
+    // riportato a un punto di terra dell'area di partenza attraverso il mondo
+    bool frozen = HdBurn_IsFrozenAt(cur_sprite_x + 8, cur_sprite_y + 8);
+    sprite_oam_flags[k] = (sprite_oam_flags[k] & 0x3f) | kWhirlpool_OamFlags[frozen ? 0 : frame_counter >> 3 & 3];
     Oam_AllocateFromRegionB(4);
     cur_sprite_x -= 5;
     SpriteDraw_SingleLarge(k);
     if (Sprite_ReturnIfInactive(k))
       return;
-    if (Sprite_CheckDamageToLink_same_layer(k)) {
+    if (frozen || !link_item_flippers) {
+      sprite_A[k] = 0;
+    } else if (Sprite_CheckDamageToLink_same_layer(k)) {
       if (sprite_A[k] == 0) {
         submodule_index = 46;
         subsubmodule_index = 0;

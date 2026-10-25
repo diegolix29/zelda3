@@ -14,8 +14,11 @@
 #include "assets.h"
 #include "hd_light.h"
 #include "hd_fx.h"
+#include "hd_water.h"
 #include "hd_hud.h"
 #include "hd_menu.h"
+#include "hud.h"
+#include "messaging.h"
 ZeldaEnv g_zenv;
 uint8 g_ram[131072];
 
@@ -160,6 +163,100 @@ extern int g_lamp_cone_idx;
 #include "hd_world.h"
 #include "hd_trans.h"
 
+// Passaggio fra due stanze con lo schermo largo: la mappa della PPU e' di
+// 512x512 pixel e il gioco ci copia solo la parte della stanza nuova in cui
+// entra (256 pixel); il resto contiene ancora la stanza vecchia, anche nei
+// punti che le fasce laterali mostrano come stanza nuova (pixel della stanza
+// di prima). Per il solo disegno del fotogramma ogni casella visibile si
+// prende dalla stanza a cui appartiene nel mondo: la nuova e' gia' tutta in
+// dung_bg1/dung_bg2, la vecchia dalla copia della mappa fatta a stanza
+// ferma (RoomSeamRemember). Poi si rimette com'era. Lo schermo e' piu' piccolo
+// di 512x512, quindi ogni casella della mappa compare una volta sola.
+static int g_seam_prev_room = -1, g_seam_prev_x0, g_seam_prev_x1, g_seam_prev_y1;
+static bool g_seam_snap_valid;
+static uint16 g_seam_snap[2][64 * 64];
+enum { kSeamMax = 2 * 64 * 64 };
+static uint16 g_seam_addr[kSeamMax], g_seam_old[kSeamMax];
+static int g_seam_n;
+
+static int SeamTileAddr(BgLayer *bg, int row, int col) {
+  int a = bg->tilemapAdr + ((row & 31) << 5) + (col & 31);
+  if ((row & 32) && bg->tilemapHigher)
+    a += bg->tilemapWider ? 0x800 : 0x400;
+  if ((col & 32) && bg->tilemapWider)
+    a += 0x400;
+  return a & 0x7fff;
+}
+
+static bool RoomSeamActive(void) {
+  return main_module_index == 7 && submodule_index == 2 && g_seam_prev_room >= 0 &&
+         g_seam_prev_room != dungeon_room_index;
+}
+
+// Stanza ferma: si ricorda quale parte se ne vede (per le fasce durante il
+// passaggio, quando room_bounds e' gia' della stanza nuova)
+static void RoomSeamRemember(void) {
+  if (main_module_index != 7 || submodule_index != 0)
+    return;
+  int qm = quadrant_fullsize_x >> 1, qy = quadrant_fullsize_y >> 1;
+  g_seam_prev_room = dungeon_room_index;
+  g_seam_prev_x0 = room_bounds_x.v[qm];
+  g_seam_prev_x1 = room_bounds_x.v[qm + 2] + 256;
+  g_seam_prev_y1 = room_bounds_y.v[qy + 2];
+  // copia della mappa della stanza (con le transizioni rapide il gioco copia
+  // la stanza nuova gia' nel primo fotogramma del passaggio)
+  Ppu *ppu = g_zenv.ppu;
+  g_seam_snap_valid = ppu->mode == 1;
+  if (g_seam_snap_valid)
+    for (int l = 0; l < 2; l++)
+      for (int i = 0; i < 64 * 64; i++)
+        g_seam_snap[l][i] = ppu->vram[SeamTileAddr(&ppu->bgLayer[l], i >> 6, i & 63)];
+}
+
+static void RoomSeamPatch(Ppu *ppu, int width, int height) {
+  g_seam_n = 0;
+  if (!RoomSeamActive() || ppu->mode != 1 || !g_seam_snap_valid)
+    return;
+  int ext = (width - 256) / 2;
+  int new_room = dungeon_room_index, old_room = g_seam_prev_room;
+  // punto del mondo (secondo BG2) all'angolo in alto a sinistra dello schermo
+  int base_x = BG2HOFS_copy2 + ppu->bgBiasX - ext, base_y = BG2VOFS_copy2 + ppu->bgBiasY + 1;
+  for (int l = 0; l < 2; l++) {
+    BgLayer *bg = &ppu->bgLayer[l];
+    const uint16 *tm = l == 0 ? dung_bg1 : dung_bg2;
+    // BG1 puo' scorrere diverso da BG2 (stanze con il piano che si muove)
+    int dx = ((bg->hScroll - ppu->bgLayer[1].hScroll + 512) & 1023) - 512;
+    int dy = ((bg->vScroll - ppu->bgLayer[1].vScroll + 512) & 1023) - 512;
+    for (int y = -8; y < height + 8; y += 8) {
+      int wy = base_y + y;
+      for (int x = -8; x < width + 8; x += 8) {
+        int wx = base_x + x;
+        if (wx < 0 || wy < 0)
+          continue;
+        int room = (wy >> 9) << 4 | (wx >> 9);
+        if (room != new_room && room != old_room)
+          continue;
+        int lx = wx + dx, ly = wy + dy;
+        int row = (ly >> 3) & 63, col = (lx >> 3) & 63;
+        uint16 v = room == new_room ? tm[row * 64 + col] : g_seam_snap[l][row * 64 + col];
+        int a = SeamTileAddr(bg, row, col);
+        if (ppu->vram[a] == v || g_seam_n >= kSeamMax)
+          continue;
+        g_seam_addr[g_seam_n] = a, g_seam_old[g_seam_n] = ppu->vram[a];
+        g_seam_n++;
+        ppu->vram[a] = v;
+      }
+    }
+  }
+}
+
+static void RoomSeamRestore(Ppu *ppu) {
+  while (g_seam_n > 0) {
+    g_seam_n--;
+    ppu->vram[g_seam_addr[g_seam_n]] = g_seam_old[g_seam_n];
+  }
+}
+
 static void ConfigurePpuSideSpace() {
   // Let PPU impl know about the maximum allowed extra space on the sides and bottom
   int extra_right = 0, extra_left = 0, extra_bottom = 0;
@@ -176,7 +273,9 @@ static void ConfigurePpuSideSpace() {
   // mappa del mondo e mappa dell'Ocarina: nuvole anche oltre il bordo della mappa
   g_zenv.ppu->m7CloudFill = main_module_index == 14 && (submodule_index == 7 || submodule_index == 10);
   g_zenv.ppu->bg1ConeQuadrant = (mod == 7 && hdr_dungeon_dark_with_lantern && TS_copy != 0) ? g_lamp_cone_idx : -1;
-  if (mod == 9) {
+  // 11: aree speciali (Dominio di Zora...): come l'esterno, le fasce si
+  // aprono solo dove l'area ha davvero dei pixel
+  if (mod == 9 || mod == 11) {
     if (main_module_index == 14 && submodule_index == 7 && overworld_map_state >= 4) {
       // World map
       extra_left = kPpuExtraLeftRight, extra_right = kPpuExtraLeftRight;
@@ -196,6 +295,13 @@ static void ConfigurePpuSideSpace() {
 
     int qy = quadrant_fullsize_y >> 1;
     extra_bottom = IntMax(room_bounds_y.v[qy + 2] - BG2VOFS_copy2, 0);
+    // passaggio fra due stanze: le fasce coprono la stanza nuova e la vecchia
+    RoomSeamRemember();
+    if (RoomSeamActive()) {
+      extra_left = IntMax(extra_left, BG2HOFS_copy2 - g_seam_prev_x0);
+      extra_right = IntMax(extra_right, g_seam_prev_x1 - 256 - BG2HOFS_copy2);
+      extra_bottom = IntMax(extra_bottom, g_seam_prev_y1 - BG2VOFS_copy2);
+    }
   } else if (mod == 20 || mod == 0 || mod == 1) {
     extra_left = kPpuExtraLeftRight, extra_right = kPpuExtraLeftRight;
     extra_bottom = 16;
@@ -336,8 +442,14 @@ static void ApplyRenderBias() {
   g_render_bias_x = g_cam_dx + ix;
   g_render_bias_y = g_cam_dy + iy;
   Ppu *ppu = g_zenv.ppu;
+  int obj_x = g_cam_dx, obj_y = g_cam_dy;
+  // Mode 7 (mappa del mondo, dell'Ocarina): la telecamera libera del mondo
+  // continuo non c'entra; con Link vicino al bordo dell'area spostava di
+  // decine di pixel l'icona di Link e i segnalini rispetto alla mappa
+  if (ppu->mode == 7)
+    g_render_bias_x = g_render_bias_y = obj_x = obj_y = 0;
   ppu->bgBiasX = g_render_bias_x, ppu->bgBiasY = g_render_bias_y;
-  ppu->objBiasX = g_cam_dx, ppu->objBiasY = g_cam_dy;
+  ppu->objBiasX = obj_x, ppu->objBiasY = obj_y;
 }
 
 // Con la vista spostata (telecamera fluida o libera) la posizione verticale
@@ -456,6 +568,13 @@ void ZeldaDrawPpuFrame(uint8 *pixel_buffer, size_t pitch, uint32 render_flags) {
 
   if (g_zenv.ppu->extraLeftRight != 0 || render_flags & kPpuRenderFlags_Height240)
     ConfigurePpuSideSpace();
+  else
+    g_zenv.ppu->m7CloudFill = false;
+  // mappa progressiva (anche in 4:3): nuvole sulle aree mai visitate
+  g_zenv.ppu->m7Fog = MapFog_Frame();
+  g_zenv.ppu->m7FogClouds = g_zenv.ppu->m7Fog ? MapFog_CloudTiles() : NULL;
+  if (g_zenv.ppu->m7Fog)
+    g_zenv.ppu->m7CloudFill = true;
 
   int height = render_flags & kPpuRenderFlags_Height240 ? 240 : 224;
 
@@ -465,13 +584,25 @@ void ZeldaDrawPpuFrame(uint8 *pixel_buffer, size_t pitch, uint32 render_flags) {
   // caso (anche chiome d'albero davanti a Link); il fondale arriva dalle
   // immagini delle aree, quindi gli sprite vanno sempre davanti
   g_zenv.ppu->objOnTop = HdWorld_BackgroundFromImages();
+  RoomSeamPatch(g_zenv.ppu, 256 + 2 * g_zenv.ppu->extraLeftRight, height);
   HdLight_BeforeRender(g_zenv.ppu);
   HdHud_BeforeRender(g_zenv.ppu);
   HdFx_IrisBeforeRender(g_zenv.ppu);
   HdFx_ShadowsBeforeRender(g_zenv.ppu, 256 + 2 * g_zenv.ppu->extraLeftRight, height);
   HdFx_IceBeforeRender(g_zenv.ppu);
+  HdFx_SuperBombBeforeRender(g_zenv.ppu);
   HdWorld_BeforeRender(256 + 2 * g_zenv.ppu->extraLeftRight, height);
+  // specchio: la PPU disegna senza onda e con i colori veri (vedi hd_world.c)
+  HdWorld_WarpBeforeRender();
 
+  // Mostra il massimo in giallo: le cifre al massimo dell'HUD classico hanno il
+  // giallo della versione GBA (#FFDE52) solo nel colore di riempimento, senza
+  // toccare stivali, scudo e altre icone che usano la stessa palette 5
+  uint16 cg10 = g_zenv.ppu->cgram[0x10];
+  g_zenv.ppu->bg3MaxDigits = (enhanced_features0 & kFeatures0_ShowMaxItemsInYellow) && g_zenv.ppu->mode != 7;
+  if (g_zenv.ppu->bg3MaxDigits)
+    g_zenv.ppu->cgram[0x10] = 0x2b7f;
+  HdWorld_WarpLine(0);
   for (int i = 0; i <= height; i++) {
     if (i == 128 && irq_flag) {
       zelda_ppu_write(BG3HOFS, selectfile_var8);
@@ -486,24 +617,38 @@ void ZeldaDrawPpuFrame(uint8 *pixel_buffer, size_t pitch, uint32 render_flags) {
     ppu_runLine(g_zenv.ppu, i);
     SimpleHdma_DoLine(&hdma_chans[0]);
     SimpleHdma_DoLine(&hdma_chans[1]);
+    HdWorld_WarpLine(i + 1);
   }
+  HdWorld_WarpAfterRender();
+  if (g_zenv.ppu->bg3MaxDigits)
+    g_zenv.ppu->cgram[0x10] = cg10;
   HdLight_AfterRender(g_zenv.ppu);
   HdFx_IrisAfterRender(g_zenv.ppu);
   HdFx_ShadowsAfterRender(g_zenv.ppu);
   HdWorld_Composite(pixel_buffer, (int)pitch, 256 + 2 * g_zenv.ppu->extraLeftRight, height);
+  HdWorld_WarpMask(pixel_buffer, (int)pitch, 256 + 2 * g_zenv.ppu->extraLeftRight, height);
 
   // Illuminazione dinamica (non sulla mappa del mondo in Mode 7)
   if (g_zenv.ppu->mode != 7) {
     int frame_w = 256 + 2 * g_zenv.ppu->extraLeftRight;
+    HdWater_BeforeEffects(pixel_buffer, (int)pitch, frame_w, height);
     HdFx_SpriteShadows(pixel_buffer, (int)pitch, frame_w, height);
     HdFx_BeforeLight(pixel_buffer, (int)pitch, frame_w, height, g_render_bias_x, g_render_bias_y);
     HdLight_Apply(pixel_buffer, (int)pitch, frame_w, height, g_render_bias_x, g_render_bias_y);
     HdFx_AfterLight(pixel_buffer, (int)pitch, frame_w, height, g_render_bias_x, g_render_bias_y);
     HdFx_MarkWater(pixel_buffer, (int)pitch, frame_w, height, g_render_bias_x, g_render_bias_y);
     HdFx_MarkBackdrop(pixel_buffer, (int)pitch, frame_w, height);
+    HdWater_Apply(pixel_buffer, (int)pitch, frame_w, height, g_render_bias_x, g_render_bias_y);
+    HdFx_FrozenWater(pixel_buffer, (int)pitch, frame_w, height, g_render_bias_x, g_render_bias_y);
+    HdLight_FairyGlow(pixel_buffer, (int)pitch, frame_w, height);
+    HdFx_Lightning(pixel_buffer, (int)pitch, frame_w, height);
+    HdFx_Mosaic(pixel_buffer, (int)pitch, frame_w, height);
+    // specchio: onda e bianco del gioco su tutto, aggiunte HD comprese
+    HdWorld_WarpPost(pixel_buffer, (int)pitch, frame_w, height);
     HdFx_SoftIris(pixel_buffer, (int)pitch, frame_w, height);
     HdFx_MenuBlur(pixel_buffer, (int)pitch, frame_w, height);
   }
+  RoomSeamRestore(g_zenv.ppu);
 }
 
 void HdmaSetup(uint32 addr6, uint32 addr7, uint8 transfer_unit, uint8 reg6, uint8 reg7, uint8 indirect_bank) {
@@ -1014,7 +1159,10 @@ bool ZeldaRunFrame(int inputs) {
       }
 
       if (enhanced_features0 != g_wanted_zelda_features) {
+        uint32 changed = enhanced_features0 ^ g_wanted_zelda_features;
         enhanced_features0 = g_wanted_zelda_features;
+        if (changed & kFeatures0_ExtendedInventory)
+          Hud_ChangeInventoryStyle((enhanced_features0 & kFeatures0_ExtendedInventory) != 0);
         EmuSyncMemoryRegion(&enhanced_features0, sizeof(enhanced_features0));
         StateRecorder_RecordPatchByte(&state_recorder, kRam_Features0, (uint8 *)&enhanced_features0, 4);
       }

@@ -1,3 +1,4 @@
+#include <math.h>
 #include "messaging.h"
 #include "zelda_rtl.h"
 #include "variables.h"
@@ -155,8 +156,13 @@ static const uint8 kBirdTravel_x_lo[8] = {0x80, 0xcf, 0x10, 0xb8, 0x30, 0x70, 0x
 static const uint8 kBirdTravel_x_hi[8] = {6, 0xc, 2, 8, 0xf, 0, 7, 0xe};
 static const uint8 kBirdTravel_y_lo[8] = {0x5b, 0x98, 0xc0, 0x20, 0x50, 0xb0, 0x30, 0x80};
 static const uint8 kBirdTravel_y_hi[8] = {3, 5, 7, 0xb, 0xb, 0xf, 0xf, 0xf};
-// Punto di volo 9 (kFeatures0_BirdTravel9): posizione sulla mappa
-static const uint16 kBirdTravel9_x = 0xf08, kBirdTravel9_y = 0x118;
+// Punto di volo 9 (kFeatures0_BirdTravel9): posizione sulla mappa come su GBA
+// (0x8170738). Come su GBA c'e' solo dopo aver aperto la Rocca della
+// Tartaruga col Medaglione Terremoto (0x80b3c14)
+static const uint16 kBirdTravel9_x = 0xf07, kBirdTravel9_y = 0x115;
+static bool BirdTravel9_Open() {
+  return (enhanced_features0 & kFeatures0_BirdTravel9) && (save_ow_event_info[0x47] & 0x20);
+}
 static const uint8 kPendantBitMask[3] = {4, 1, 2};
 static const uint8 kCrystalBitMask[7] = {2, 0x40, 8, 0x20, 1, 4, 0x10};
 static const uint16 kOwMapCrystal0_x[9] = {0x7ff, 0x2c0, 0xd00, 0xf31, 0x6d, 0x7e0, 0xf40, 0xf40, 0x8dc};
@@ -793,7 +799,16 @@ void Death_Func15(bool count_as_death) {  // 89f50f
   if (follower_indicator == 6 || follower_indicator == 9 || follower_indicator == 10 || follower_indicator == 13)
     follower_indicator = 0;
 
-  death_var4 = link_health_current = kHealthAfterDeath[link_health_capacity >> 3];
+  death_var4 = kHealthAfterDeath[link_health_capacity >> 3];
+  // Salva stato cuori e magia: con Link vivo ("Salva ed esci") restano i cuori
+  // e la magia di adesso, compreso quello che si stava ancora riempiendo
+  if ((enhanced_features0 & kFeatures0_SaveHeartsAndMagic) && link_health_current != 0) {
+    link_health_current = IntMin(link_health_current + link_hearts_filler, link_health_capacity);
+    link_magic_power = IntMin(link_magic_power + link_magic_filler, 128);
+    link_hearts_filler = link_magic_filler = 0;
+  } else {
+    link_health_current = death_var4;
+  }
   uint8 i = BYTE(cur_palace_index_x2);
   if (i != 0xff)
     link_keys_earned_per_dungeon[(i == 2 ? 0 : i) >> 1] = link_num_keys;
@@ -978,7 +993,7 @@ void FluteMenu_HandleSelection() {  // 8ab78b
     birdtravel_var1[0]++;
     sound_effect_2 = 32;
   }
-  if (enhanced_features0 & kFeatures0_BirdTravel9)
+  if (BirdTravel9_Open())
     birdtravel_var1[0] = (birdtravel_var1[0] == 0xff) ? 8 : birdtravel_var1[0] % 9;
   else
     birdtravel_var1[0] = birdtravel_var1[0] & 7;
@@ -1000,7 +1015,7 @@ void FluteMenu_HandleSelection() {  // 8ab78b
       WorldMap_AddSprite(i, 0, (i == birdtravel_var1[0]) ? 0x30 + (frame_counter & 6) : 0x32, kBirdTravel_tab1[i], pt.x, pt.y);
   }
   // Il 9 non c'e' tra le cifre della mappa: e' il 6 capovolto
-  if (enhanced_features0 & kFeatures0_BirdTravel9) {
+  if (BirdTravel9_Open()) {
     link_x_coord_spexit = kBirdTravel9_x;
     link_y_coord_spexit = kBirdTravel9_y;
     if (WorldMap_CalculateOamCoordinates(&pt))
@@ -1178,7 +1193,6 @@ typedef struct MapMarker {
 static MapMarker g_map_markers[kMaxMapMarkers];
 static int g_map_marker_count;
 static int g_map_markers_slot = -1;
-static bool g_map_hint_shown;
 
 static void MapMarkers_FileName(char *buf, size_t size) {
   snprintf(buf, size, "saves/segnalini_file%d.txt", g_map_markers_slot);
@@ -1212,6 +1226,289 @@ static void MapMarkers_Save() {
   for (int i = 0; i < g_map_marker_count; i++)
     fprintf(f, "%d %d %d\n", g_map_markers[i].dark, g_map_markers[i].x, g_map_markers[i].y);
   fclose(f);
+}
+
+// ---------------------------------------------------------------------------
+// Mappa progressiva: per ogni file un byte per area 512x512 del mondo (8x8,
+// Mondo della Luce e Mondo delle Tenebre separati), 1 = Link ci e' passato.
+// Le aree grandi si scoprono tutte insieme. Salvata in saves/nebbia_fileN.dat:
+// se manca (file creati prima di questa opzione) la mappa e' tutta scoperta,
+// un file nuovo parte tutto coperto (si scopre subito l'area di Link).
+// Per la PPU si costruisce una maschera di 512x512 pixel della mappa con i
+// bordi a sbuffi, ricostruita solo quando qualcosa cambia.
+
+static uint8 g_map_fog[2][64];
+static int g_map_fog_slot = -1;
+static int g_map_fog_version;  // cresce a ogni cambio di g_map_fog
+static uint8 g_fog_mask[512 * 512];
+static int g_fog_mask_key = -1;
+
+static void MapFog_FileName(char *buf, size_t size, int slot) {
+  snprintf(buf, size, "saves/nebbia_file%d.dat", slot);
+}
+
+static void MapFog_Save() {
+  char name[64];
+  MapFog_FileName(name, sizeof(name), g_map_fog_slot);
+  FILE *f = fopen(name, "wb");
+  if (!f)
+    return;
+  fwrite(g_map_fog, 1, sizeof(g_map_fog), f);
+  fclose(f);
+}
+
+static void MapFog_Load(int slot) {
+  if (slot == g_map_fog_slot)
+    return;
+  g_map_fog_slot = slot;
+  g_map_fog_version++;
+  char name[64];
+  MapFog_FileName(name, sizeof(name), slot);
+  FILE *f = fopen(name, "rb");
+  if (!f || fread(g_map_fog, 1, sizeof(g_map_fog), f) != sizeof(g_map_fog))
+    memset(g_map_fog, 1, sizeof(g_map_fog));
+  if (f)
+    fclose(f);
+}
+
+void MapFog_NewFile(int slot) {
+  g_map_fog_slot = slot;
+  g_map_fog_version++;
+  memset(g_map_fog, 0, sizeof(g_map_fog));
+  MapFog_Save();
+}
+
+void MapFog_CopyFile(int from, int to) {
+  char src[64], dst[64];
+  MapFog_FileName(src, sizeof(src), from);
+  MapFog_FileName(dst, sizeof(dst), to);
+  remove(dst);
+  FILE *f = fopen(src, "rb");
+  if (f) {
+    uint8 buf[sizeof(g_map_fog)];
+    size_t n = fread(buf, 1, sizeof(buf), f);
+    fclose(f);
+    FILE *g = n == sizeof(buf) ? fopen(dst, "wb") : NULL;
+    if (g) {
+      fwrite(buf, 1, sizeof(buf), g);
+      fclose(g);
+    }
+  }
+  if (to == g_map_fog_slot)
+    g_map_fog_slot = -1;
+}
+
+// Uno sbuffo largo w pixel e alto da amin ad amax (a caso) nel punto t di un bordo
+static float MapFog_Bump(int line, float t, int w, float amin, float amax) {
+  int k = (int)floorf(t / w);
+  float q = (t - k * w) / w * 2 - 1;
+  uint32 h = (uint32)k * 0x9e3779b1u ^ (uint32)line * 0x85ebca6bu ^ (uint32)w * 0x27d4eb2fu;
+  h ^= h >> 13, h *= 0xc2b2ae35u, h ^= h >> 16;
+  float a = amin + (h & 255) * ((amax - amin) / 255);
+  return a * sqrtf(q * q < 1 ? 1 - q * q : 0);
+}
+
+// Distanza dal bordo di un'area scoperta a cui comincia la nuvola nel punto t
+// del bordo: le aree scoperte restano tutte visibili e la nuvola comincia
+// dentro l'area coperta, con sbuffi piccoli (10 pixel) e grandi (26 pixel)
+static float MapFog_Edge(int line, float t) {
+  float e = 8.5f - MapFog_Bump(line, t, 10, 2, 4.5f) - MapFog_Bump(line, t + 7, 26, 0, 3);
+  return e > 0.5f ? e : 0.5f;
+}
+
+// Bordi in pixel della mappa della colonna o riga n di aree: il mondo occupa
+// i pixel 128-383; le aree sul bordo arrivano fino in fondo alla mappa, cosi'
+// le nuvole coprono anche il disegno oltre il mondo (la torre in alto...)
+static int MapFog_Lo(int n) { return n == 0 ? -100000 : 128 + n * 32; }
+static int MapFog_Hi(int n) { return n == 7 ? 100000 : 160 + n * 32; }
+static int MapFog_Cell(int p) { return IntMin(IntMax((p - 128) >> 5, 0), 7); }
+
+enum { kFogPlainTile = 0x28, kFogBandRows = 16 };
+
+// La mappa del Mondo della Luce, 64x64 caselle (quattro quadranti di 32x32)
+static const uint8 *MapFog_LightMap() {
+  static uint8 map[64 * 64];
+  static bool built;
+  if (!built) {
+    built = true;
+    const uint8 *src = kLightOverworldTilemap;
+    for (int j = 0; j < 4; j++)
+      for (int r = 0; r < 32; r++, src += 32)
+        memcpy(&map[((j >> 1) * 32 + r) * 64 + (j & 1) * 32], src, 32);
+  }
+  return map;
+}
+
+// Fuori dal mondo (pixel 128-383) le caselle che nella mappa sono gia' nuvole
+// (quelle delle prime 10 righe, sole nuvole) si mostrano sempre come sono:
+// la nebbia copre solo il disegno di terra oltre il bordo. Prima, con un'area
+// del bordo scoperta, la striscia di nuvole vere fino al bordo della mappa
+// restava scoperta fra due contorni scuri e sembravano due righe.
+static bool MapFog_IsMapCloud(int x, int y) {
+  static bool cloud[256], built;
+  const uint8 *map = MapFog_LightMap();
+  if (!built) {
+    built = true;
+    for (int i = 0; i < 10 * 64; i++)
+      cloud[map[i]] = true;
+  }
+  if (x >= 128 && x < 384 && y >= 128 && y < 384)
+    return false;
+  return cloud[map[(y >> 3) << 6 | (x >> 3)]];
+}
+
+static void MapFog_BuildMask(const uint8 *fog) {
+  for (int y = 0; y < 512; y++) {
+    int cy = MapFog_Cell(y);
+    float fy = y + 0.5f;
+    for (int x = 0; x < 512; x++) {
+      int cx = MapFog_Cell(x);
+      uint8 *m = &g_fog_mask[y << 9 | x];
+      if (fog[cy << 3 | cx]) {
+        *m = 0;
+        continue;
+      }
+      // area coperta: vicino alle aree scoperte la nuvola comincia un po'
+      // piu' in la', con il bordo a sbuffi
+      float fx = x + 0.5f, best = 1e9f;
+      for (int ny = cy - 1; ny <= cy + 1; ny++) {
+        for (int nx = cx - 1; nx <= cx + 1; nx++) {
+          if (nx < 0 || nx > 7 || ny < 0 || ny > 7 || !fog[ny << 3 | nx])
+            continue;
+          int x0 = MapFog_Lo(nx), x1 = MapFog_Hi(nx), y0 = MapFog_Lo(ny), y1 = MapFog_Hi(ny);
+          float dx = fx < x0 ? x0 - fx : fx > x1 ? fx - x1 : 0;
+          float dy = fy < y0 ? y0 - fy : fy > y1 ? fy - y1 : 0;
+          int bx = fx < x0 ? x0 : x1, by = fy < y0 ? y0 : y1;
+          float v;
+          if (dy == 0)
+            v = dx - MapFog_Edge(bx * 2, fy);
+          else if (dx == 0)
+            v = dy - MapFog_Edge(by * 2 + 1, fx);
+          else
+            v = sqrtf(dx * dx + dy * dy) - MapFog_Edge(bx * 2, (float)by);
+          best = v < best ? v : best;
+        }
+      }
+      *m = best < 0 ? 0 : best < 1.0f ? 2 : 1;
+    }
+  }
+  for (int y = 0; y < 512; y++)
+    for (int x = 0; x < 512; x++)
+      if (MapFog_IsMapCloud(x, y))
+        g_fog_mask[y << 9 | x] = 0;
+  // il contorno scuro solo dove la nuvola tocca la terra visibile
+  for (int y = 0; y < 512; y++) {
+    for (int x = 0; x < 512; x++) {
+      if (g_fog_mask[y << 9 | x] != 2)
+        continue;
+      bool land = false;
+      for (int dy = -1; dy <= 1 && !land; dy++) {
+        for (int dx = -1; dx <= 1; dx++) {
+          int xx = x + dx, yy = y + dy;
+          if (xx >= 0 && xx < 512 && yy >= 0 && yy < 512 && !g_fog_mask[yy << 9 | xx] &&
+              !MapFog_IsMapCloud(xx, yy)) {
+            land = true;
+            break;
+          }
+        }
+      }
+      if (!land)
+        g_fog_mask[y << 9 | x] = 1;
+    }
+  }
+}
+
+// Fascia di nuvole per la nebbia, 16x64 caselle: le prime 16 righe della mappa
+// (nuvole sopra il mondo) con i soli ciuffi interi, cioe' che non toccano la
+// riga 0 o la 15; il resto e' nuvola piatta. Cosi' si ripete senza le cuciture
+// che lasciavano le prime 8 righe ripetute (ciuffi tagliati a righe).
+uint8 Overworld_AreaHead(int square);
+
+const uint8 *MapFog_CloudTiles() {
+  static uint8 band[kFogBandRows * 64];
+  static bool built;
+  if (built)
+    return band;
+  built = true;
+  const uint8 *map = MapFog_LightMap();
+  memset(band, kFogPlainTile, sizeof(band));
+  // ciuffi = caselle non piatte collegate (anche in diagonale e da un bordo
+  // all'altro in orizzontale), cercati su tutta la mappa
+  static uint8 seen[64 * 64];
+  static uint16 stack[64 * 64], comp[64 * 64];
+  memset(seen, 0, sizeof(seen));
+  for (int i = 0; i < kFogBandRows * 64; i++) {
+    if (seen[i] || map[i] == kFogPlainTile)
+      continue;
+    int ns = 0, nc = 0;
+    bool cut = false;
+    stack[ns++] = i, seen[i] = 1;
+    while (ns) {
+      int p = stack[--ns], y = p >> 6, x = p & 63;
+      comp[nc++] = p;
+      if (y == 0 || y >= kFogBandRows - 1)
+        cut = true;
+      for (int dy = -1; dy <= 1; dy++) {
+        for (int dx = -1; dx <= 1; dx++) {
+          int yy = y + dy, q = yy * 64 + ((x + dx) & 63);
+          if (yy >= 0 && yy < 64 && !seen[q] && map[q] != kFogPlainTile)
+            seen[q] = 1, stack[ns++] = q;
+        }
+      }
+    }
+    if (!cut)
+      for (int k = 0; k < nc; k++)
+        band[comp[k]] = map[comp[k]];
+  }
+  return band;
+}
+
+// Maschera per la nebbia fog (64 aree); key cambia quando cambia la nebbia
+static const uint8 *MapFog_MaskFor(const uint8 *fog, int key) {
+  if (key != g_fog_mask_key) {
+    g_fog_mask_key = key;
+    if (memchr(fog, 0, 64))
+      MapFog_BuildMask(fog);
+    else
+      g_fog_mask[0] = 0xff;  // tutto scoperto: niente maschera
+  }
+  return g_fog_mask[0] == 0xff ? NULL : g_fog_mask;
+}
+
+const uint8 *MapFog_Frame() {
+  // Prologo della presentazione (modulo 0x14, scena 1): la mappa coperta, con
+  // scoperta solo l'area del castello per la storia
+  if (main_module_index == 0x14 && attract_sequence == 1) {
+    static uint8 prologue[64];
+    prologue[0x1b] = prologue[0x1c] = prologue[0x23] = prologue[0x24] = 1;
+    if (!(enhanced_features0 & kFeatures0_ProgressiveMap))
+      return NULL;
+    return MapFog_MaskFor(prologue, -2);
+  }
+  int slot = srm_var1 >> 1;
+  if (slot < 1 || slot > 3)
+    return NULL;
+  MapFog_Load(slot);
+  int dark = (overworld_screen_index & 0x40) != 0;
+  // Link all'aperto (non nelle aree speciali come il Dominio di Zora)
+  if (main_module_index == 9 && !player_is_indoors && overworld_screen_index < 0x80) {
+    int c = (link_y_coord >> 9 & 7) << 3 | (link_x_coord >> 9 & 7);
+    if (!g_map_fog[dark][c]) {
+      // l'area intera (le grandi sono 2x2 caselle a partire dalla prima)
+      int head = Overworld_AreaHead(c) & 0x3f, x = head & 7, y = head >> 3;
+      int n = kOverworldMapIsSmall[head] ? 1 : 2;
+      for (int i = 0; i < n; i++)
+        for (int j = 0; j < n; j++)
+          g_map_fog[dark][(y + i) << 3 | (x + j)] = 1;
+      g_map_fog[dark][c] = 1;
+      g_map_fog_version++;
+      MapFog_Save();
+    }
+  }
+  if (!(enhanced_features0 & kFeatures0_ProgressiveMap) || main_module_index != 14 ||
+      (submodule_index != 7 && submodule_index != 10))
+    return NULL;
+  return MapFog_MaskFor(g_map_fog[dark], g_map_fog_version * 2 + dark);
 }
 
 static bool WorldMap_CalculateOamCoordinates(Point16U *pt);
@@ -1338,18 +1635,18 @@ void WorldMap_PlayerControl() {  // 8abae6
     }
   }
 
-  MapMarkers_Load();
-  if (!g_map_hint_shown && !HdMenu_ButtonHintsOn()) {
-    g_map_hint_shown = true;
-    HdMenu_ShowMessage("A segnalino   Y centra su Link   tieni B per scorrere veloce");
-  }
+  // segnalini, Y, B veloce e mirino solo con la mappa migliorata
+  bool improved = (enhanced_features0 & kFeatures0_ImprovedWorldMap) != 0;
+  if (improved)
+    MapMarkers_Load();
+  // i tasti della mappa li spiegano solo i suggerimenti dei tasti (FxButtonHints)
   if (overworld_map_flags) {
-    if (filtered_joypad_H & 0x40)  // Y: ricentra su Link
+    if (improved && (filtered_joypad_H & 0x40))  // Y: ricentra su Link
       WorldMap_CenterOnLink();
-    if (filtered_joypad_L & 0x80)  // A: metti o togli un segnalino
+    if (improved && (filtered_joypad_L & 0x80))  // A: metti o togli un segnalino
       WorldMap_ToggleMarkerAtCenter();
     // Tenendo B lo scorrimento e' tre volte piu' veloce
-    int steps = (joypad1H_last & 0x80) ? 3 : 1;
+    int steps = (improved && (joypad1H_last & 0x80)) ? 3 : 1;
     // Limiti veri invece del confronto esatto dell'originale: con due
     // direzioni opposte premute insieme (facile da tastiera) la vista
     // scorreva oltre il bordo e usciva dalla mappa. I limiti sono quelli
@@ -1368,7 +1665,8 @@ void WorldMap_PlayerControl() {  // 8abae6
     }
   }
   WorldMap_HandleSprites();
-  WorldMap_DrawHdSprites();
+  if (improved)
+    WorldMap_DrawHdSprites();
 }
 
 void WorldMap_RestoreGraphics() {  // 8abbd6
@@ -2018,8 +2316,10 @@ void DungeonMap_HandleInput() {  // 8ae95b
 
 void DungeonMap_HandleMovementInput() {  // 8ae979
   DungeonMap_HandleFloorSelect();
-  // Cambio di piano piu' rapido: tre passi per frame
-  for (int i = 0; i < 3 && dungmap_var2; i++)
+  // Cambio di piano piu' rapido con la mappa del dungeon migliorata: tre
+  // passi per frame
+  int steps = (enhanced_features0 & kFeatures0_ImprovedDungeonMap) ? 3 : 1;
+  for (int i = 0; i < steps && dungmap_var2; i++)
     DungeonMap_ScrollFloors();
 }
 

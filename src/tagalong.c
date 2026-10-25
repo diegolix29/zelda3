@@ -582,6 +582,8 @@ void Follower_HandleTrigger() {  // 89a59e
   } while (++tmi != tmi_end);
 }
 
+uint8 g_super_bomb_oam = 0xff;
+
 void Tagalong_Draw() {  // 89a907
   if (tagalong_var5)
     return;
@@ -681,6 +683,8 @@ skip_first_sprites:
     BYTE(dma_var6) = sprf->dma6;
   }
   {
+    if (follower_indicator == 13)
+      g_super_bomb_oam = (uint8)(oam - (OamEnt *)&g_ram[0x800]);
     SetOam_Follower(oam, scrollx + sprd->x2, scrolly + sprd->y2 + 8, 0x22,
                   ((sprf->flags & 0xf) << 4) | pal << 1 | (oam_priority_value >> 8), 2);
     BYTE(dma_var7) = sprf->dma7;

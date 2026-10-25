@@ -30,6 +30,56 @@ static bool Ancilla_OutsideView(uint16 x, uint16 y) {
   return (uint16)(x - g_view_wx + ext) >= 256 + 2 * ext || (uint16)(y - g_view_wy) >= 240;
 }
 
+// Bacchette del Fuoco e del Ghiaccio: il colpo vola fino al bordo della
+// vista, nelle fasce laterali dello schermo largo e, col mondo continuo, fino
+// al bordo della vista che segue Link (non solo nei 256 pixel della
+// telecamera del gioco). Vale per il colpo, l'esplosione, le scintille e lo
+// scoppio del ghiaccio sul muro
+static bool Ancilla_ShotOutside(uint16 x, uint16 y) {
+  if (Ancilla_LiveView())
+    return Ancilla_OutsideView(x, y);
+  int ext = g_zenv.ppu->extraLeftRight;
+  return (uint16)(x - BG2HOFS_copy2 + ext) >= 256 + 2 * ext || (uint16)(y - BG2VOFS_copy2) >= 0xf0;
+}
+
+static bool Ancilla_IsRodShot(int k) {
+  return ancilla_type[k] == 0x02 || ancilla_type[k] == 0x0b;
+}
+
+// Senza mondo continuo il gioco conosce le caselle solo dell'area corrente
+// (all'aperto) o del blocco di 512 pixel della stanza di Link: oltre, il
+// colpo nelle fasce laterali non urta niente
+static bool Ancilla_ShotOnMap(uint16 x, uint16 y) {
+  if (!player_is_indoors)
+    return HdWorld_InsideCurrentArea(x, y);
+  return (x >> 9) == (link_x_coord >> 9) && (y >> 9) == (link_y_coord >> 9);
+}
+
+static void Ancilla_SetOam(OamEnt *oam, uint16 x, uint16 y, uint8 charnum, uint8 flags, uint8 big);
+
+// Pezzo del colpo nel punto (x, y) relativo alla telecamera del gioco
+static void Ancilla_ShotOam(OamEnt *oam, uint16 x, uint16 y, uint8 charnum, uint8 flags, uint8 big) {
+  if (Ancilla_LiveView()) {
+    Ancilla_SetOam(oam, x, y, charnum, flags, big);
+    return;
+  }
+  int ext = g_zenv.ppu->extraLeftRight;
+  uint8 yval = 0xf0;
+  if ((uint16)(x + ext + 16) < 256 + 2 * ext + 16 && y < 0xf0) {
+    big |= (x >> 8) & 1;
+    yval = y;
+  }
+  oam->x = x;
+  oam->y = yval;
+  oam->charnum = charnum;
+  oam->flags = flags;
+  bytewise_extended_oam[oam - oam_buf] = big;
+}
+
+static uint8 Ancilla_ShotFlags(int k) {
+  return ancilla_floor[k] ? 0x10 : 0x20;
+}
+
 static const uint8 kAncilla_Pflags[68] = {
   0,    8,  0xc, 0x10, 0x10,    4, 0x10, 0x18,    8,    8,    8,    0, 0x14, 0, 0x10, 0x28,
   0x18, 0x10, 0x10, 0x10, 0x10,  0xc,    8,    8, 0x50,    0, 0x10,    8, 0x40, 0,  0xc, 0x24,
@@ -728,14 +778,17 @@ void Ancilla13_IceRodSparkle(int k) {  // 888435
     Ancilla_MoveX(k);
     Ancilla_MoveY(k);
   }
-  AncillaOamInfo info;
-  if (Ancilla_ReturnIfOutsideBounds(k, &info))
+  if (Ancilla_ShotOutside(Ancilla_GetX(k), Ancilla_GetY(k))) {
+    ancilla_type[k] = 0;
     return;
+  }
+  uint8 flags = Ancilla_ShotFlags(k);
+  uint16 sx = Ancilla_GetX(k) - BG2HOFS_copy2, sy = Ancilla_GetY(k) - BG2VOFS_copy2;
 
   int j;
   for (j = kAncilla_LinkSlots - 1; j >= 0 && ancilla_type[j] != 0xb; j--) {}
   if (j >= 0 && ancilla_objprio[j])
-    info.flags = 0x30;
+    flags = 0x30;
 
   if (sort_sprites_setting) {
     if (ancilla_floor[k])
@@ -749,7 +802,7 @@ void Ancilla13_IceRodSparkle(int k) {  // 888435
   OamEnt *oam = GetOamCurPtr();
   j = ancilla_timer[k] & 0x1c;
   for (int i = 3; i >= 0; i--, oam++)
-    SetOamPlain(oam, info.x + kIceShotSparkle_X[i + j], info.y + kIceShotSparkle_Y[i + j], kIceShotSparkle_Char[i + j], info.flags | 4, 0);
+    Ancilla_ShotOam(oam, sx + (int8)kIceShotSparkle_X[i + j], sy + (int8)kIceShotSparkle_Y[i + j], kIceShotSparkle_Char[i + j], flags | 4, 0);
 }
 
 void AncillaAdd_IceRodSparkle(int k) {  // 8884c8
@@ -771,6 +824,8 @@ void AncillaAdd_IceRodSparkle(int k) {  // 8884c8
 
     ancilla_x_lo[j] = ancilla_x_lo[k];
     ancilla_y_lo[j] = ancilla_y_lo[k];
+    ancilla_x_hi[j] = ancilla_x_hi[k];  // la posizione intera serve fuori dai 256 pixel
+    ancilla_y_hi[j] = ancilla_y_hi[k];
     ancilla_floor[j] = ancilla_floor[k];
     ancilla_numspr[j] = 0;
   }
@@ -872,6 +927,29 @@ static void FireRodShot_BurnAhead(int k) {
   uint16 x = Ancilla_GetX(k), y = Ancilla_GetY(k);
   HdBurn_Ignite(x + kProbe8_X[d], y + kProbe8_Y[d], true);
   HdBurn_Ignite(x + kProbe12_X[d], y + kProbe12_Y[d], true);
+  // l'acqua ghiacciata si scioglie dove si congela: al centro e ai lati
+  int cx = x + 8, cy = y + 8;
+  int sx = d & 2 ? 0 : 16, sy = d & 2 ? 16 : 0;
+  HdBurn_MeltWater(cx, cy);
+  HdBurn_MeltWater(cx - sx, cy - sy);
+  HdBurn_MeltWater(cx + sx, cy + sy);
+}
+
+// Spada e oggetti: come su GBA (0x81186fe) la fiammata in volo taglia le
+// tende al chiuso e, come la fiamma della Lanterna (link_item_in_hand 0x20),
+// erba alta e cespugli; all'aperto con Fuoco e ghiaccio no: li incendia
+// (FireRodShot_BurnAhead)
+static void FireRodShot_CutAhead(int k) {
+  if (!(enhanced_features0 & kFeatures0_SwordAndItems) || ancilla_type[k] != 2)
+    return;
+  if (player_is_indoors)
+    Dungeon_SlashAhead(Ancilla_GetX(k), Ancilla_GetY(k));
+  else if (enhanced_features0 & kFeatures0_BurnAndFreeze)
+    return;
+  uint8 in_hand = link_item_in_hand;
+  link_item_in_hand |= 0x20;
+  HandleItemTileAction_Overworld((Ancilla_GetX(k) + 8) >> 3, Ancilla_GetY(k) + 8);
+  link_item_in_hand = in_hand;
 }
 
 void Ancilla02_FireRodShot(int k) {  // 8886d2
@@ -903,13 +981,17 @@ void Ancilla02_FireRodShot(int k) {  // 8886d2
       ancilla_dir[k] &= ~0xC;
       if (((byte_7E0333 = ancilla_L[k]) & 0xf0) == 0xc0 || ((byte_7E0333 = ancilla_tile_attr[k]) & 0xf0) == 0xc0)
         Dungeon_LightTorch();
+      FireRodShot_CutAhead(k);
     }
     FireShot_Draw(k);
   } else {
-    AncillaOamInfo info;
     Ancilla_CheckBasicSpriteCollision(k);
-    if (Ancilla_ReturnIfOutsideBounds(k, &info))
+    if (Ancilla_ShotOutside(Ancilla_GetX(k), Ancilla_GetY(k))) {
+      ancilla_type[k] = 0;
       return;
+    }
+    uint8 flags = Ancilla_ShotFlags(k);
+    uint16 sx = Ancilla_GetX(k) - BG2HOFS_copy2, sy = Ancilla_GetY(k) - BG2VOFS_copy2;
     OamEnt *oam = GetOamCurPtr();
     if (!ancilla_timer[k]) {
       uint8 old_type = ancilla_type[k];
@@ -921,10 +1003,10 @@ void Ancilla02_FireRodShot(int k) {  // 8886d2
     int j = ancilla_timer[k] >> 3;
     if (j != 0) {
       static const uint8 kFireShot_Draw_Char[3] = {0xa2, 0xa0, 0x8e};
-      SetOamPlain(oam, info.x, info.y, kFireShot_Draw_Char[j - 1], info.flags | 2, 2);
+      Ancilla_ShotOam(oam, sx, sy, kFireShot_Draw_Char[j - 1], flags | 2, 2);
     } else {
-      SetOamPlain(oam + 0, info.x + 0, info.y - 3, 0xa4, info.flags | 2, 0);
-      SetOamPlain(oam + 1, info.x + 8, info.y - 3, 0xa5, info.flags | 2, 0);
+      Ancilla_ShotOam(oam + 0, sx + 0, sy - 3, 0xa4, flags | 2, 0);
+      Ancilla_ShotOam(oam + 1, sx + 8, sy - 3, 0xa5, flags | 2, 0);
     }
   }
 }
@@ -933,16 +1015,19 @@ void FireShot_Draw(int k) {  // 88877c
   static const uint8 kFireShot_Draw_X2[16] = {7, 0, 8, 0, 8, 4, 0, 0, 2, 8, 0, 0, 1, 4, 9, 0};
   static const uint8 kFireShot_Draw_Y2[16] = {1, 4, 9, 0, 7, 0, 8, 0, 8, 4, 0, 0, 2, 8, 0, 0};
   static const uint8 kFireShot_Draw_Char2[3] = {0x8d, 0x9d, 0x9c};
-  AncillaOamInfo info;
-  if (Ancilla_ReturnIfOutsideBounds(k, &info))
+  if (Ancilla_ShotOutside(Ancilla_GetX(k), Ancilla_GetY(k))) {
+    ancilla_type[k] = 0;
     return;
+  }
+  uint8 flags = Ancilla_ShotFlags(k);
   if (ancilla_objprio[k])
-    info.flags |= 0x30;
+    flags |= 0x30;
+  uint16 sx = Ancilla_GetX(k) - BG2HOFS_copy2, sy = Ancilla_GetY(k) - BG2VOFS_copy2;
 
   OamEnt *oam = GetOamCurPtr();
   int j = ancilla_item_to_link[k] & 0xc;
   for (int i = 2; i >= 0; i--, oam++)
-    SetOamPlain(oam, info.x + kFireShot_Draw_X2[j + i], info.y + kFireShot_Draw_Y2[j + i], kFireShot_Draw_Char2[i], info.flags | 2, 0);
+    Ancilla_ShotOam(oam, sx + kFireShot_Draw_X2[j + i], sy + kFireShot_Draw_Y2[j + i], kFireShot_Draw_Char2[i], flags | 2, 0);
 }
 
 uint8 Ancilla_CheckTileCollision_staggered(int k) {  // 88897b
@@ -988,6 +1073,7 @@ bool Ancilla_CheckTileCollisionOneFloor(int k) {  // 888a03
 
 bool Ancilla_CheckTileCollision_targeted(int k, uint16 x, uint16 y) {  // 888a26
   if (Ancilla_LiveView() ? Ancilla_OutsideView(x, y) :
+      Ancilla_IsRodShot(k) ? Ancilla_ShotOutside(x, y) || !Ancilla_ShotOnMap(x, y) :
       (uint16)(y - BG2VOFS_copy2) >= 224 || (uint16)(x - BG2HOFS_copy2) >= 256)
     return 0;
   uint8 tile_attr;
@@ -1311,12 +1397,20 @@ void Ancilla_MoveZ(int k) {  // 8890b7
   ancilla_z_subpixel[k] = t, ancilla_z[k] = t >> 8;
 }
 
-// Il Boomerang Magico (ancilla_G = 1) taglia cespugli ed erba alta che
-// attraversa (Overworld_BoomerangCut): -1 niente, 0 tagliato, 1 c'era qualcosa
+// Il Boomerang Magico (ancilla_G = 1) agisce sulla casella che attraversa come
+// su GBA (0x8122e2c): taglia cespugli ed erba alta e, come la spada a mano
+// vuota, rompe i cartelli dalla Spada Suprema e i vasi con la Spada d'Oro
+// (Overworld_BoomerangCut): -1 niente, 0 tagliato, 1 c'era qualcosa
 static int Boomerang_CutGrass(int k) {
-  if (!(enhanced_features0 & kFeatures0_SwordAndItems) || !ancilla_G[k] || player_is_indoors)
+  if (!(enhanced_features0 & kFeatures0_SwordAndItems) || !ancilla_G[k])
     return -1;
-  return Overworld_BoomerangCut(Ancilla_GetX(k) + 8, Ancilla_GetY(k) + 8);
+  uint16 x = Ancilla_GetX(k) + 8, y = Ancilla_GetY(k) + 8;
+  if (player_is_indoors) {
+    if (link_sword_type != 4 || link_position_mode != 0 || link_item_in_hand & 2)
+      return -1;
+    return Dungeon_SmashPotAtPos((ancilla_floor[k] ? 0x1000 : 0) + ((x & 0x1f8) >> 3) + ((y & 0x1f8) << 3)) ? 0 : -1;
+  }
+  return Overworld_BoomerangCut(x, y);
 }
 
 void Ancilla05_Boomerang(int k) {  // 8890fc
@@ -2003,6 +2097,12 @@ void Ancilla09_Arrow(int k) {  // 88a131
   if (link_item_bow & 4 && !(frame_counter & 1))
     AncillaAdd_SilverArrowSparkle(k);
   ancilla_S[k] = 255;
+  // come su GBA (0x811a7f8) il vaso si guarda prima dei nemici: la freccia
+  // normale rompe il primo e sparisce, quella d'argento prosegue
+  if (Arrow_SmashPot(k) && !(link_item_bow & 4)) {
+    ancilla_type[k] = 0;
+    return;
+  }
   if ((j = Ancilla_CheckSpriteCollision(k)) >= 0) {
     ancilla_x_vel[k] = ancilla_x_lo[k] - sprite_x_lo[j];
     ancilla_y_vel[k] = ancilla_y_lo[k] - sprite_y_lo[j] + sprite_z[j];
@@ -2023,12 +2123,7 @@ void Ancilla09_Arrow(int k) {  // 88a131
     } else {
       byte_7E0B88 = 0;
     }
-  } else if ((j = Arrow_SmashPot(k)) != 0 && (link_item_bow & 4)) {
-    // la freccia d'argento rompe il vaso e prosegue
-    Arrow_Draw(k);
-    return;
-  } else if (j != 0 || (j = Ancilla_CheckTileCollision(k)) != 0) {
-    // la freccia normale si ferma sul primo vaso che rompe
+  } else if ((j = Ancilla_CheckTileCollision(k)) != 0) {
     ancilla_H[k] = j >> 1;
     j = ancilla_dir[k] & 3;
     Ancilla_SetX(k, Ancilla_GetX(k) + kArrow_X[j]);
@@ -2152,7 +2247,8 @@ void Ancilla0A_ArrowInTheWall(int k) {  // 88a45b
 }
 
 // Il colpo della Bacchetta del Ghiaccio congela i cespugli e l'erba alta che
-// incontra in linea retta, nei punti in cui controlla i muri
+// incontra in linea retta, nei punti in cui controlla i muri, e l'acqua sotto
+// il suo centro: una fila di lastre larga tre tile
 static void IceRodShot_FreezeAhead(int k) {
   static const int8 kProbe8_X[4] = {4, 4, 4, 12}, kProbe8_Y[4] = {4, 12, 5, 5};
   static const int8 kProbe12_X[4] = {12, 12, 4, 12}, kProbe12_Y[4] = {4, 12, 12, 12};
@@ -2160,6 +2256,22 @@ static void IceRodShot_FreezeAhead(int k) {
   uint16 x = Ancilla_GetX(k), y = Ancilla_GetY(k);
   HdBurn_Freeze(x + kProbe8_X[d], y + kProbe8_Y[d]);
   HdBurn_Freeze(x + kProbe12_X[d], y + kProbe12_Y[d]);
+  // tre lastre affiancate: dall'acqua Link ci arriva col salto, che lo porta
+  // avanti di circa 22 pixel (Link_HopInOrOutOfWater_X/Y)
+  int cx = x + 8, cy = y + 8;
+  int sx = d & 2 ? 0 : 16, sy = d & 2 ? 16 : 0;
+  HdBurn_FreezeWater(cx, cy);
+  HdBurn_FreezeWater(cx - sx, cy - sy);
+  HdBurn_FreezeWater(cx + sx, cy + sy);
+  // e la fila dietro: il colpo nasce gia' avanti e fra Link e la prima lastra
+  // restava una striscia d'acqua (Link a piedi ci cadeva). Non mentre Link
+  // nuota: si congelerebbe l'acqua sotto di lui
+  if (!link_is_in_deep_water) {
+    int bx = cx + (d == 2 ? 16 : d == 3 ? -16 : 0), by = cy + (d == 0 ? 16 : d == 1 ? -16 : 0);
+    HdBurn_FreezeWater(bx, by);
+    HdBurn_FreezeWater(bx - sx, by - sy);
+    HdBurn_FreezeWater(bx + sx, by + sy);
+  }
 }
 
 void Ancilla0B_IceRodShot(int k) {  // 88a4dd
@@ -2172,9 +2284,10 @@ void Ancilla0B_IceRodShot(int k) {  // 88a4dd
       ancilla_aux_timer[k] = 3;
     }
     if (ancilla_step[k]) {
-      AncillaOamInfo info;
-      if (Ancilla_ReturnIfOutsideBounds(k, &info))
+      if (Ancilla_ShotOutside(Ancilla_GetX(k), Ancilla_GetY(k))) {
+        ancilla_type[k] = 0;
         return;
+      }
       Ancilla_MoveY(k);
       Ancilla_MoveX(k);
       IceRodShot_FreezeAhead(k);
@@ -2213,16 +2326,9 @@ void IceShotSpread_Draw(int k) {  // 88a571
   for (int i = 0; i != 4; i++, j++) {
     uint16 y = info.y + (int8)kIceShotSpread_XY[j * 2 + 0];
     uint16 x = info.x + (int8)kIceShotSpread_XY[j * 2 + 1];
-    uint8 yv = 0xf0;
-    if (x < 256 && y < 256) {
-      oam->x = x;
-      if (y < 224)
-        yv = y;
-    }
-    oam->y = yv;
-    oam->charnum = kIceShotSpread_CharFlags[j * 2 + 0];
-    oam->flags = kIceShotSpread_CharFlags[j * 2 + 1] & ~0x30 | HIBYTE(oam_priority_value);
-    bytewise_extended_oam[oam - oam_buf] = 0;
+    // anche nelle fasce laterali dello schermo largo (Ancilla_ShotOam)
+    Ancilla_ShotOam(oam, x, y, kIceShotSpread_CharFlags[j * 2 + 0],
+                    kIceShotSpread_CharFlags[j * 2 + 1] & ~0x30 | HIBYTE(oam_priority_value), 0);
     oam = Ancilla_AllocateOamFromCustomRegion(oam + 1);
   }
   oam = GetOamCurPtr();
@@ -5350,6 +5456,14 @@ void Ancilla2F_LampFlame(int k) {  // 88ec13
       oam++;
     }
   } while (++j & 3);
+  // Spada e oggetti: come su GBA (0x8117f74) la fiamma ferisce i nemici che
+  // tocca come il tipo 1 (classe di danno 1, spinta nella sua direzione)
+  if (enhanced_features0 & kFeatures0_SwordAndItems) {
+    uint8 t = ancilla_type[k];
+    ancilla_type[k] = 1;
+    Ancilla_CheckSpriteCollision(k);
+    ancilla_type[k] = t;
+  }
 }
 
 void Ancilla41_WaterfallSplash(int k) {  // 88ecaf
@@ -6308,6 +6422,14 @@ void AncillaAdd_LampFlame(uint8 a, uint8 y) {  // 898f1c
     ancilla_dir[k] = j;
     Ancilla_SetXY(k, link_x_coord + kLampFlame_X[j], link_y_coord + kLampFlame_Y[j]);
     sound_effect_1 = Ancilla_CalculateSfxPan(k) | 42;
+    // come su GBA (0x80ad31c) taglia erba alta e cespugli davanti a Link
+    // (link_item_in_hand 0x20, Overworld_ToolAndTileInteraction); all'aperto
+    // con Fuoco e ghiaccio no: la fiamma li incendia (HdBurn_Ignite)
+    if ((enhanced_features0 & kFeatures0_SwordAndItems) && submodule_index == 0 &&
+        (player_is_indoors || !(enhanced_features0 & kFeatures0_BurnAndFreeze))) {
+      link_item_in_hand = 0x20;
+      TileDetect_MainHandler(1);
+    }
   }
 }
 

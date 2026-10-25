@@ -15,6 +15,7 @@
 #include "snes/ppu.h"
 #include "hd_light.h"
 #include "hd_fx.h"
+#include "hd_water.h"
 #include "hd_hud.h"
 
 void ZeldaApuLock();
@@ -81,13 +82,18 @@ static const FeatureOption kFeatureOptions[] = {
   { "HUD moderno", "ModernHud", kFeatures0_ModernHud },
   { "Oggetti X, L, R nell'HUD", "ShowXLRItemsInHud", kFeatures0_ShowXLRItemsInHud },
   { "Nomi dei dungeon", "DungeonNames", kFeatures0_DungeonNames },
+  { "Mappa migliorata", "ImprovedWorldMap", kFeatures0_ImprovedWorldMap },
+  { "Mappa dungeon migliorata", "ImprovedDungeonMap", kFeatures0_ImprovedDungeonMap },
+  { "Mappa progressiva", "ProgressiveMap", kFeatures0_ProgressiveMap },
   { "Cambio oggetti con L e R", "ItemSwitchLR", kFeatures0_SwitchLR },
+  { "Inventario esteso", "ExtendedInventory", kFeatures0_ExtendedInventory },
   { "Spada e oggetti interazione ambiente", "SwordAndItemsInteraction", kFeatures0_SwordAndItems },
   { "Interazione bruciatura e congelamento", "BurnAndFreezeInteraction", kFeatures0_BurnAndFreeze },
   { "Sterza durante lo scatto", "TurnWhileDashing", kFeatures0_TurnWhileDashing },
   { "Fino a 10 bombe insieme", "MoreActiveBombs", kFeatures0_MoreActiveBombs },
   { "Massimi in giallo nell'HUD", "ShowMaxItemsInYellow", kFeatures0_ShowMaxItemsInYellow },
   { "Disattiva bip vita bassa", "DisableLowHealthBeep", kFeatures0_DisableLowHealthBeep },
+  { "Salva stato cuori e magia", "SaveHeartsAndMagic", kFeatures0_SaveHeartsAndMagic },
   { "Annulla il volo con X", "CancelBirdTravel", kFeatures0_CancelBirdTravel },
   { "Punto di volo 9", "BirdTravelPoint9", kFeatures0_BirdTravel9 },
   { "Specchio verso il Mondo delle Tenebre", "MirrorToDarkworld", kFeatures0_MirrorToDarkworld },
@@ -422,11 +428,13 @@ void HdMenu_ApplyConfig() {
   if (g_msu_on)
     g_msu_mode = g_config.enable_msu;
   g_dynamic_light = g_config.dynamic_light;
-  g_fx_embers = g_config.fx_embers, g_fx_window_rays = g_config.fx_window_rays;
+  g_fx_heat = g_config.fx_heat, g_fx_window_rays = g_config.fx_window_rays;
   g_fx_item_glow = g_config.fx_item_glow;
-  g_fx_heat_haze = g_config.fx_heat_haze, g_fx_rain = g_config.fx_rain;
+  g_fx_rain = g_config.fx_rain;
   g_fx_menu_blur = g_config.fx_menu_blur, g_fx_sprite_shadows = g_config.fx_sprite_shadows;
   g_fx_soft_iris = g_config.fx_soft_iris, g_fx_button_hints = g_config.fx_button_hints;
+  g_fx_whirlpool = g_config.fx_whirlpool;
+  g_fx_water = g_config.fx_water;
 }
 
 static bool IsItalian() {
@@ -446,10 +454,15 @@ static const char *Tr(const char *it) {
     { "Cambio oggetti con L e R", "Switch items with L and R" },
     { "Spada e oggetti interazione ambiente", "Sword and items interaction" },
     { "Interazione bruciatura e congelamento", "Burn and freeze interaction" },
+    { "Inventario esteso", "Extended inventory" },
+    { "Mappa migliorata", "Improved map" },
+    { "Mappa dungeon migliorata", "Improved dungeon map" },
+    { "Mappa progressiva", "Progressive map" },
     { "Sterza durante lo scatto", "Turn while dashing" },
     { "Fino a 10 bombe insieme", "Up to 10 bombs at once" },
     { "Massimi in giallo nell'HUD", "Maximums in yellow in the HUD" },
     { "Disattiva bip vita bassa", "Disable low health beep" },
+    { "Salva stato cuori e magia", "Save hearts and magic" },
     { "Annulla il volo con X", "Cancel bird travel with X" },
     { "Punto di volo 9", "Bird travel point 9" },
     { "Specchio verso il Mondo delle Tenebre", "Mirror to the Dark World" },
@@ -479,15 +492,16 @@ static const char *Tr(const char *it) {
     { "Testo nitido nei dialoghi", "Sharp dialogue text" },
     { "Fluidit\xc3\xa0 oltre i 60 Hz", "Smoothness above 60 Hz" },
     { "Illuminazione dinamica", "Dynamic lighting" },
-    { "Braci dalle fiamme", "Embers from flames" },
+    { "Effetto calore e fiamme", "Heat and flames effect" },
     { "Raggi dalle finestre", "Light rays from windows" },
     { "Bagliore degli oggetti ricevuti", "Glow of received items" },
-    { "Calore sopra la lava", "Heat haze over lava" },
     { "Pioggia e lampi migliorati", "Improved rain and lightning" },
-    { "Sfocatura dietro menu", "Blur behind menus" },
+    { "Acqua e cascate realistiche", "Realistic water and waterfalls" },
+    { "Sfocatura dietro menu e dialoghi", "Blur behind menus and dialogues" },
     { "Ombre di personaggi e nemici", "Shadows of characters and enemies" },
     { "Cerchio di transizione morbido", "Soft transition circle" },
     { "Suggerimenti dei tasti", "Button hints" },
+    { "Distingui vortici da Zora", "Tell whirlpools from Zoras" },
     { "Solo 16:9 e 16:10", "Only 16:9 and 16:10" },
     { "Richiede lo schermo 16:9 o 16:10", "Requires a 16:9 or 16:10 screen" },
     { "Velocit\xc3\xa0 del testo", "Text speed" },
@@ -571,15 +585,16 @@ static void SaveSettings() {
   AddIni(v, &n, "[Graphics]", "HdText", "%d", g_config.hd_text);
   AddIni(v, &n, "[Graphics]", "HighRefreshInterpolation", "%d", g_config.high_refresh);
   AddIni(v, &n, "[Graphics]", "DynamicLighting", "%d", g_config.dynamic_light);
-  AddIni(v, &n, "[Graphics]", "FxEmbers", "%d", g_config.fx_embers);
+  AddIni(v, &n, "[Graphics]", "FxHeatAndFlames", "%d", g_config.fx_heat);
   AddIni(v, &n, "[Graphics]", "FxWindowRays", "%d", g_config.fx_window_rays);
   AddIni(v, &n, "[Graphics]", "FxItemGlow", "%d", g_config.fx_item_glow);
-  AddIni(v, &n, "[Graphics]", "FxHeatHaze", "%d", g_config.fx_heat_haze);
   AddIni(v, &n, "[Graphics]", "FxRain", "%d", g_config.fx_rain);
+  AddIni(v, &n, "[Graphics]", "FxWater", "%d", g_config.fx_water);
   AddIni(v, &n, "[Graphics]", "FxMenuBlur", "%d", g_config.fx_menu_blur);
   AddIni(v, &n, "[Graphics]", "FxSpriteShadows", "%d", g_config.fx_sprite_shadows);
   AddIni(v, &n, "[Graphics]", "FxSoftIris", "%d", g_config.fx_soft_iris);
   AddIni(v, &n, "[Graphics]", "FxButtonHints", "%d", g_config.fx_button_hints);
+  AddIni(v, &n, "[Graphics]", "FxWhirlpoolGlow", "%d", g_config.fx_whirlpool);
   AddIni(v, &n, "[General]", "AutosaveOnAreaChange", "%d", g_config.autosave_areas);
   AddIni(v, &n, "[General]", "AutosaveSlots", "%d", AutosaveCount());
   // La lingua si scrive solo se cambiata dal menu (altrimenti resta quella
@@ -677,15 +692,16 @@ static void BuildItems() {
     AddItem(4, "Testo nitido nei dialoghi", YesNo(g_config.hd_text));
     AddItem(5, "Fluidit\xc3\xa0 oltre i 60 Hz", YesNo(g_config.high_refresh));
     AddItem(6, "Illuminazione dinamica", YesNo(g_config.dynamic_light));
-    AddItem(7, "Braci dalle fiamme", YesNo(g_config.fx_embers));
+    AddItem(7, "Effetto calore e fiamme", YesNo(g_config.fx_heat));
     AddItem(8, "Raggi dalle finestre", YesNo(g_config.fx_window_rays));
     AddItem(9, "Bagliore degli oggetti ricevuti", YesNo(g_config.fx_item_glow));
-    AddItem(10, "Calore sopra la lava", YesNo(g_config.fx_heat_haze));
     AddItem(11, "Pioggia e lampi migliorati", YesNo(g_config.fx_rain));
-    AddItem(12, "Sfocatura dietro menu", YesNo(g_config.fx_menu_blur));
+    AddItem(12, "Sfocatura dietro menu e dialoghi", YesNo(g_config.fx_menu_blur));
     AddItem(13, "Ombre di personaggi e nemici", YesNo(g_config.fx_sprite_shadows));
     AddItem(14, "Cerchio di transizione morbido", YesNo(g_config.fx_soft_iris));
     AddItem(15, "Suggerimenti dei tasti", g_zenv.ppu->extraLeftRight > 0 ? YesNo(g_config.fx_button_hints) : "Solo 16:9 e 16:10");
+    AddItem(16, "Acqua e cascate realistiche", YesNo(g_config.fx_water));
+    AddItem(17, "Distingui vortici da Zora", YesNo(g_config.fx_whirlpool));
     break;
   case kPage_Game:
     AddItem(100, "Velocit\xc3\xa0 del testo", kTextSpeedNames[g_config.text_speed % 3]);
@@ -761,10 +777,11 @@ static void Activate(int id, int dir) {
       g_dynamic_light = g_config.dynamic_light;
     } else if (id == 15 && g_zenv.ppu->extraLeftRight == 0) {
       ShowMessage("Richiede lo schermo 16:9 o 16:10");
-    } else if (id >= 7 && id <= 15) {
-      bool *opt[9] = { &g_config.fx_embers, &g_config.fx_window_rays, &g_config.fx_item_glow,
-                       &g_config.fx_heat_haze, &g_config.fx_rain, &g_config.fx_menu_blur,
-                       &g_config.fx_sprite_shadows, &g_config.fx_soft_iris, &g_config.fx_button_hints };
+    } else if (id >= 7 && id <= 17 && id != 10) {
+      bool *opt[11] = { &g_config.fx_heat, &g_config.fx_window_rays, &g_config.fx_item_glow,
+                       NULL, &g_config.fx_rain, &g_config.fx_menu_blur,
+                       &g_config.fx_sprite_shadows, &g_config.fx_soft_iris, &g_config.fx_button_hints,
+                       &g_config.fx_water, &g_config.fx_whirlpool };
       *opt[id - 7] = !*opt[id - 7];
       HdMenu_ApplyConfig();
     }
@@ -1227,10 +1244,13 @@ static void DrawButtonHints(Canvas *cv) {
       if (nr)
         DrawHintColumn(cv, right, nr, cv->width - side / 2, pad);
     }
-  } else if (sub == 7 && overworld_map_state >= 4 && overworld_map_state <= 5) {  // mappa del mondo
-    if (overworld_map_flags & 1) {
+  } else if (sub == 7 && overworld_map_state == 5) {  // mappa del mondo (non mentre si schiarisce)
+    if ((overworld_map_flags & 1) && (enhanced_features0 & kFeatures0_ImprovedWorldMap)) {
       Hint h[4] = { { kBtn_A, "Segnalino" }, { kBtn_Y, "Centra su Link" }, { kBtn_B, "Veloce" }, { kBtn_L, "Riduci" } };
       DrawHints(cv, h, 4, 22);
+    } else if (overworld_map_flags & 1) {
+      Hint h[1] = { { kBtn_L, "Riduci" } };
+      DrawHints(cv, h, 1, 22);
     } else {
       Hint h[2] = { { kBtn_L, "Ingrandisci" }, { map_btn, "Chiudi" } };
       DrawHints(cv, h, 2, 22);
@@ -1241,7 +1261,8 @@ static void DrawButtonHints(Canvas *cv) {
   }
 }
 
-// Nome del labirinto mostrato sulla mappa del dungeon, in alto al centro
+// Nome del labirinto mostrato sulla mappa del dungeon, in alto al centro (fa
+// parte della mappa migliorata, decisione dell'utente)
 static void DrawDungeonMapStatus(Canvas *cv) {
   static const char *const kDungeonNames[14] = {
     "Fogne del castello", "Castello di Hyrule", "Palazzo dell'Est", "Castello di Sabbia",
@@ -1249,6 +1270,8 @@ static void DrawDungeonMapStatus(Canvas *cv) {
     "Bosco d'Ossa", "Forte Ghiaccio", "Torre di Hera", "Villaggio dei Ladroni",
     "Rocca Tartaruga", "Torre di Ganon",
   };
+  if (!(enhanced_features0 & kFeatures0_ImprovedWorldMap))
+    return;
   if (main_module_index != 14 || submodule_index != 3 || overworld_map_state < 2 || overworld_map_state > 4)
     return;
   int dung = cur_palace_index_x2 >> 1;
@@ -1372,34 +1395,29 @@ static void GbaText(Canvas *cv, int x, int y, const char *s, int pass) {
   }
 }
 
-// Porte dei dungeon che mostrano il nome (indice di which_entrance), con il
-// livello dei dungeon del Mondo delle Tenebre (0 = senza livello). Castello di
-// Hyrule, torre di Agahnim, sala del boss del Deserto e cadute restano senza nome.
+// Nomi dei dungeon per indice (cur_palace_index_x2 / 2), con il livello dei
+// dungeon del Mondo delle Tenebre (0 = senza livello). Come su GBA (tabella dei
+// messaggi 0x814e498) fogne, Castello di Hyrule e torre di Agahnim non ne hanno.
 typedef struct DungeonEntry {
-  uint8 entrance, level;
+  uint8 level;
   const char *name;
 } DungeonEntry;
 
-static const DungeonEntry kDungeonEntries[] = {
-  { 0x08, 0, "Palazzo dell'Est" },
-  { 0x09, 0, "Castello di Sabbia" },
-  { 0x0a, 0, "Castello di Sabbia" },
-  { 0x0b, 0, "Castello di Sabbia" },
-  { 0x33, 0, "Torre di Hera" },
-  { 0x26, 1, "Palazzo Cupo" },
-  { 0x25, 2, "Dedalo d'Acqua" },
-  { 0x28, 3, "Bosco d'Ossa" },
-  { 0x29, 3, "Bosco d'Ossa" },
-  { 0x2a, 3, "Bosco d'Ossa" },
-  { 0x2b, 3, "Bosco d'Ossa" },
-  { 0x34, 4, "Villaggio dei Ladroni" },
-  { 0x2d, 5, "Forte Ghiaccio" },
-  { 0x27, 6, "Malapalude" },
-  { 0x35, 7, "Rocca Tartaruga" },
-  { 0x15, 7, "Rocca Tartaruga" },
-  { 0x18, 7, "Rocca Tartaruga" },
-  { 0x19, 7, "Rocca Tartaruga" },
-  { 0x37, 8, "Torre di Ganon" },
+static const DungeonEntry kDungeonEntries[14] = {
+  { 0, NULL },                       // fogne
+  { 0, NULL },                       // Castello di Hyrule
+  { 0, "Palazzo dell'Est" },
+  { 0, "Castello di Sabbia" },
+  { 0, NULL },                       // torre di Agahnim
+  { 2, "Dedalo d'Acqua" },
+  { 1, "Palazzo Cupo" },
+  { 6, "Malapalude" },
+  { 3, "Bosco d'Ossa" },
+  { 5, "Forte Ghiaccio" },
+  { 0, "Torre di Hera" },
+  { 4, "Villaggio dei Ladroni" },
+  { 7, "Rocca Tartaruga" },
+  { 8, "Torre di Ganon" },
 };
 
 static const DungeonEntry *g_dungeon_name;
@@ -1410,14 +1428,17 @@ static uint16 g_dungeon_name_x, g_dungeon_name_y;
 static int g_dungeon_name_tick;
 static bool g_dungeon_name_held;  // tasto tenuto mentre la scritta aspettava (HdMenu_FilterInput)
 
+// Da Module_PreDungeon: come su GBA (0x806f2c4) il nome dipende solo dal
+// dungeon caricato, quindi compare da ogni porta, ripartendo dopo la morte e
+// caricando la partita; non dalle cadute, che non passano di li'
 void HdMenu_ShowDungeonName(void) {
   g_dungeon_name = NULL;
   g_dungeon_name_armed = false;
   g_dungeon_name_tick = 0;
   g_dungeon_name_held = false;
-  for (int i = 0; i < countof(kDungeonEntries); i++)
-    if (kDungeonEntries[i].entrance == which_entrance)
-      g_dungeon_name = &kDungeonEntries[i];
+  uint16 i = cur_palace_index_x2 >> 1;
+  if (cur_palace_index_x2 != 0xff && i < countof(kDungeonEntries) && kDungeonEntries[i].name)
+    g_dungeon_name = &kDungeonEntries[i];
 }
 
 static int GbaTextWidth(const char *s) {
@@ -1480,6 +1501,8 @@ bool HdMenu_FreezeEnemies(void) {
 // Il tasto della mappa (X) intanto non conta: non apre la mappa e non toglie
 // la scritta; la corsa (A) e tutti gli altri si'.
 enum { kInputMapButton = 1 << 9 };  // X (kKbdRemap in main.c)
+// su, giu', sinistra, destra, A (corsa) e Y (oggetto)
+enum { kInputPassThrough = 0xf0 | 1 << 8 | 1 << 1 };
 static bool g_dungeon_name_swallow;
 static int g_dungeon_name_prev_inputs;
 
@@ -1513,6 +1536,11 @@ int HdMenu_FilterInput(int inputs) {
     g_dungeon_name_held = false;
     return inputs;
   }
+  // come su GBA una direzione o la corsa tolgono la scritta e Link si muove
+  // subito; l'oggetto pure (vicino alla porta il gioco non lo usa); la spada
+  // e gli altri tasti la tolgono soltanto, la mappa e' gia' esclusa sopra
+  if (pressed & kInputPassThrough)
+    return inputs & kInputPassThrough;
   g_dungeon_name_swallow = true;
   return 0;
 }
@@ -1655,9 +1683,15 @@ void HdText_Scale4x(const uint8 *src, int src_pitch, int x, int y, int w, int h,
     tmp0 = malloc(cap * 4);
     tmp1 = malloc(cap * 4 * 4);
   }
-  for (int yy = 0; yy < h; yy++)
-    for (int xx = 0; xx < w; xx++)
-      tmp0[yy * w + xx] = ((const uint32 *)(src + (y + yy) * src_pitch))[x + xx] | 0xff000000;
+  // solo i pixel dell'interfaccia (strato 2: riquadro e testo) sono opachi:
+  // i messaggi senza riquadro (la telepatia di Zelda) lasciano vedere il
+  // fondale passato dallo shader, prima nel rettangolo restava quello originale
+  for (int yy = 0; yy < h; yy++) {
+    for (int xx = 0; xx < w; xx++) {
+      uint32 c = ((const uint32 *)(src + (y + yy) * src_pitch))[x + xx];
+      tmp0[yy * w + xx] = (c >> 24) == 2 ? c | 0xff000000 : 0;
+    }
+  }
   Scale2x(tmp0, w, h, tmp1);
   Scale2x(tmp1, w * 2, h * 2, dst);
 }

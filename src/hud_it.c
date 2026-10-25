@@ -207,9 +207,15 @@ static const char *ItemName(int item, int btn_index) {
     "LANTERNA", "MARTELLO\nMAGICO", "PALA", "RETINO PER\nFARFALLE", "LIBRO DI\nMUDORA",
     "FUNGO", "BASTONE DI\nSOMARIA", "BASTONE DI\nBYRNA", "MANTELLO\nMAGICO", "",
   };
-  // inventario nuovo (kNewStyleInventory): quattro bottiglie, la 16 e' la pala
+  // inventario esteso: quattro bottiglie, la 16 e' la pala; in quello
+  // originale la 16 e' la bottiglia scelta
   if (item >= kHudItem_Bottle1 && item <= kHudItem_Bottle4) {
     int bottle = link_bottle_info[item - kHudItem_Bottle1];
+    return bottle >= 1 && bottle <= 8 ? kBottles[bottle - 1] : "";
+  }
+  if (item == kHudItem_BottleOld && !Hud_ExtendedInventory()) {
+    int i = link_item_bottle_index;
+    int bottle = i >= 1 && i <= 4 ? link_bottle_info[i - 1] : 0;
     return bottle >= 1 && bottle <= 8 ? kBottles[bottle - 1] : "";
   }
   switch (item) {

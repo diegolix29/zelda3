@@ -854,6 +854,10 @@ static void LinkOam_MainInner() {  // 8da18e
   link_direction_facing_mirror = link_direction_facing;
   if (link_is_in_deep_water)
     oam_priority_value = 0x2000;
+  // immersione al chiuso: come su GBA (0x80a5298) Link resta visibile ma
+  // passa dietro l'acqua
+  if (g_link_dive_timer && player_is_indoors)
+    oam_priority_value = 0x1000;
 
   if (link_player_handler_state == kPlayerState_Swimming) {
     yt = 0x11, rt &= 1;
@@ -1076,13 +1080,14 @@ continue_after_set:
   if (link_visibility_status != 12 && link_player_handler_state != kPlayerState_AsleepInBed) {
     if (value_computed_for_player_oam != 5 && draw_water_ripples_or_grass) {
       LinkOam_DrawFootObject(r4loc, xcoord, ycoord);
-    } else if (link_auxiliary_state != 4 && link_player_handler_state != kPlayerState_Swimming) {
+    } else if (link_auxiliary_state != 4 && (link_player_handler_state != kPlayerState_Swimming ||
+               g_link_dive_timer && !player_is_indoors)) {  // sott'acqua l'ombra, come su GBA (0x80a5ec0)
       if (player_near_pit_state != 0 && player_near_pit_state != 1) {
         if (link_this_controls_sprite_oam >= 6) {
           LinkOam_DrawDungeonFallShadow(r4loc, xcoord);
           r4loc = 2; // wtf
         }
-      } else if (!g_fx_sprite_shadows) {  // con le ombre morbide (hd_fx.c) l'ovale non serve
+      } else if (!g_fx_sprite_shadows || g_link_dive_timer) {  // con le ombre morbide (hd_fx.c) l'ovale serve solo sott'acqua
         // draw shadow
         int shadow_idx = (link_auxiliary_state != 0) && (link_auxiliary_state != 1 || !link_cape_mode);
         uint16 oam_y = link_y_coord - BG2VOFS_copy2 + kOffsToShadowGivenDir_Y[link_direction_facing_mirror >> 1];
@@ -1139,7 +1144,8 @@ continue_after_set:
       (hide_shadow = false,
       submodule_index == 0 && countdown_for_blink && --countdown_for_blink >= 4 && (countdown_for_blink & 1) == 0 ||
       link_visibility_status == 12 ||
-      link_cape_mode != 0)) {
+      link_cape_mode != 0 ||
+      g_link_dive_timer && !player_is_indoors)) {  // sott'acqua resta solo l'ombra
     int shadow_oam_pos = (!hide_shadow && link_visibility_status != 12) ?
         (scratch_0_var ? kShadow_oam_indexes_1 : kShadow_oam_indexes_0)[r4loc] >> 2 : -10;
     g_link_oam_hidden = true;

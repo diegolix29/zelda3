@@ -18,6 +18,10 @@ enum kHudItems {
 };
 
 void Hud_RefreshIcon();
+// Inventario esteso acceso o spento: converte gli oggetti dei tasti
+void Hud_ChangeInventoryStyle(bool extended);
+// true con l'inventario esteso a 6 colonne
+bool Hud_ExtendedInventory();
 uint8 CheckPalaceItemPosession();
 void Hud_FloorIndicator();
 void Hud_RemoveSuperBombIndicator();

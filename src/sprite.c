@@ -1042,6 +1042,8 @@ void Sprite_SpawnThrowableTerrain(uint8 what, uint16 x, uint16 y) {  // 86814b
 int Sprite_SpawnThrowableTerrain_silently(uint8 what, uint16 x, uint16 y) {  // 868156
   int k = 15;
   for (; k >= 0 && sprite_state[k] != 0; k--);
+  if (k < 0)  // mondo continuo: il posto di un nemico lontano
+    k = HdWorld_FreeSlot(-1, 15);
   if (k < 0)
     return k;
   sprite_state[k] = 10;
@@ -3922,16 +3924,21 @@ void Sprite_Overworld_ProximityMotivatedLoad(uint16 x, uint16 y) {  // 89c6f5
 
 // Mondo continuo tutto attivo: tutti i nemici dell'area si caricano subito,
 // non solo quelli vicini alla telecamera (finche' ci sono posti liberi; i
-// generatori di nemici restano legati alla telecamera)
+// generatori di nemici restano legati alla telecamera).
+// Regola fissa dei 16 posti degli sprite: i nemici caricati in anticipo ne
+// lasciano sempre kSpareSlots liberi per quello che nasce giocando (oggetti
+// sollevati, colpi, oggetti lasciati, segreti); se servono lo stesso,
+// HdWorld_FreeSlot toglie un nemico tranquillo lontano
+enum { kSpareSlots = 4 };
 void Sprite_OverworldLoadAllEnemies(void) {
   for (int blk = 0; blk < 0x1000; blk++) {
     uint8 t = sprite_where_in_overworld[blk];
     if (!t || t >= 0xf4 || (overworld_sprite_was_loaded[blk >> 3] & (0x80 >> (blk & 7))))
       continue;
-    int i = 14;
-    while (i >= 0 && sprite_state[i])
-      i--;
-    if (i < 0)
+    int n_free = 0;
+    for (int i = 0; i < 16; i++)
+      n_free += !sprite_state[i];
+    if (n_free <= kSpareSlots)
       return;
     Overworld_LoadProximaSpriteIfAlive(blk);
   }

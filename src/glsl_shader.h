@@ -29,6 +29,9 @@ typedef struct GlslUniforms {
   int ScrollOffset;
   int GameModule;
   int Sunny;
+  int MirrorWarp;
+  int LinearFilter;
+  int MirrorDx;
   int LUTTexCoord;
   int VertexCoord;
   GlslTextureUniform Orig;
