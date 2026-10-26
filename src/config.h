@@ -37,6 +37,7 @@ enum {
   kKeys_HdMenu,
   kKeys_View3D,
   kKeys_View3DCurve,
+  kKeys_View3DDrawDistance,
   kKeys_Total,
 };
 
@@ -93,6 +94,7 @@ typedef struct Config {
   uint8 text_speed;         // 0 = originale, 1 = veloce, 2 = istantaneo
   uint8 view3d;             // vista 3D: 0 = spenta, 1-5 = inclinazione (hd_3d.c)
   uint8 view3d_curve;       // curvatura del mondo nella vista 3D: 0 = piatto, 1-3
+  uint8 view3d_dist;        // distanza di disegno degli sprite: 0 = schermo, 1 = 2x, 2 = 3x
 
   const char *link_graphics;
   char *memory_buffer;

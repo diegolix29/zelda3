@@ -112,6 +112,7 @@ static const char *const kControlNames[12] = {
 static const char *const kSmoothCameraNames[4] = { "Spenta", "Leggera", "Media", "Forte" };
 static const char *const kView3dNames[kHd3d_NumLevels] = { "Spenta", "20\xc2\xb0", "35\xc2\xb0", "50\xc2\xb0", "65\xc2\xb0", "75\xc2\xb0" };
 static const char *const kView3dCurveNames[kHd3d_NumCurves] = { "Spenta", "Leggera", "Media", "Forte" };
+static const char *const kView3dDistNames[kHd3d_NumDists] = { "Schermo", "2x", "3x" };
 static const char *const kTextSpeedNames[3] = { "Originale", "Veloce con A o B", "Istantanea" };
 
 // ---------------------------------------------------------------------------
@@ -408,6 +409,8 @@ static const char *Tr(const char *it) {
     { "Telecamera fluida", "Smooth camera" },
     { "Vista 3D (inclinazione)", "3D view (tilt)" },
     { "Curvatura del mondo 3D", "3D world curve" },
+    { "Distanza di disegno 3D", "3D draw distance" },
+    { "Schermo", "Screen" },
     { "Schermo intero", "Fullscreen" },
     { "Mappa del mondo in HD", "HD world map" },
     { "Mostra FPS", "Show FPS" },
@@ -507,6 +510,7 @@ static void SaveSettings() {
   AddIni(v, &n, "[Graphics]", "SmoothCamera", "%d", g_config.smooth_camera);
   AddIni(v, &n, "[Graphics]", "View3D", "%d", g_config.view3d);
   AddIni(v, &n, "[Graphics]", "View3DCurve", "%d", g_config.view3d_curve);
+  AddIni(v, &n, "[Graphics]", "View3DDrawDistance", "%d", g_config.view3d_dist);
   AddIni(v, &n, "[Graphics]", "EnhancedMode7", "%d", g_config.enhanced_mode7);
   AddIni(v, &n, "[Graphics]", "HdText", "%d", g_config.hd_text);
   AddIni(v, &n, "[Graphics]", "HighRefreshInterpolation", "%d", g_config.high_refresh);
@@ -637,6 +641,7 @@ static void BuildItems() {
     AddItem(19, "Link biondo", g_config.link_graphics ? "Link personalizzato" : YesNo(g_config.blond_link));
     AddItem(18, "Vista 3D (inclinazione)", kView3dNames[g_view3d % kHd3d_NumLevels]);
     AddItem(19, "Curvatura del mondo 3D", kView3dCurveNames[g_view3d_curve % kHd3d_NumCurves]);
+    AddItem(20, "Distanza di disegno 3D", kView3dDistNames[g_view3d_dist % kHd3d_NumDists]);
     break;
   case kPage_Game:
     AddItem(100, "Velocit\xc3\xa0 del testo", kTextSpeedNames[g_config.text_speed % 3]);

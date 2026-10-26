@@ -19,6 +19,7 @@
 #include "tile_detect.h"
 #include "sprite_main.h"
 #include "assets.h"
+#include "hd_3d.h"
 static const uint16 kOamGetBufferPos_Tab0[6] = {0x171, 0x201, 0x31, 0xc1, 0x141, 0x1d1};
 static const uint16 kOamGetBufferPos_Tab1[48] = {
    0x30,  0x50,  0x80,  0xb0,  0xe0, 0x110, 0x140, 0x170, 0x1d0, 0x1d4, 0x1dc, 0x1e0, 0x1e4, 0x1ec, 0x1f0, 0x1f8,
@@ -1137,6 +1138,8 @@ uint8 g_oam_real_f0[128];
 // Mondo continuo: il nemico e' fuori dalla vista ma continua a muoversi
 // (Sprite_PrepOamCoordOrDoubleRet); i pezzi che disegna si nascondono
 static uint8 g_sprite_offscreen[16];
+// Vista 3D (hd_3d.c): fuori dalla vista ma entro la distanza di disegno
+static uint8 g_sprite_far[16];
 
 void Sprite_Main() {  // 868328
   if (!player_is_indoors) {
@@ -1181,13 +1184,15 @@ void Sprite_Main() {  // 868328
     for (int j = 0; j < 128; j++)
       saved[j] = WORD(oam_buf[j].charnum), WORD(oam_buf[j].charnum) = 0xffff;
     g_sprite_offscreen[i] = 0;
+    g_sprite_far[i] = 0;
     uint8 sfx1 = sound_effect_1, sfx2 = sound_effect_2;
     HdWorld_SpriteBegin(i);  // vede Link solo da vicino, resta vicino a casa
     Sprite_ExecuteSingle(i);
     HdWorld_SpriteEnd(i, g_sprite_offscreen[i] != 0);
     // fuori dalla vista: niente pezzi sullo schermo e niente suoni
+    // (lontano nella vista 3D: i pezzi si', i suoni no)
     bool hide = g_sprite_offscreen[i] != 0;
-    if (hide)
+    if (hide || g_sprite_far[i])
       sound_effect_1 = sfx1, sound_effect_2 = sfx2;
     for (int j = 0; j < 128; j++) {
       if (WORD(oam_buf[j].charnum) == 0xffff)
@@ -1926,8 +1931,18 @@ bool Sprite_PrepOamCoordOrDoubleRet(int k, PrepOamCoordsRet *ret) {  // 86e41e
     kx = cur_sprite_x - g_view_wx, ky = cur_sprite_y - g_view_wy;
   }
 
-  if ((uint16)(kx + 0x40 + xt) >= (0x170 + xt * 2) ||
-      (uint16)(ky + 0x40) >= 0x170 && !(sprite_flags4[k] & 0x20)) {
+  bool outside = (uint16)(kx + 0x40 + xt) >= (0x170 + xt * 2) ||
+                 (uint16)(ky + 0x40) >= 0x170 && !(sprite_flags4[k] & 0x20);
+  // Vista 3D con distanza di disegno: oltre la vista ma entro la distanza il
+  // nemico si disegna (e si muove) come sullo schermo, senza suoni (Sprite_Main)
+  int mx, mt, mb;
+  if (outside && live && !g_hd_neighbor_tick && Hd3d_FarSprites(&mx, &mt, &mb) &&
+      (uint16)(kx + 0x40 + xt + mx) < (0x170 + xt * 2 + 2 * mx) &&
+      ((uint16)(ky + 0x40 + mt) < (0x170 + mt + mb) || (sprite_flags4[k] & 0x20))) {
+    g_sprite_far[k] = 1;
+    outside = false;
+  }
+  if (outside) {
     // mondo continuo tutto attivo: i nemici dell'area continuano a muoversi
     // anche fuori dalla vista (senza disegnarsi, vedi Sprite_Main)
     // (nel gioco normale restano gli oggetti caduti, fino al loro tempo)

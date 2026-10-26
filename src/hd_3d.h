@@ -8,9 +8,17 @@ typedef struct Ppu Ppu;
 enum {
   kHd3d_NumLevels = 6,   // tilt: 0 = off, then 20, 35, 50, 65, 75 degrees
   kHd3d_NumCurves = 4,   // world curve: off, light, medium, strong
+  kHd3d_NumDists = 3,    // sprite draw distance: screen, 2x, 3x
 };
 
-extern int g_view3d, g_view3d_curve;
+extern int g_view3d, g_view3d_curve, g_view3d_dist;
+
+void Hd3d_SetDrawDistance(int dist, const char *why);
+void Hd3d_CycleDrawDistance(void);
+const char *Hd3d_DrawDistanceName(int dist);
+// Sprite draw distance: true when enemies beyond the view should still be
+// drawn, with the extra margins (pixels) left/right, above and below the view
+bool Hd3d_FarSprites(int *margin_x, int *margin_top, int *margin_bottom);
 
 void Hd3d_Init(void);
 void Hd3d_SetLevel(int level, const char *why);

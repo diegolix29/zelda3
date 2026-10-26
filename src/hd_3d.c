@@ -45,6 +45,9 @@ extern uint8 g_sprite_oam_owner[128];   // sprite.c
 
 int g_view3d;
 int g_view3d_curve;
+int g_view3d_dist;
+
+static const char *const kDistNames[kHd3d_NumDists] = { "Screen", "2x", "3x" };
 
 static const float kLevelDegrees[kHd3d_NumLevels] = { 0.0f, 20.0f, 35.0f, 50.0f, 65.0f, 75.0f };
 static const char *const kLevelNames[kHd3d_NumLevels] = { "Off", "20", "35", "50", "65", "75" };
@@ -101,11 +104,13 @@ void Hd3d_Init(void) {
     g_log = fopen("zelda3_3d.log", "w");
   g_view3d = g_config.view3d % kHd3d_NumLevels;
   g_view3d_curve = g_config.view3d_curve % kHd3d_NumCurves;
+  g_view3d_dist = g_config.view3d_dist % kHd3d_NumDists;
   g_angle = kLevelDegrees[g_view3d];
   g_radius_inv = RadiusInv(g_view3d_curve);
-  Hd3d_Log("3D view init: View3D=%d (%s deg), View3DCurve=%d (%s), NewRenderer=%d, OutputMethod=%d, "
-           "ExtendedAspectRatio=%d, ContinuousWorld=%d, shader='%s'",
+  Hd3d_Log("3D view init: View3D=%d (%s deg), View3DCurve=%d (%s), View3DDrawDistance=%d (%s), NewRenderer=%d, "
+           "OutputMethod=%d, ExtendedAspectRatio=%d, ContinuousWorld=%d, shader='%s'",
            g_view3d, kLevelNames[g_view3d], g_view3d_curve, kCurveNames[g_view3d_curve],
+           g_view3d_dist, kDistNames[g_view3d_dist],
            g_config.new_renderer, g_config.output_method, g_config.extended_aspect_ratio,
            (g_config.features0 & kFeatures0_ContinuousWorld) != 0, g_config.shader ? g_config.shader : "");
   if (!g_config.new_renderer)
@@ -144,6 +149,33 @@ void Hd3d_SetCurve(int curve, const char *why) {
 
 void Hd3d_CycleCurve(void) {
   Hd3d_SetCurve(g_view3d_curve + 1, "hotkey");
+}
+
+const char *Hd3d_DrawDistanceName(int dist) {
+  return kDistNames[(unsigned)dist % kHd3d_NumDists];
+}
+
+void Hd3d_SetDrawDistance(int dist, const char *why) {
+  dist = (unsigned)dist % kHd3d_NumDists;
+  if (dist != g_view3d_dist)
+    Hd3d_Log("sprite draw distance -> %s (%s)", kDistNames[dist], why);
+  g_view3d_dist = dist;
+  g_config.view3d_dist = (uint8)dist;
+}
+
+void Hd3d_CycleDrawDistance(void) {
+  Hd3d_SetDrawDistance(g_view3d_dist + 1, "hotkey");
+}
+
+bool Hd3d_FarSprites(int *margin_x, int *margin_top, int *margin_bottom) {
+  // the 3D view was drawn last frame, and the continuous world is on (it
+  // keeps every enemy of the area alive and gives sprites their true position)
+  if (!g_active_last || g_view3d_dist == 0 || !HdWorld_Active())
+    return false;
+  *margin_x = 256 * g_view3d_dist;
+  *margin_top = 256 * g_view3d_dist;   // far away = up the screen
+  *margin_bottom = 16;
+  return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -571,9 +603,17 @@ static void DrawGround(uint32 *out, int pitch_px, const Cam *cm, const Ground *g
 typedef struct Group {
   int key;
   int x0, y0, x1, y1;
+  bool far;            // drawn from the OAM table (pieces outside the SNES screen)
+  int n_ents;
+  uint8 ents[24];      // OAM entries of a far group, in OAM order (first wins)
 } Group;
 
 enum { kMaxGroups = 64 };
+
+static const uint8 kObjSizes[8][2] = {   // same as kSpriteSizes in snes/ppu.c
+  {8, 16}, {8, 32}, {8, 64}, {16, 32},
+  {16, 64}, {32, 64}, {16, 32}, {16, 32}
+};
 
 static int GroupKey(int oam) {
   if (g_link_oam_mask[oam])
@@ -588,26 +628,73 @@ static int CompareGroups(const void *a, const void *b) {
   return ga->y1 - gb->y1;   // smaller y1 = farther away, drawn first
 }
 
-static int DrawSprites(uint32 *out, int pitch_px, const Cam *cm) {
+// OAM entry: visible, frame position and size. Needs the true positions
+// (objXValid / objYValid, set with the continuous world or the smooth camera)
+static bool OamEntry(Ppu *ppu, int i, int *fx, int *fy, int *size) {
+  int yy = ppu->oam[i * 2] >> 8;
+  if (yy == 0xf0 && !ppu->objShowF0[i])
+    return false;
+  int high = ppu->oam[0x100 + (i >> 3)] >> ((i & 7) * 2);
+  *size = kObjSizes[ppu->objSize][(high >> 1) & 1];
+  *fx = ppu->objX[i] - ppu->objBiasX + ppu->extraLeftRight;
+  *fy = ppu->objY[i] - ppu->objBiasY;
+  return true;
+}
+
+// one pixel of an OAM entry (local coordinates), as the PPU fetches it
+static bool OamPixel(Ppu *ppu, int i, int col, int row, int size, uint32 *out) {
+  int oam1 = ppu->oam[i * 2 + 1];
+  if (oam1 & 0x8000) row = size - 1 - row;
+  if (oam1 & 0x4000) col = size - 1 - col;
+  int obj_adr = (oam1 & 0x100) ? ppu->objTileAdr2 : ppu->objTileAdr1;
+  int tile = ((((oam1 & 0xff) >> 4) + (row >> 3)) << 4) | (((oam1 & 0xf) + (col >> 3)) & 0xf);
+  const uint16 *a = &ppu->vram[(obj_adr + tile * 16 + (row & 7)) & 0x7fff];
+  int bit = 7 - (col & 7);
+  int v = (a[0] >> bit & 1) | (a[0] >> (8 + bit) & 1) << 1 | (a[8] >> bit & 1) << 2 | (a[8] >> (8 + bit) & 1) << 3;
+  if (!v)
+    return false;
+  *out = CgramToPixel(ppu, 0x80 + 16 * ((oam1 >> 9) & 7) + v, 4);
+  return true;
+}
+
+static int g_stat_far_groups;
+
+static int DrawSprites(uint32 *out, int pitch_px, const Cam *cm, Ppu *ppu) {
   int w = g_w, h = g_h;
   Group groups[kMaxGroups];
   int16 key_to_group[32 + 128];
   memset(key_to_group, 0xff, sizeof(key_to_group));
   int n = 0;
+
+  // Groups with a piece outside the SNES screen are drawn entirely from the
+  // OAM table (the PPU only drew their on-screen part)
+  bool far_key[32 + 128];
+  memset(far_key, 0, sizeof(far_key));
+  bool far_ok = ppu->objXValid && ppu->objYValid && g_view3d_dist > 0;
+  int efx[128], efy[128], esz[128];
+  bool evis[128];
+  for (int i = 0; i < 128; i++) {
+    evis[i] = far_ok && OamEntry(ppu, i, &efx[i], &efy[i], &esz[i]);
+    if (evis[i] && (efx[i] < 0 || efy[i] < 0 || efx[i] + esz[i] > w || efy[i] + esz[i] > h))
+      far_key[GroupKey(i)] = true;
+  }
+
   memset(g_group_map, 0, w * h);
   for (int i = 0; i < w * h; i++) {
     uint8 o = g_owner[i];
     if (o >= 128)
       continue;
     int key = GroupKey(o);
+    if (far_key[key])
+      continue;
     int gi = key_to_group[key];
     if (gi < 0) {
       if (n == kMaxGroups)
         continue;
       gi = key_to_group[key] = n++;
-      groups[gi].key = key;
+      groups[gi].key = key, groups[gi].far = false, groups[gi].n_ents = 0;
       groups[gi].x0 = groups[gi].y0 = 1 << 20;
-      groups[gi].x1 = groups[gi].y1 = -1;
+      groups[gi].x1 = groups[gi].y1 = -(1 << 20);
     }
     Group *g = &groups[gi];
     int x = i % w, y = i / w;
@@ -617,6 +704,31 @@ static int DrawSprites(uint32 *out, int pitch_px, const Cam *cm) {
     if (y > g->y1) g->y1 = y;
     g_group_map[i] = (uint8)(gi + 1);
   }
+  int far_groups = 0;
+  for (int i = 0; i < 128; i++) {
+    if (!evis[i] || !far_key[GroupKey(i)])
+      continue;
+    int key = GroupKey(i);
+    int gi = key_to_group[key];
+    if (gi < 0) {
+      if (n == kMaxGroups)
+        continue;
+      gi = key_to_group[key] = n++;
+      groups[gi].key = key, groups[gi].far = true, groups[gi].n_ents = 0;
+      groups[gi].x0 = groups[gi].y0 = 1 << 20;
+      groups[gi].x1 = groups[gi].y1 = -(1 << 20);
+      far_groups++;
+    }
+    Group *g = &groups[gi];
+    if (g->n_ents == (int)sizeof(g->ents))
+      continue;
+    g->ents[g->n_ents++] = (uint8)i;
+    if (efx[i] < g->x0) g->x0 = efx[i];
+    if (efx[i] + esz[i] - 1 > g->x1) g->x1 = efx[i] + esz[i] - 1;
+    if (efy[i] < g->y0) g->y0 = efy[i];
+    if (efy[i] + esz[i] - 1 > g->y1) g->y1 = efy[i] + esz[i] - 1;
+  }
+  g_stat_far_groups += far_groups;
   if (n == 0)
     return 0;
   // sort far to near, remembering each group's id in g_group_map
@@ -631,6 +743,10 @@ static int DrawSprites(uint32 *out, int pitch_px, const Cam *cm) {
     float sx, sy, sc;
     if (!Cam_ToScreen(cm, ax, ay, &sx, &sy, &sc))
       continue;
+    // far away: same fog as the ground, gone at the fog end
+    float depth = cm->D / sc;
+    if (depth >= kFogEnd)
+      continue;
     float inv = 1.0f / sc;
     int dx0 = (int)floorf(sx + (g->x0 - ax) * sc), dx1 = (int)ceilf(sx + (g->x1 + 1 - ax) * sc);
     int dy0 = (int)floorf(sy + (g->y0 - ay) * sc), dy1 = (int)ceilf(sy);
@@ -642,13 +758,30 @@ static int DrawSprites(uint32 *out, int pitch_px, const Cam *cm) {
       int vy = (int)floorf(ay + (y + 0.5f - sy) * inv);
       if (vy < g->y0 || vy > g->y1)
         continue;
-      const uint8 *gm = g_group_map + vy * w;
-      const uint32 *src = g_side + vy * w;
       uint32 *dst = out + y * pitch_px;
-      for (int x = dx0; x < dx1; x++) {
-        int vx = (int)floorf(ax + (x + 0.5f - sx) * inv);
-        if (vx >= g->x0 && vx <= g->x1 && gm[vx] == id)
-          dst[x] = src[vx];
+      if (!g->far) {
+        const uint8 *gm = g_group_map + vy * w;
+        const uint32 *src = g_side + vy * w;
+        for (int x = dx0; x < dx1; x++) {
+          int vx = (int)floorf(ax + (x + 0.5f - sx) * inv);
+          if (vx >= g->x0 && vx <= g->x1 && gm[vx] == id)
+            dst[x] = src[vx];
+        }
+      } else {
+        for (int x = dx0; x < dx1; x++) {
+          int vx = (int)floorf(ax + (x + 0.5f - sx) * inv);
+          if (vx < g->x0 || vx > g->x1)
+            continue;
+          for (int e = 0; e < g->n_ents; e++) {
+            int i = g->ents[e], lx = vx - efx[i], ly = vy - efy[i];
+            uint32 c;
+            if ((unsigned)lx < (unsigned)esz[i] && (unsigned)ly < (unsigned)esz[i] &&
+                OamPixel(ppu, i, lx, ly, esz[i], &c)) {
+              dst[x] = c;
+              break;
+            }
+          }
+        }
       }
     }
   }
@@ -683,7 +816,7 @@ void Hd3d_EndFrame(uint8 *pixels, int pitch, int width, int height) {
   Sky_Setup(&sk, outdoors, width);
   uint32 *out = (uint32 *)pixels;
   DrawGround(out, pitch_px, &cm, &gr, &sk);
-  int groups = DrawSprites(out, pitch_px, &cm);
+  int groups = DrawSprites(out, pitch_px, &cm, g_zenv.ppu);
   if (g_weather) {
     // the game's weather layer, flat over ground and sky (not sprites). With
     // the HD rain on it only darkens (its drops would be a second rain)
@@ -700,11 +833,14 @@ void Hd3d_EndFrame(uint8 *pixels, int pitch, int width, int height) {
   if (++g_stat_frames == 300) {
     double ms = g_stat_ticks * 1000.0 / SDL_GetPerformanceFrequency() / g_stat_frames;
     Hd3d_Log("stats: %d frames, 3D compose %.3f ms/frame, sprite groups avg %.1f max %d, tilt %.1f, curve R=%.0f, "
-             "past-screen px/frame %d (missing %d), source %s, frame %dx%d, module=%d area=0x%02x",
+             "past-screen px/frame %d (missing %d), source %s, far sprites avg %.1f (draw distance %s, %s), "
+             "frame %dx%d, module=%d area=0x%02x",
              g_stat_frames, ms, (double)g_stat_groups / g_stat_frames, g_stat_max_groups, g_angle, cm.R,
              g_stat_outside / g_stat_frames, g_stat_missing / g_stat_frames, kSourceNames[gr.source],
+             (double)g_stat_far_groups / g_stat_frames, kDistNames[g_view3d_dist],
+             HdWorld_Active() ? "active" : "needs continuous world outdoors",
              width, height, main_module_index, BYTE(overworld_screen_index));
     g_stat_ticks = 0, g_stat_frames = 0, g_stat_groups = 0, g_stat_max_groups = 0;
-    g_stat_outside = 0, g_stat_missing = 0;
+    g_stat_outside = 0, g_stat_missing = 0, g_stat_far_groups = 0;
   }
 }

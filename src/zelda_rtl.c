@@ -487,6 +487,8 @@ static void ResolveSpritePositions(Ppu *ppu) {
   if (ppu->objBiasY == 0 && ppu->objBiasX == 0 && !g_view_valid && !(g_trans_link_dx | g_trans_link_dy))
     return;
   int link_x = (int16)(link_x_coord - BG2HOFS_copy2) + 8;
+  int fmx, fmt, fmb;
+  bool far = Hd3d_FarSprites(&fmx, &fmt, &fmb);   // vista 3D: nemici lontani disegnati
   // Si confronta anche la x: un nemico fermo 256 pixel piu' in alto ma
   // lontano in orizzontale non deve "rubare" i pezzi di uno sprite vicino
   // (il corpo del vecchio della Montagna spariva sopra lo schermo)
@@ -526,8 +528,20 @@ static void ResolveSpritePositions(Ppu *ppu) {
       k1 = 1;
     else if (o < 16 && slot[o] >= 0)
       k0 = slot[o], k1 = k0 + 1;
+    // Vista 3D con distanza di disegno: un nemico puo' essere a piu' schermi
+    // di distanza. Il pezzo resta entro ~128 pixel dal suo nemico, quindi x e
+    // y si ricavano da lui (x con giri di 512, y di 256) a qualunque distanza
+    int crange = 1;
+    if (far && !g_link_oam_mask[i] && o < 16 && slot[o] >= 0) {
+      int bx = lo + hi * 256, bestx = 1 << 30;
+      for (int c = -4; c <= 4; c++)
+        if (abs(bx + c * 512 - ox[slot[o]]) < bestx)
+          bestx = abs(bx + c * 512 - ox[slot[o]]), x = bx + c * 512;
+      ppu->objX[i] = (int16)x;
+      crange = 5;
+    }
     int best = 1 << 30, y = yy;
-    for (int c = -1; c <= 1; c++)
+    for (int c = -crange; c <= crange; c++)
       for (int k = k0; k < k1; k++) {
         int d = abs(yy + c * 256 - oy[k]) + abs(x - ox[k]);
         if (d < best)
