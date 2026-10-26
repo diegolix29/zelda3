@@ -50,5 +50,23 @@ __attribute__((format(printf, 1, 2)))   // the compiler checks the arguments
 void Hd3d_Log(const char *fmt, ...);
 // Writes every sprite piece and group of the next 3D frame to the log (key 6)
 void Hd3d_RequestDump(void);
+// Writes the current room's objects and wall classes to the log (key 8)
+void Hd3d_RequestRoomDump(void);
+
+// Room building (dungeon.c, Dungeon_LoadRoom): which room object drew each
+// tile, so walls, furniture, pots... each get their own height
+enum {
+  kHd3d_ObjSubtype1 = 0x000,   // + object id 0x00-0xf7
+  kHd3d_ObjSubtype3 = 0x100,   // + id 0x00-0x7f
+  kHd3d_ObjSubtype2 = 0x200,   // + id 0x00-0x3f
+  kHd3d_ObjDoor = 0x300,       // + door type
+  kHd3d_ObjPushBlock = 0x400,
+  kHd3d_ObjTorch = 0x401,
+};
+void Hd3d_RoomBuildBegin(int room);
+void Hd3d_RoomPass(int pass);
+void Hd3d_ObjBegin(void);
+void Hd3d_ObjEnd(int code, int x, int y);
+void Hd3d_RoomBuildEnd(void);
 
 #endif  // ZELDA3_HD_3D_H_

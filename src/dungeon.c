@@ -19,6 +19,7 @@
 #include "hd_water.h"
 #include "hd_menu.h"
 #include "hd_icegba.h"
+#include "hd_3d.h"
 
 // todo: move to config
 static const uint16 kBossRooms[] = {
@@ -2624,31 +2625,42 @@ void Dungeon_LoadRoom() {  // 81873a
   dung_load_ptr_offs = 0;
   RoomDraw_DrawFloors(cur_p0);
 
+  // Vista 3D (hd_3d.c): si annota quale oggetto della stanza disegna ogni
+  // casella (muri, letti, vasi...) per dare l'altezza giusta a ognuno
+  Hd3d_RoomBuildBegin(dungeon_room_index);
+
   uint16 old_offs = dung_load_ptr_offs;
   dung_layout_and_starting_quadrant = cur_p0[dung_load_ptr_offs];
 
   const uint8 *cur_p1 = GetDefaultRoomLayout(dung_layout_and_starting_quadrant >> 2);
 
   dung_load_ptr_offs = 0;
+  Hd3d_RoomPass(0);  // forma della stanza (muri)
   RoomDraw_DrawAllObjects(cur_p1);
 
   dung_load_ptr_offs = old_offs + 1;
 
+  Hd3d_RoomPass(1);
   RoomDraw_DrawAllObjects(cur_p0);  // Draw Layer 1 objects to BG2
   dung_load_ptr_offs += 2;
 
   memcpy(&dung_line_ptrs_row0, kDungeon_DrawObjectOffsets_BG2, 33);
+  Hd3d_RoomPass(2);
   RoomDraw_DrawAllObjects(cur_p0);  // Draw Layer 2 objects to BG2
   dung_load_ptr_offs += 2;
 
   memcpy(&dung_line_ptrs_row0, kDungeon_DrawObjectOffsets_BG1, 33);
+  Hd3d_RoomPass(3);
   RoomDraw_DrawAllObjects(cur_p0);  // Draw Layer 3 objects to BG2
 
   int num_blocks = HdIce_NumMovableBlocks();  // 99, o 100 con Palazzo 6 come GBA
   for (dung_load_ptr_offs = 0; dung_load_ptr_offs != num_blocks * 4; dung_load_ptr_offs += 4) {
     MovableBlockData m = movable_block_datas[dung_load_ptr_offs >> 2];
-    if (m.room == dungeon_room_index)
+    if (m.room == dungeon_room_index) {
+      Hd3d_ObjBegin();
       DrawObjects_PushableBlock(m.tilemap, dung_load_ptr_offs);
+      Hd3d_ObjEnd(kHd3d_ObjPushBlock, (m.tilemap >> 1) & 63, (m.tilemap >> 7) & 63);
+    }
   }
 
   uint16 t;
@@ -2662,7 +2674,9 @@ void Dungeon_LoadRoom() {  // 81873a
       do {
         t = dung_torch_data[i >> 1];
         i += 2;
+        Hd3d_ObjBegin();
         DrawObjects_LightableTorch(t, i - 2);
+        Hd3d_ObjEnd(kHd3d_ObjTorch, ((t & 0x3fff) >> 1) & 63, ((t & 0x3fff) >> 7) & 63);
       } while (dung_torch_data[i >> 1] != 0xffff);
       break;
     }
@@ -2674,6 +2688,7 @@ void Dungeon_LoadRoom() {  // 81873a
   } while (i != 0x120);
 
   dung_load_ptr_offs = 0x120;
+  Hd3d_RoomBuildEnd();
 }
 
 void RoomDraw_DrawAllObjects(const uint8 *level_data) {  // 8188e4
@@ -2691,7 +2706,9 @@ void RoomDraw_DrawAllObjects(const uint8 *level_data) {  // 8188e4
     uint16 d = WORD(level_data[dung_load_ptr_offs]);
     if (d == 0xffff)
       return;
+    Hd3d_ObjBegin();
     RoomData_DrawObject_Door(d);
+    Hd3d_ObjEnd(kHd3d_ObjDoor | (d >> 8), -1, -1);   // porta: tipo nel byte alto
   }
 }
 
@@ -2718,17 +2735,22 @@ void RoomData_DrawObject(uint16 r0, const uint8 *level_data) {  // 81893c
     uint8 x = (uint8)r0 >> 2;
     uint8 y = (r0 >> 10);
     uint16 dst = y * 64 + x;
+    Hd3d_ObjBegin();
     if (idx < 0xf8) {
       LoadType1ObjectSubtype1(idx, DstoPtr(dst), dst);
+      Hd3d_ObjEnd(kHd3d_ObjSubtype1 | idx, x, y);
     } else {
       idx = (idx & 7) << 4 | ((r0 >> 8) & 3) << 2 | (r0 & 3);
       LoadType1ObjectSubtype3(idx, DstoPtr(dst), dst);
+      Hd3d_ObjEnd(kHd3d_ObjSubtype3 | idx, x, y);
     }
   } else {
     uint8 x = (r0 & 3) << 4 | (r0 >> 12) & 0xf;
     uint8 y = ((r0 >> 8) & 0xf) << 2 | (idx >> 6);
     uint16 dst = y * 64 + x;
+    Hd3d_ObjBegin();
     LoadType1ObjectSubtype2(idx & 0x3f, DstoPtr(dst), dst);
+    Hd3d_ObjEnd(kHd3d_ObjSubtype2 | (idx & 0x3f), x, y);
   }
 }
 

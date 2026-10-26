@@ -40,6 +40,7 @@ enum {
   kKeys_View3DDrawDistance,
   kKeys_View3DDump,
   kKeys_View3DWalls,
+  kKeys_View3DRoomDump,
   kKeys_Total,
 };
 

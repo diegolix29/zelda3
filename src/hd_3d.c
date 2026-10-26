@@ -643,8 +643,9 @@ static void DrawGround(uint32 *out, int pitch_px, const Cam *cm, const Ground *g
 // when that ground is a wall, fill the rows its face and top cover above what
 // is already drawn. A depth buffer keeps characters behind walls hidden.
 
-enum { kWallMax = 32 };          // tallest wall, pixels
-static uint8 g_hmap[64 * 64];    // wall height per 8x8 tile of the room
+enum { kWallMax = 48 };          // tallest wall, pixels
+static uint8 g_hmap[64 * 64];    // height per 8x8 tile of the room
+static uint8 g_hfold[64 * 64];   // 1 = the surface shows the art z pixels north (fold-up)
 static bool g_depth_valid;
 static int g_stat_wall_cells;
 
@@ -652,35 +653,274 @@ static bool IsWallAttr(uint8 a) {
   return a >= 0x01 && a <= 0x03;
 }
 
+// --- which room object drew each tile (recorded while the room is built) ---
+
+enum {
+  kCls_Floor,
+  kCls_Wall,       // walls of the room (raised only where solid)
+  kCls_Ceiling,    // the dark void above walls
+  kCls_Door,       // door frames (raised only where solid)
+  kCls_Rail,       // rails, low walls
+  kCls_Furniture,  // beds, tables, chairs, pews, forge
+  kCls_Small,      // pots, chests, chest pedestals
+  kCls_Block,      // blocks, pegs, big chests
+  kCls_Tall,       // statues, columns
+  kCls_Torch,
+  kCls_Count,
+};
+static const char kClsLetter[kCls_Count] = { '.', 'W', 'C', 'D', 'r', 'f', 'o', 'b', 'T', 't' };
+static const char *const kClsName[kCls_Count] = {
+  "floor", "wall", "ceiling", "door", "rail", "furniture", "small", "block", "tall", "torch",
+};
+static const uint8 kClsHeight[kCls_Count] = { 0, kWallMax, kWallMax, kWallMax, 8, 12, 10, 16, 28, 14 };
+
+// Object ids and names from the comments in dungeon.c (LoadType1ObjectSubtype1/2/3)
+static int ObjectClass(int code) {
+  int id = code & 0xff;
+  switch (code & 0xf00) {
+  case kHd3d_ObjSubtype1:
+    if (id == 0x00 || id == 0x60 || (id >= 0xa0 && id <= 0xac && id != 0xa4) || id == 0xc0 || id == 0xc2)
+      return kCls_Ceiling;
+    if ((id >= 0x01 && id <= 0x20) || id == 0x53 || id == 0xb6 || id == 0xb7 || id == 0x36 || id == 0x37 ||
+        id == 0x3a || id == 0x3b || id == 0x3e || id == 0x4b || id == 0x51 || id == 0x52 || id == 0x55 ||
+        id == 0x56 || id == 0x61 || id == 0x62 || id == 0x90 || id == 0x91 || (id >= 0x64 && id <= 0x68) ||
+        id == 0x73 || id == 0x74 || id == 0x76 || id == 0x77 || id == 0x78 || id == 0x7b ||
+        (id >= 0x7f && id <= 0x86) || id == 0xcd || id == 0xce)
+      return kCls_Wall;
+    if (id == 0x22 || id == 0x2f || id == 0x30 || id == 0x5f || id == 0x69 || id == 0x6c || id == 0x6d ||
+        id == 0x88 || id == 0x8a)
+      return kCls_Rail;
+    if (id == 0x3c || id == 0xdd)
+      return kCls_Furniture;
+    if (id == 0x38 || id == 0x39 || id == 0x3d || id == 0x75 || id == 0x87)
+      return kCls_Tall;
+    if (id == 0x89 || id == 0xb8 || id == 0xb9 || id == 0x92 || id == 0x93 || id == 0x96 || id == 0xbd || id == 0xde)
+      return kCls_Block;
+    if (id == 0x95 || id == 0xbc || id == 0xc1 || id == 0xdc)
+      return kCls_Small;
+    return kCls_Floor;
+  case kHd3d_ObjSubtype2:
+    if ((id >= 0x04 && id <= 0x1b) || id == 0x2a || id == 0x3c)
+      return kCls_Wall;
+    if (id == 0x1d || id == 0x21 || id == 0x26)
+      return kCls_Tall;
+    if (id == 0x22 || id == 0x28 || id == 0x23 || id == 0x3e)
+      return kCls_Furniture;
+    if (id == 0x20)
+      return kCls_Torch;
+    return kCls_Floor;
+  case kHd3d_ObjSubtype3:
+    if (id <= 0x02 || id == 0x0d || id == 0x17 || id == 0x18 || id == 0x69 || id == 0x6a || id == 0x6e || id == 0x6f)
+      return kCls_Wall;
+    if (id == 0x19 || id == 0x2f || id == 0x5a)
+      return kCls_Small;
+    if (id == 0x2c || id == 0x31 || id == 0x32 || id == 0x16)
+      return kCls_Block;
+    if (id == 0x4d || id == 0x5d || id == 0x2d)
+      return kCls_Furniture;
+    return kCls_Floor;
+  case kHd3d_ObjDoor:
+    return kCls_Door;
+  }
+  if (code == kHd3d_ObjPushBlock) return kCls_Block;
+  if (code == kHd3d_ObjTorch) return kCls_Torch;
+  return kCls_Floor;
+}
+
+typedef struct RoomObj {
+  uint16 code;
+  int8 x, y;
+  uint8 pass, cls;
+  uint16 tiles;      // tiles it drew (both layers)
+} RoomObj;
+enum { kMaxRoomObjs = 256 };
+static RoomObj g_room_objs[kMaxRoomObjs];
+static int g_n_room_objs;
+static uint16 g_tile_obj[2][64 * 64];   // per layer (0 = BG2, 1 = BG1): room object index + 1, 0 = none
+static uint16 g_snap[2][64 * 64];
+static int g_room_id = -1, g_room_pass;
+static bool g_room_building, g_room_dump_request;
+
+void Hd3d_RoomBuildBegin(int room) {
+  g_room_building = true;
+  g_room_id = room;
+  g_n_room_objs = 0;
+  g_room_pass = 0;
+  memset(g_tile_obj, 0, sizeof(g_tile_obj));
+}
+
+void Hd3d_RoomPass(int pass) {
+  g_room_pass = pass;
+}
+
+void Hd3d_ObjBegin(void) {
+  if (!g_room_building)
+    return;
+  memcpy(g_snap[0], dung_bg2, sizeof(g_snap[0]));
+  memcpy(g_snap[1], dung_bg1, sizeof(g_snap[1]));
+}
+
+void Hd3d_ObjEnd(int code, int x, int y) {
+  if (!g_room_building || g_n_room_objs == kMaxRoomObjs)
+    return;
+  int idx = g_n_room_objs++;
+  RoomObj *o = &g_room_objs[idx];
+  o->code = (uint16)code, o->x = (int8)x, o->y = (int8)y, o->pass = (uint8)g_room_pass;
+  o->cls = (uint8)ObjectClass(code);
+  int tiles = 0;
+  for (int i = 0; i < 64 * 64; i++) {
+    if (dung_bg2[i] != g_snap[0][i])
+      g_tile_obj[0][i] = (uint16)(idx + 1), tiles++;
+    if (dung_bg1[i] != g_snap[1][i])
+      g_tile_obj[1][i] = (uint16)(idx + 1), tiles++;
+  }
+  o->tiles = (uint16)tiles;
+}
+
+void Hd3d_RoomBuildEnd(void) {
+  g_room_building = false;
+  int counts[kCls_Count] = { 0 };
+  for (int i = 0; i < g_n_room_objs; i++)
+    counts[g_room_objs[i].cls]++;
+  Hd3d_Log("room %d built: %d objects (walls %d, ceiling %d, doors %d, rails %d, furniture %d, small %d, blocks %d, "
+           "tall %d, torches %d)", g_room_id, g_n_room_objs, counts[kCls_Wall], counts[kCls_Ceiling],
+           counts[kCls_Door], counts[kCls_Rail], counts[kCls_Furniture], counts[kCls_Small], counts[kCls_Block],
+           counts[kCls_Tall], counts[kCls_Torch]);
+}
+
+void Hd3d_RequestRoomDump(void) {
+  g_room_dump_request = true;
+  Hd3d_Log("room dump requested (key 8)");
+}
+
+static int CellClass(int cell) {
+  int best = kCls_Floor;
+  for (int l = 0; l < 2; l++) {
+    int o = g_tile_obj[l][cell];
+    if (o && kClsHeight[g_room_objs[o - 1].cls] > kClsHeight[best])
+      best = g_room_objs[o - 1].cls;
+  }
+  return best;
+}
+
+static bool IsWallClass(int c) {
+  return c == kCls_Wall || c == kCls_Ceiling || c == kCls_Door;
+}
+
+static void RoomDump(const uint8 *attr, const uint8 *cls) {
+  Hd3d_Log("=== room dump: room %d (built for %d), layer %s, %d objects", dungeon_room_index, g_room_id,
+           link_is_on_lower_level ? "lower" : "upper", g_n_room_objs);
+  for (int i = 0; i < g_n_room_objs; i++) {
+    const RoomObj *o = &g_room_objs[i];
+    const char *kind = (o->code & 0xf00) == kHd3d_ObjSubtype1 ? "T1" : (o->code & 0xf00) == kHd3d_ObjSubtype2 ? "T2" :
+                       (o->code & 0xf00) == kHd3d_ObjSubtype3 ? "T3" : (o->code & 0xf00) == kHd3d_ObjDoor ? "door" :
+                       o->code == kHd3d_ObjPushBlock ? "pushblock" : "torch";
+    Hd3d_Log("  obj %3d pass %d %s 0x%02x at (%d,%d) tiles %d -> %s", i, o->pass, kind, o->code & 0xff, o->x, o->y,
+             o->tiles, kClsName[o->cls]);
+  }
+  Hd3d_Log("  class map, then heights (64x64 tiles of 8 px; . floor W wall C ceiling D door r rail f furniture "
+           "o small b block T tall t torch; w = wall class but not solid, so flat; heights in 8 px):");
+  char line[3 * 64 + 8];
+  for (int y = 0; y < 64; y++) {
+    int n = 0;
+    for (int x = 0; x < 64; x++) {
+      int c = y * 64 + x;
+      char ch = kClsLetter[cls[c]];
+      if (IsWallClass(cls[c]) && !IsWallAttr(attr[c]))
+        ch = 'w';
+      line[n++] = ch;
+    }
+    line[n++] = ' ', line[n++] = '|', line[n++] = ' ';
+    for (int x = 0; x < 64; x++) {
+      int hgt = g_hmap[y * 64 + x];
+      line[n++] = hgt ? (char)('0' + (hgt / 8 > 9 ? 9 : hgt / 8)) : '.';
+    }
+    line[n] = 0;
+    Hd3d_Log("  %2d %s", y, line);
+  }
+  Hd3d_Log("  collision types (hex per tile):");
+  for (int y = 0; y < 64; y++) {
+    char hex[64 * 2 + 1];
+    for (int x = 0; x < 64; x++)
+      snprintf(hex + x * 2, 3, "%02x", attr[y * 64 + x]);
+    Hd3d_Log("  %2d %s", y, hex);
+  }
+}
+
 static void BuildHeightMap(void) {
   // the table of the layer Link is on, as the game's tile detection reads it
   const uint8 *attr = dung_bg2_attr_table + (link_is_on_lower_level ? 0x1000 : 0);
+  bool objects = g_room_id == dungeon_room_index && g_n_room_objs > 0;
+  uint8 cls[64 * 64];
   int cells = 0;
+  if (!objects) {
+    // no object info: every solid tile is a wall (first version)
+    for (int i = 0; i < 64 * 64; i++)
+      cls[i] = IsWallAttr(attr[i]) ? kCls_Wall : kCls_Floor;
+  } else {
+    for (int i = 0; i < 64 * 64; i++)
+      cls[i] = (uint8)CellClass(i);
+  }
+  // raised wall tiles: wall class and solid for the game
+  uint8 wall[64 * 64];
+  for (int i = 0; i < 64 * 64; i++)
+    wall[i] = IsWallClass(cls[i]) && IsWallAttr(attr[i]);
+
+  memset(g_hmap, 0, sizeof(g_hmap));
+  memset(g_hfold, 0, sizeof(g_hfold));
   for (int cx = 0; cx < 64; cx++) {
     int cy = 0;
     while (cy < 64) {
-      if (!IsWallAttr(attr[cy * 64 + cx])) {
-        g_hmap[cy * 64 + cx] = 0;
-        cy++;
+      int c = cy * 64 + cx;
+      if (wall[c]) {
+        int y0 = cy;
+        while (cy < 64 && wall[cy * 64 + cx])
+          cy++;
+        bool floor_n = y0 > 0 && !wall[(y0 - 1) * 64 + cx];
+        bool floor_s = cy < 64 && !wall[cy * 64 + cx];
+        int hgt = (cy - y0) * 8;
+        bool fold = true;
+        if (floor_n && !floor_s) {
+          hgt = 16, fold = false;          // south wall: we look at its top
+        } else if (!floor_s) {
+          if (hgt > 32) hgt = 32;          // side walls (run to the next wall)
+        }
+        if (hgt > kWallMax) hgt = kWallMax;
+        for (int y = y0; y < cy; y++)
+          g_hmap[y * 64 + cx] = (uint8)hgt, g_hfold[y * 64 + cx] = fold;
+        cells += cy - y0;
         continue;
       }
-      int y0 = cy;
-      while (cy < 64 && IsWallAttr(attr[cy * 64 + cx]))
-        cy++;
-      int hgt = (cy - y0) * 8;
-      if (hgt > kWallMax)
-        hgt = kWallMax;
-      for (int y = y0; y < cy; y++)
-        g_hmap[y * 64 + cx] = (uint8)hgt;
-      cells += cy - y0;
+      int k = cls[c];
+      if (k != kCls_Floor && !IsWallClass(k)) {
+        // an object: as tall as its class (or its depth, if smaller)
+        int y0 = cy;
+        while (cy < 64 && cls[cy * 64 + cx] == k)
+          cy++;
+        int hgt = (cy - y0) * 8;
+        if (hgt > kClsHeight[k]) hgt = kClsHeight[k];
+        for (int y = y0; y < cy; y++)
+          g_hmap[y * 64 + cx] = (uint8)hgt, g_hfold[y * 64 + cx] = 1;
+        cells += cy - y0;
+        continue;
+      }
+      cy++;
     }
   }
   g_stat_wall_cells += cells;
+  if (g_room_dump_request) {
+    g_room_dump_request = false;
+    if (!objects)
+      Hd3d_Log("room dump: no object info for room %d (built for %d)", dungeon_room_index, g_room_id);
+    RoomDump(attr, cls);
+  }
 }
 
-static inline int HeightAt(const Ground *gr, float u, float v) {
+static inline int HeightAt(const Ground *gr, float u, float v, int *fold) {
   int wx = gr->org_x + (int)floorf(u), wy = gr->org_y + (int)floorf(v);
-  return g_hmap[((wy >> 3) & 63) * 64 + ((wx >> 3) & 63)];
+  int c = ((wy >> 3) & 63) * 64 + ((wx >> 3) & 63);
+  *fold = g_hfold[c];
+  return g_hmap[c];
 }
 
 // ground color at frame coordinates (u, v): the PPU frame inside the SNES
@@ -712,7 +952,8 @@ static void DrawTerrain(uint32 *out, int pitch_px, const Cam *cm, const Ground *
       }
       int f = depth > kFogStart ? (int)((depth - kFogStart) * (256.0f / (kFogEnd - kFogStart))) : 0;
       if (f > 256) f = 256;
-      int hgt = HeightAt(gr, u, v);
+      int fold;
+      int hgt = HeightAt(gr, u, v, &fold);
       int top = y;
       float sy_top = y + 0.5f;
       if (hgt) {
@@ -728,7 +969,7 @@ static void DrawTerrain(uint32 *out, int pitch_px, const Cam *cm, const Ground *
       for (int r = ybuf - 1; r >= top; r--) {
         // height of this row on the face, then fold-up: art z pixels north
         float z = 0.0f;
-        if (hgt && span > 0.01f) {
+        if (hgt && fold && span > 0.01f) {
           z = hgt * ((y + 0.5f) - (r + 0.5f)) / span;
           z = z < 0 ? 0 : z > hgt ? (float)hgt : z;
         }
