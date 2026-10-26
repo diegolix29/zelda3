@@ -1155,7 +1155,8 @@ static void UpdateMist(bool step) {
 // laterali e la riga in fondo restano nere. Li' l'acqua non c'e'
 static int g_vis_x0, g_vis_x1, g_vis_y1;
 
-static void DrawMist(uint8 *pixels, int pitch, int width, int height, int cam_x, int cam_y, int ext) {
+// dark: Mondo Oscuro all'aperto, nebbia nera come la schiuma della riva
+static void DrawMist(uint8 *pixels, int pitch, int width, int height, int cam_x, int cam_y, int ext, bool dark) {
   for (int i = 0; i < g_num_mist; i++) {
     Mist *m = &g_mist[i];
     float k = (float)m->age / m->life;
@@ -1180,7 +1181,10 @@ static void DrawMist(uint8 *pixels, int pitch, int width, int height, int cam_x,
         float a = alpha * q * q;
         uint32 c = row[x];
         float r = (float)(c >> 16 & 0xff), g = (float)(c >> 8 & 0xff), b = (float)(c & 0xff);
-        row[x] = PackColor(r + (240 * g_bright - r) * a, g + (246 * g_bright - g) * a, b + (255 * g_bright - b) * a, c >> 24);
+        float tr = 240 * g_bright, tg = 246 * g_bright, tb = 255 * g_bright;
+        if (dark)
+          tr = r * 0.12f + 6, tg = g * 0.12f + 2, tb = b * 0.12f;
+        row[x] = PackColor(r + (tr - r) * a, g + (tg - g) * a, b + (tb - b) * a, c >> 24);
       }
     }
   }
@@ -1463,6 +1467,16 @@ static void MarkSmallIslands(int w, int h, int cam_x, int cam_y, int ext) {
         g_cell_own[st[j] / kMaxCellsX][st[j] % kMaxCellsX] = 1;
     }
 #undef LAND
+  // i sassi nell'acqua (caselle 0x1e1 sopra e 0x1cf sotto, palette 7; nella
+  // palude sembrano ceppi) tengono tutti l'anello col filo verde dello SNES e
+  // la schiuma attorno, anche quelli che si toccano (cerchio di sassi): prima
+  // solo le isolette piccole, e nel cerchio l'anello diventava acqua
+  for (int cy = 0; cy < kMaxCellsY; cy++)
+    for (int cx = 0; cx < kMaxCellsX; cx++) {
+      int e = g_cell_entry[cy][cx], t = e & 0x3ff;
+      if (e >= 0 && (e >> 10 & 7) == 7 && (t == 0x1e1 || t == 0x1cf))
+        g_cell_own[cy][cx] = 1;
+    }
   DilateCells(g_cell_small, g_cell_own, 2);
   DilateCells(g_cell_near1, g_cell_own, 1);
   // l'anello: i pixel nelle caselle dell'isoletta e quelli attaccati fino a 2
@@ -2100,7 +2114,7 @@ void HdWater_Apply(uint8 *pixels, int pitch, int width, int height, int bias_x, 
   if (!n_water && !n_fall) {
     g_num_bases = 0;
     UpdateMist(step);
-    DrawMist(pixels, pitch, width, height, cam_x, cam_y, ext);
+    DrawMist(pixels, pitch, width, height, cam_x, cam_y, ext, outdoors && (overworld_screen_index & 0x40));
     return;
   }
   // la riva vera, pixel per pixel: vicino all'acqua marcata (12 pixel) i
@@ -2203,18 +2217,29 @@ void HdWater_Apply(uint8 *pixels, int pitch, int width, int height, int bias_x, 
           float side = 0.72f + 0.28f * Smooth(0, 6, (float)(l < rgt ? l : rgt));
           float r = fr * side, g = fg * side, b = fb * side;
           float a = st * 0.75f;
-          r += (228 - r) * a, g += (240 - g) * a, b += (255 - b) * a;
+          // nel Mondo Oscuro le cascate sono nere e verdi: striature, bordo
+          // della cima e schiuma vanno verso il nero (come la schiuma della riva)
+          float wr = 228, wg = 240, wb = 255;
+          if (dark_shore)
+            wr = r * 0.12f + 6, wg = g * 0.12f + 2, wb = b * 0.12f;
+          r += (wr - r) * a, g += (wg - g) * a, b += (wb - b) * a;
           // bordo chiaro nella cima vera (caselle 0x1ca-0x1cb), non sul bordo
           // dello schermo o dell'area (Cascata dei Desideri); schiuma in fondo
           float fby = (float)(bottom - yy);
           int lip_top = outdoors ? LipTop(x, yy, cam_x, cam_y, ext) : -1;
           if (lip_top >= 0) {
             float lip = 1 - Smooth(0, 6, wy - lip_top);
-            r += (245 - r) * lip * 0.7f, g += (250 - g) * lip * 0.7f, b += (255 - b) * lip * 0.7f;
+            if (dark_shore)
+              r += (r * 0.12f + 6 - r) * lip * 0.7f, g += (g * 0.12f + 2 - g) * lip * 0.7f, b += (b * 0.12f - b) * lip * 0.7f;
+            else
+              r += (245 - r) * lip * 0.7f, g += (250 - g) * lip * 0.7f, b += (255 - b) * lip * 0.7f;
           }
           if (foot) {
             float f = (1 - Smooth(0, 7, fby)) * (0.55f + 0.45f * Noise(wx * 0.3f, wy * 0.3f - t * 0.1f));
-            r += (240 - r) * f, g += (246 - g) * f, b += (255 - b) * f;
+            if (dark_shore)
+              r += (r * 0.12f + 6 - r) * f, g += (g * 0.12f + 2 - g) * f, b += (b * 0.12f - b) * f;
+            else
+              r += (240 - r) * f, g += (246 - g) * f, b += (255 - b) * f;
           }
           float kk[3];
           const float *k = fall_light ? &g_fall_k[i * 3] : kk;
@@ -2234,5 +2259,5 @@ void HdWater_Apply(uint8 *pixels, int pitch, int width, int height, int bias_x, 
 
   // 4: nebbia alla base delle cascate
   UpdateMist(step);
-  DrawMist(pixels, pitch, width, height, cam_x, cam_y, ext);
+  DrawMist(pixels, pitch, width, height, cam_x, cam_y, ext, dark_shore);
 }
