@@ -38,6 +38,7 @@ enum {
   kKeys_View3D,
   kKeys_View3DCurve,
   kKeys_View3DDrawDistance,
+  kKeys_View3DDump,
   kKeys_Total,
 };
 

@@ -3340,7 +3340,7 @@ void HdWorld_OverlayFlat(uint8 *pixels, int pitch, int width, int height, bool u
       for (int x = 0; x < width; x++) {
         uint32 c = row[x], l = c >> 24 & 0xf;
         int bit = l == 7 ? 1 : l == 3 ? 5 : l;
-        if (l == 2 || l == 4 || !(ppu->mathEnabled & (1 << bit)))
+        if (l == 2 || l == 4 || l == 6 || !(ppu->mathEnabled & (1 << bit)))
           continue;
         int cr = c >> 16 & 255, cg = c >> 8 & 255, cb = c & 255;
         cr += (((cr + ar) >> 1) - cr) * k >> 8;
@@ -3355,7 +3355,7 @@ void HdWorld_OverlayFlat(uint8 *pixels, int pitch, int width, int height, bool u
     uint32 *row = (uint32 *)(pixels + y * pitch);
     for (int x = 0; x < width; x++) {
       uint32 l = row[x] >> 24 & 0xf;
-      if (l == 2 || l == 4)
+      if (l == 2 || l == 4 || l == 6)
         continue;
       // stessi strati a cui il gioco somma lo strato (7 = acqua, e' BG2;
       // 3 = fondale e cielo della vista 3D, come il colore di fondo)

@@ -1171,6 +1171,15 @@ void Sprite_Main() {  // 868328
   Overlord_Main();
   archery_game_out_of_arrows = 0;
   memset(g_sprite_oam_owner, 0xff, sizeof(g_sprite_oam_owner));
+  // vista 3D: nemici lontani disegnati fuori dall'OAM (vedi sotto)
+  int fmx, fmt, fmb;
+  bool far_frame = !g_hd_neighbor_tick && Hd3d_FarSprites(&fmx, &fmt, &fmb);
+  if (!g_hd_neighbor_tick)
+    Hd3d_FarPiecesClear();
+  static OamEnt far_saved_oam[128];
+  static uint8 far_saved_ext[128], far_saved_f0[128];
+  static uint16 far_saved_region[6], far_saved_alloc[6];
+  static uint16 far_saved_cur, far_saved_ext_cur;
   // Nome del dungeon sullo schermo: nemici fermi (ma disegnati) con il blocco
   // del gioco, finche' Link non si muove
   uint8 saved_freeze = flag_unk1;
@@ -1181,6 +1190,20 @@ void Sprite_Main() {  // 868328
     // Si segna quali voci OAM scrive ogni nemico (come per Link in
     // LinkOam_Main): con la vista spostata la posizione di ogni pezzo si
     // ricava dal suo nemico invece che dall'oggetto piu' vicino
+    // Vista 3D con distanza di disegno: un nemico lontano non deve occupare
+    // le voci OAM (sono 128 per tutto: senza posto il boomerang, le leve e le
+    // fiamme lampeggiavano). Si salva l'OAM e lo stato delle regioni: se il
+    // nemico risulta lontano, i suoi pezzi vanno nella lista a parte
+    // (Hd3d_FarPiece) e tutto torna com'era prima del suo turno
+    bool far_mode = far_frame;
+    if (far_mode) {
+      memcpy(far_saved_oam, oam_buf, sizeof(far_saved_oam));
+      memcpy(far_saved_ext, bytewise_extended_oam, sizeof(far_saved_ext));
+      memcpy(far_saved_f0, g_oam_real_f0, sizeof(far_saved_f0));
+      memcpy(far_saved_region, oam_region_base, sizeof(far_saved_region));
+      memcpy(far_saved_alloc, oam_alloc_arr1, sizeof(far_saved_alloc));
+      far_saved_cur = oam_cur_ptr, far_saved_ext_cur = oam_ext_cur_ptr;
+    }
     uint16 saved[128];
     for (int j = 0; j < 128; j++)
       saved[j] = WORD(oam_buf[j].charnum), WORD(oam_buf[j].charnum) = 0xffff;
@@ -1195,6 +1218,28 @@ void Sprite_Main() {  // 868328
     bool hide = g_sprite_offscreen[i] != 0;
     if (hide || g_sprite_far[i])
       sound_effect_1 = sfx1, sound_effect_2 = sfx2;
+    if (far_mode && g_sprite_far[i] && !hide) {
+      // posizione vera di ogni pezzo (rispetto alla telecamera del gioco):
+      // resta entro ~128 pixel dal nemico, x con giri di 512 e y di 256
+      int ox = (int16)(Sprite_GetX(i) - BG2HOFS_copy2);
+      int oy = (int16)(Sprite_GetY(i) - sprite_z[i] - BG2VOFS_copy2);
+      for (int j = 0; j < 128; j++) {
+        if (WORD(oam_buf[j].charnum) == 0xffff)
+          continue;
+        uint8 ext = bytewise_extended_oam[j];
+        int x = oam_buf[j].x + (ext & 1) * 256, y = oam_buf[j].y;
+        x += ((ox - x + 256) >> 9) * 512;   // giro di 512 piu' vicino al nemico
+        y += ((oy - y + 128) >> 8) * 256;   // giro di 256 piu' vicino
+        Hd3d_FarPiece(i, x, y, WORD(oam_buf[j].charnum), (ext >> 1) & 1);
+      }
+      memcpy(oam_buf, far_saved_oam, sizeof(far_saved_oam));
+      memcpy(bytewise_extended_oam, far_saved_ext, sizeof(far_saved_ext));
+      memcpy(g_oam_real_f0, far_saved_f0, sizeof(far_saved_f0));
+      memcpy(oam_region_base, far_saved_region, sizeof(far_saved_region));
+      memcpy(oam_alloc_arr1, far_saved_alloc, sizeof(far_saved_alloc));
+      oam_cur_ptr = far_saved_cur, oam_ext_cur_ptr = far_saved_ext_cur;
+      continue;
+    }
     for (int j = 0; j < 128; j++) {
       if (WORD(oam_buf[j].charnum) == 0xffff)
         WORD(oam_buf[j].charnum) = saved[j];

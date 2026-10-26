@@ -19,6 +19,10 @@ const char *Hd3d_DrawDistanceName(int dist);
 // Sprite draw distance: true when enemies beyond the view should still be
 // drawn, with the extra margins (pixels) left/right, above and below the view
 bool Hd3d_FarSprites(int *margin_x, int *margin_top, int *margin_bottom);
+// Pieces of far enemies, kept out of the real OAM (sprite.c, Sprite_Main):
+// position relative to the game camera, OAM word 1 (tile + flags), big size
+void Hd3d_FarPiecesClear(void);
+void Hd3d_FarPiece(int slot, int x, int y, uint16 char_flags, int big);
 
 void Hd3d_Init(void);
 void Hd3d_SetLevel(int level, const char *why);
@@ -37,5 +41,7 @@ void Hd3d_AfterLines(Ppu *ppu);
 void Hd3d_EndFrame(uint8 *pixels, int pitch, int width, int height);
 
 void Hd3d_Log(const char *fmt, ...);
+// Writes every sprite piece and group of the next 3D frame to the log (key 6)
+void Hd3d_RequestDump(void);
 
 #endif  // ZELDA3_HD_3D_H_

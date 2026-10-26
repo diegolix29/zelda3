@@ -284,7 +284,10 @@ void Hd3d_CaptureLine(Ppu *ppu, int line) {
   uint8 *own = g_owner + (line - 1) * g_w;
   int base = kPpuExtraLeftRight - ppu->extraLeftRight;
   for (int c = 0; c < g_w; c++) {
-    if ((row[c] >> 24 & 0xf) == 4) {
+    // sprite pixels are layer 4 (palettes 4-7) or 6 (palettes 0-3: boomerang,
+    // levers, lamp flame...), see SPRITE_PRIO_TO_PRIO in snes/ppu.c
+    uint32 l = row[c] >> 24 & 0xf;
+    if (l == 4 || l == 6) {
       int i = c + base;
       own[c] = (i >= 0 && i < kPpuXPixels) ? ppu->objOwnerLine[i] : 0xff;
     }
@@ -605,7 +608,7 @@ typedef struct Group {
   int x0, y0, x1, y1;
   bool far;            // drawn from the OAM table (pieces outside the SNES screen)
   int n_ents;
-  uint8 ents[24];      // OAM entries of a far group, in OAM order (first wins)
+  uint16 ents[24];     // entries of a far group (0-127 OAM, then far pieces), first wins
 } Group;
 
 enum { kMaxGroups = 64 };
@@ -691,8 +694,28 @@ static bool OamEntry(Ppu *ppu, int i, int *fx, int *fy, int *size) {
 }
 
 // one pixel of an OAM entry (local coordinates), as the PPU fetches it
-static bool OamPixel(Ppu *ppu, int i, int col, int row, int size, uint32 *out) {
-  int oam1 = ppu->oam[i * 2 + 1];
+// Far enemies' pieces, kept out of the real OAM (Sprite_Main in sprite.c)
+typedef struct FarPiece {
+  int16 x, y;          // relative to the game camera, like the OAM
+  uint16 char_flags;   // OAM word 1
+  uint8 big, slot;
+} FarPiece;
+enum { kMaxFarPieces = 256 };
+static FarPiece g_far[kMaxFarPieces];
+static int g_n_far;
+
+void Hd3d_FarPiecesClear(void) {
+  g_n_far = 0;
+}
+
+void Hd3d_FarPiece(int slot, int x, int y, uint16 char_flags, int big) {
+  if (g_n_far == kMaxFarPieces)
+    return;
+  FarPiece *f = &g_far[g_n_far++];
+  f->x = (int16)x, f->y = (int16)y, f->char_flags = char_flags, f->big = (uint8)big, f->slot = (uint8)slot;
+}
+
+static bool OamPixel(Ppu *ppu, int oam1, int col, int row, int size, uint32 *out) {
   if (oam1 & 0x8000) row = size - 1 - row;
   if (oam1 & 0x4000) col = size - 1 - col;
   int obj_adr = (oam1 & 0x100) ? ppu->objTileAdr2 : ppu->objTileAdr1;
@@ -707,23 +730,33 @@ static bool OamPixel(Ppu *ppu, int i, int col, int row, int size, uint32 *out) {
 }
 
 static int g_stat_far_groups;
+static bool g_dump_request;   // sprite dump to the log on the next 3D frame (key 6)
+
+void Hd3d_RequestDump(void) {
+  g_dump_request = true;
+  Hd3d_Log("sprite dump requested (key 6)%s", g_active_last ? "" : ": the 3D view is off, it runs on the next 3D frame");
+}
 
 static int DrawSprites(uint32 *out, int pitch_px, const Cam *cm, Ppu *ppu) {
   int w = g_w, h = g_h;
   Group groups[kMaxGroups];
-  int16 key_to_group[32 + 128];
+  int16 key_to_group[32 + 128 + 16];   // + far enemies (160 + slot)
   memset(key_to_group, 0xff, sizeof(key_to_group));
   int n = 0;
 
   // Groups with a piece outside the SNES screen are drawn entirely from the
   // OAM table (the PPU only drew their on-screen part)
-  bool far_key[32 + 128];
+  bool far_key[32 + 128 + 16];
   memset(far_key, 0, sizeof(far_key));
   // far pieces need their true positions (ResolveSpritePositions runs while
   // the draw distance is on)
   bool far_ok = ppu->objXValid && ppu->objYValid && g_view3d_dist > 0;
-  int efx[128], efy[128], esz[128];
+  // entries: 0-127 the OAM, then the far enemies' pieces
+  static int efx[128 + kMaxFarPieces], efy[128 + kMaxFarPieces], esz[128 + kMaxFarPieces];
+  static int ecf[128 + kMaxFarPieces];
   bool evis[128];
+  for (int i = 0; i < 128; i++)
+    ecf[i] = ppu->oam[i * 2 + 1];
   for (int i = 0; i < 128; i++)
     evis[i] = OamEntry(ppu, i, &efx[i], &efy[i], &esz[i]);
   OamGroups(evis, efx, efy, esz);
@@ -732,11 +765,18 @@ static int DrawSprites(uint32 *out, int pitch_px, const Cam *cm, Ppu *ppu) {
       far_key[GroupKey(i)] = true;
   }
 
+  bool dump = g_dump_request;
+  g_dump_request = false;
+  int captured[128];   // pixels the PPU drew for each OAM entry (dump only)
+  if (dump)
+    memset(captured, 0, sizeof(captured));
   memset(g_group_map, 0, w * h);
   for (int i = 0; i < w * h; i++) {
     uint8 o = g_owner[i];
     if (o >= 128)
       continue;
+    if (dump)
+      captured[o]++;
     int key = GroupKey(o);
     if (far_key[key])
       continue;
@@ -773,15 +813,64 @@ static int DrawSprites(uint32 *out, int pitch_px, const Cam *cm, Ppu *ppu) {
       far_groups++;
     }
     Group *g = &groups[gi];
-    if (g->n_ents == (int)sizeof(g->ents))
+    if (g->n_ents == (int)(sizeof(g->ents) / sizeof(g->ents[0])))
       continue;
-    g->ents[g->n_ents++] = (uint8)i;
+    g->ents[g->n_ents++] = (uint16)i;
     if (efx[i] < g->x0) g->x0 = efx[i];
     if (efx[i] + esz[i] - 1 > g->x1) g->x1 = efx[i] + esz[i] - 1;
     if (efy[i] < g->y0) g->y0 = efy[i];
     if (efy[i] + esz[i] - 1 > g->y1) g->y1 = efy[i] + esz[i] - 1;
   }
+  // far enemies (kept out of the OAM): one group per enemy slot
+  for (int p = 0; p < g_n_far; p++) {
+    const FarPiece *f = &g_far[p];
+    int e = 128 + p;
+    efx[e] = f->x - ppu->objBiasX + ppu->extraLeftRight;
+    efy[e] = f->y - ppu->objBiasY;
+    esz[e] = kObjSizes[ppu->objSize][f->big & 1];
+    ecf[e] = f->char_flags;
+    int key = 160 + (f->slot & 15);
+    int gi = key_to_group[key];
+    if (gi < 0) {
+      if (n == kMaxGroups)
+        continue;
+      gi = key_to_group[key] = n++;
+      groups[gi].key = key, groups[gi].far = true, groups[gi].n_ents = 0;
+      groups[gi].x0 = groups[gi].y0 = 1 << 20;
+      groups[gi].x1 = groups[gi].y1 = -(1 << 20);
+      far_groups++;
+    }
+    Group *g = &groups[gi];
+    if (g->n_ents == (int)(sizeof(g->ents) / sizeof(g->ents[0])))
+      continue;
+    g->ents[g->n_ents++] = (uint16)e;
+    if (efx[e] < g->x0) g->x0 = efx[e];
+    if (efx[e] + esz[e] - 1 > g->x1) g->x1 = efx[e] + esz[e] - 1;
+    if (efy[e] < g->y0) g->y0 = efy[e];
+    if (efy[e] + esz[e] - 1 > g->y1) g->y1 = efy[e] + esz[e] - 1;
+  }
   g_stat_far_groups += far_groups;
+  if (dump) {
+    Hd3d_Log("=== sprite dump: module=%d sub=%d room=%d area=0x%02x indoors=%d tilt=%.1f dist=%s objXValid=%d objYValid=%d "
+             "bias=%d,%d objSize=%d far pieces=%d groups=%d",
+             main_module_index, submodule_index, dungeon_room_index, BYTE(overworld_screen_index), player_is_indoors,
+             g_angle, kDistNames[g_view3d_dist], ppu->objXValid, ppu->objYValid, ppu->objBiasX, ppu->objBiasY,
+             ppu->objSize, g_n_far, n);
+    for (int i = 0; i < 128; i++) {
+      if (!evis[i] && !captured[i])
+        continue;
+      int cf = ecf[i], o = g_sprite_oam_owner[i];
+      Hd3d_Log("  oam %3d: %s frame=(%d,%d) size=%d tile=0x%03x pal=%d prio=%d flip=%c%c owner=%s%d key=%d far=%d "
+               "captured_px=%d",
+               i, evis[i] ? "vis " : "HID ", efx[i], efy[i], esz[i], cf & 0x1ff, (cf >> 9) & 7, (cf >> 12) & 3,
+               (cf & 0x4000) ? 'H' : '-', (cf & 0x8000) ? 'V' : '-',
+               g_link_oam_mask[i] ? "link" : o < 16 ? "slot" : "none", o < 16 ? o : -1, GroupKey(i),
+               far_key[GroupKey(i)], captured[i]);
+    }
+    for (int p = 0; p < g_n_far; p++)
+      Hd3d_Log("  far piece %d: slot=%d cam-rel=(%d,%d) tile=0x%03x pal=%d big=%d", p, g_far[p].slot, g_far[p].x,
+               g_far[p].y, g_far[p].char_flags & 0x1ff, (g_far[p].char_flags >> 9) & 7, g_far[p].big);
+  }
   if (n == 0)
     return 0;
   // sort far to near, remembering each group's id in g_group_map
@@ -794,10 +883,18 @@ static int DrawSprites(uint32 *out, int pitch_px, const Cam *cm, Ppu *ppu) {
     int id = (g->key & 0xff) + 1;
     float ax = (g->x0 + g->x1 + 1) * 0.5f, ay = (float)(g->y1 + 1);   // feet
     float sx, sy, sc;
-    if (!Cam_ToScreen(cm, ax, ay, &sx, &sy, &sc))
+    if (!Cam_ToScreen(cm, ax, ay, &sx, &sy, &sc)) {
+      if (dump)
+        Hd3d_Log("  group key=%d far=%d box=(%d,%d)-(%d,%d): NOT DRAWN (behind the camera)", g->key >> 8, g->far,
+                 g->x0, g->y0, g->x1, g->y1);
       continue;
+    }
     // far away: same fog as the ground, gone at the fog end
     float depth = cm->D / sc;
+    if (dump)
+      Hd3d_Log("  group key=%d far=%d box=(%d,%d)-(%d,%d) pieces=%d -> screen feet=(%.0f,%.0f) scale=%.2f%s",
+               g->key >> 8, g->far, g->x0, g->y0, g->x1, g->y1, g->n_ents, sx, sy, sc,
+               depth >= kFogEnd ? " NOT DRAWN (past the fog)" : "");
     if (depth >= kFogEnd)
       continue;
     float inv = 1.0f / sc;
@@ -829,7 +926,7 @@ static int DrawSprites(uint32 *out, int pitch_px, const Cam *cm, Ppu *ppu) {
             int i = g->ents[e], lx = vx - efx[i], ly = vy - efy[i];
             uint32 c;
             if ((unsigned)lx < (unsigned)esz[i] && (unsigned)ly < (unsigned)esz[i] &&
-                OamPixel(ppu, i, lx, ly, esz[i], &c)) {
+                OamPixel(ppu, ecf[i], lx, ly, esz[i], &c)) {
               dst[x] = c;
               break;
             }
@@ -891,7 +988,7 @@ void Hd3d_EndFrame(uint8 *pixels, int pitch, int width, int height) {
              g_stat_frames, ms, (double)g_stat_groups / g_stat_frames, g_stat_max_groups, g_angle, cm.R,
              g_stat_outside / g_stat_frames, g_stat_missing / g_stat_frames, kSourceNames[gr.source],
              (double)g_stat_far_groups / g_stat_frames, kDistNames[g_view3d_dist],
-             HdWorld_Active() ? "active" : "needs continuous world outdoors",
+             g_view3d_dist && !(HdWorld_Active() || player_is_indoors) ? "needs continuous world outdoors" : "ok",
              width, height, main_module_index, BYTE(overworld_screen_index));
     g_stat_ticks = 0, g_stat_frames = 0, g_stat_groups = 0, g_stat_max_groups = 0;
     g_stat_outside = 0, g_stat_missing = 0, g_stat_far_groups = 0;
