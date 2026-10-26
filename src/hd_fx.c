@@ -628,6 +628,12 @@ static RainDrop g_drops[kNumDrops];
 static bool g_drops_init;
 static float g_flash, g_flash_target;
 static bool g_flash_rise;
+// Vista 3D (hd_3d.c): pioggia e lampo non si inclinano con il terreno, si
+// disegnano dopo, piatti sulla vista (HdFx_FlatWeather)
+bool g_fx_flat_weather;
+static bool g_rain_pending, g_rain_step;
+static int g_rain_cam_x, g_rain_cam_y, g_rain_ext;
+static void LightningFlash(uint8 *pixels, int pitch, int width, int height);
 
 static bool IsRaining(int mod) {
   if (mod != 9)
@@ -959,8 +965,23 @@ static void StepLightning(bool step) {
 // schiarito e nel lampeggio si vedeva l'acqua del gioco sotto
 void HdFx_Lightning(uint8 *pixels, int pitch, int width, int height) {
   int mod;
-  if (g_flash < 0.02f || !InGameplay(&mod))
+  if (g_flash < 0.02f || !InGameplay(&mod) || g_fx_flat_weather)
     return;
+  LightningFlash(pixels, pitch, width, height);
+}
+
+// Vista 3D (hd_3d.c): pioggia e lampo disegnati piatti sulla vista finita
+void HdFx_FlatWeather(uint8 *pixels, int pitch, int width, int height) {
+  int mod;
+  if (g_rain_pending) {
+    ApplyRain(pixels, pitch, width, height, g_rain_cam_x, g_rain_cam_y, g_rain_ext, g_rain_step);
+    g_rain_pending = false;
+  }
+  if (g_flash >= 0.02f && InGameplay(&mod))
+    LightningFlash(pixels, pitch, width, height);
+}
+
+static void LightningFlash(uint8 *pixels, int pitch, int width, int height) {
   for (int y = 0; y < height; y++) {
     uint32 *row = (uint32 *)(pixels + y * pitch);
     for (int x = 0; x < width; x++) {
@@ -1337,7 +1358,13 @@ void HdFx_AfterLight(uint8 *pixels, int pitch, int width, int height, int bias_x
     ApplyBurning(pixels, pitch, width, height, cam_x, cam_y, ext, step);
   DrawParticles(pixels, pitch, width, height, cam_x, cam_y, ext);
   if (g_fx_rain && IsRaining(mod)) {
-    ApplyRain(pixels, pitch, width, height, cam_x, cam_y, ext, step);
+    // vista 3D: le gocce si disegnano piatte sopra la vista (HdFx_FlatWeather)
+    if (g_fx_flat_weather) {
+      g_rain_pending = true, g_rain_step = step;
+      g_rain_cam_x = cam_x, g_rain_cam_y = cam_y, g_rain_ext = ext;
+    } else {
+      ApplyRain(pixels, pitch, width, height, cam_x, cam_y, ext, step);
+    }
     StepLightning(step);
   } else {
     g_flash = 0, g_flash_rise = false;

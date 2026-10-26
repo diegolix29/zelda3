@@ -30,6 +30,9 @@ bool HdFx_FloodWindowShows(int sx, int sy);
 void HdFx_FrozenWater(uint8 *pixels, int pitch, int width, int height, int bias_x, int bias_y);
 // Schiarimento del lampo, dopo l'acqua HD e il ghiaccio
 void HdFx_Lightning(uint8 *pixels, int pitch, int width, int height);
+// Vista 3D: pioggia HD e lampo disegnati piatti dopo la proiezione (hd_3d.c)
+extern bool g_fx_flat_weather;
+void HdFx_FlatWeather(uint8 *pixels, int pitch, int width, int height);
 // Quanto e' acceso il lampo (0-1), per lo shader
 float HdFx_LightningWhite(void);
 // All'aperto con il sole (per le ombre delle nuvole dello shader)

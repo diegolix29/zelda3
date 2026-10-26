@@ -774,6 +774,7 @@ static void HandleCommand_Locked(uint32 j, bool pressed) {
     case kKeys_VolumeDown: HandleVolumeAdjustment(j == kKeys_VolumeUp ? 1 : -1); break;
     case kKeys_HdMenu: HdMenu_Open(); break;
     case kKeys_View3D: Hd3d_CycleLevel(); break;
+    case kKeys_View3DCurve: Hd3d_CycleCurve(); break;
     default: assert(0);
     }
   }

@@ -42,8 +42,8 @@ static const uint16 kDefaultKbdControls[kKeys_Total] = {
   _(SDLK_w), _(SDLK_o), S(SDLK_w), C(SDLK_e),
   // ClearKeyLog, StopReplay, Fullscreen, Reset, Pause, PauseDimmed, Turbo, ReplayTurbo, WindowBigger, WindowSmaller, DisplayPerf, ToggleRenderer
   _(SDLK_k), _(SDLK_l), A(SDLK_RETURN), C(SDLK_r), S(SDLK_p), _(SDLK_p), _(SDLK_TAB), _(SDLK_t), N, N, _(SDLK_f), _(SDLK_r),
-  // VolumeUp, VolumeDown, HdMenu, View3D
-  N, N, _(SDLK_ESCAPE), _(SDLK_3),
+  // VolumeUp, VolumeDown, HdMenu, View3D, View3DCurve
+  N, N, _(SDLK_ESCAPE), _(SDLK_3), _(SDLK_4),
 };
 #undef _
 #undef A
@@ -64,7 +64,7 @@ static const KeyNameId kKeyNameId[] = {
   S(CheatLife), S(CheatKeys), S(CheatEquipment), S(CheatWalkThroughWalls),
   S(ClearKeyLog), S(StopReplay), S(Fullscreen), S(Reset),
   S(Pause), S(PauseDimmed), S(Turbo), S(ReplayTurbo), S(WindowBigger), S(WindowSmaller), S(VolumeUp), S(VolumeDown), S(DisplayPerf), S(ToggleRenderer),
-  S(HdMenu), S(View3D),
+  S(HdMenu), S(View3D), S(View3DCurve),
 };
 #undef S
 #undef M
@@ -435,6 +435,9 @@ static bool HandleIniConfig(int section, const char *key, char *value) {
       return ParseBool(value, &g_config.hd_text);
     } else if (StringEqualsNoCase(key, "View3D")) {
       g_config.view3d = (uint8)strtol(value, (char**)NULL, 10);
+      return true;
+    } else if (StringEqualsNoCase(key, "View3DCurve")) {
+      g_config.view3d_curve = (uint8)strtol(value, (char**)NULL, 10);
       return true;
     } else if (StringEqualsNoCase(key, "SmoothCamera")) {
       g_config.smooth_camera = (uint8)strtol(value, (char**)NULL, 10);

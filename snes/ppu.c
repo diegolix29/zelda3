@@ -951,7 +951,9 @@ static void PpuDrawBackgrounds(Ppu *ppu, int y, bool sub) {
     PpuZbufType before[kPpuXPixels];
     if (cone)
       memcpy(before, ppu->bgBuffers[1].data, sizeof(before));
-    if (IS_MOSAIC_ENABLED(ppu, 0))
+    if (ppu->skipLayers & 1)
+      ;  // BG1 (strato del tempo atmosferico all'esterno) sommato a parte dalla vista 3D
+    else if (IS_MOSAIC_ENABLED(ppu, 0))
       PpuDrawBackground_4bpp_mosaic(ppu, y, sub, 0, 0xc000, 0x8000);
     else
       PpuDrawBackground_4bpp(ppu, y, sub, 0, 0xc000, 0x8000);

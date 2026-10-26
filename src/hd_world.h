@@ -114,4 +114,12 @@ const float *HdWorld_WarpRowDx(void);
 // nel pixel sx, sy dello schermo; -1 dove e' trasparente
 int HdWorld_OverlayColorAt(int sx, int sy);
 
+// Vista 3D (hd_3d.c): origine della vista nel mondo e terreno di un punto
+void HdWorld_ViewOrigin(int width, int *x, int *y);
+bool HdWorld_SampleGround(int wx, int wy, uint32 *out);
+// Vista 3D: strato del tempo atmosferico (pioggia, nebbia) tenuto piatto
+bool HdWorld_OverlayPresent(void);
+void HdWorld_SuppressOverlay(bool on);
+void HdWorld_OverlayFlat(uint8 *pixels, int pitch, int width, int height, bool uniform);
+
 #endif  // ZELDA3_HD_WORLD_H_

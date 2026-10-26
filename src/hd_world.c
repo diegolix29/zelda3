@@ -1507,7 +1507,7 @@ void HdWorld_UpdateCamera(int *cam_x, int *cam_y) {
 // ---------------------------------------------------------------------------
 // Immagini delle aree
 
-enum { kMaxImages = 16 };
+enum { kMaxImages = 32 };  // 32: la vista 3D guarda lontano (hd_3d.c)
 
 // Il gioco ferma la telecamera in modo che delle aree si vedano al massimo le
 // prime 510 righe su 512 (o 1022 su 1024): le ultime 2 non si vedono mai e
@@ -1938,10 +1938,14 @@ typedef struct OverlayCtx {
   int x0, y0;  // posizione nello strato del pixel 0,0 dello schermo
 } OverlayCtx;
 
+// Vista 3D (hd_3d.c): il terreno si disegna senza lo strato, che poi si somma
+// piatto su tutta la vista (HdWorld_OverlayFlat)
+static bool g_overlay_suppressed;
+
 static void OverlayBegin(OverlayCtx *o, int ext) {
   Ppu *ppu = g_zenv.ppu;
   bool sub = (ppu->screenEnabled[1] & 1) && !(ppu->screenEnabled[0] & 1) && ppu->addSubscreen &&
-             !ppu->subtractColor && ppu->mode != 7;
+             !ppu->subtractColor && ppu->mode != 7 && !g_overlay_suppressed;
   o->on = sub && (ppu->mathEnabled & 2) && ppu->halfColor;
   o->sky = sub && !o->on && (ppu->mathEnabled & 0x20);
   o->half = ppu->halfColor;
@@ -3247,4 +3251,118 @@ void HdWorld_Composite(uint8 *pixels, int pitch, int width, int height) {
   if (mosaic)
     FadeLikeGame(pixels, pitch, width, height);
   PrefetchNeighbors();
+}
+
+// ---------------------------------------------------------------------------
+// Vista 3D (hd_3d.c): il terreno oltre i bordi dello schermo
+
+// Punto del mondo che corrisponde al pixel (0, 0) del fotogramma (come in
+// HdWorld_Composite)
+void HdWorld_ViewOrigin(int width, int *x, int *y) {
+  Ppu *ppu = g_zenv.ppu;
+  int ext = (width - 256) / 2;
+  *x = (int16)BG2HOFS_copy + ppu->bgBiasX - ext;
+  *y = (int16)BG2VOFS_copy + ppu->bgBiasY + 1;
+}
+
+// Colore del terreno nel punto del mondo, preso dalle immagini delle aree.
+// false: fuori dalla mappa o immagine non ancora pronta
+bool HdWorld_SampleGround(int wx, int wy, uint32 *out) {
+  static int last_head = -2;
+  static AreaImage *last_img;
+  int head = HeadAt(wx, wy);
+  if (head < 0)
+    return false;
+  if (head != last_head || !last_img || last_img->key != AreaKey(head)) {
+    last_img = GetAreaImage(head);
+    last_head = last_img ? head : -2;
+  }
+  AreaImage *img = last_img;
+  if (!img)
+    return false;
+  int ix = wx - img->x, iy = wy - img->y;
+  if (iy >= img->size - kHiddenRows)
+    iy = img->size - kHiddenRows - 1;
+  if ((unsigned)ix >= (unsigned)img->size || (unsigned)iy >= (unsigned)img->size)
+    return false;
+  *out = Dim(img->pix[iy * img->size + ix]);
+  return true;
+}
+
+// C'e' lo strato del tempo atmosferico (BG1 solo sullo schermo secondario,
+// sommato al terreno)? Solo all'esterno.
+bool HdWorld_OverlayPresent(void) {
+  Ppu *ppu = g_zenv.ppu;
+  if (overworld_screen_index >= 0x80 || player_is_indoors)
+    return false;
+  bool sub = (ppu->screenEnabled[1] & 1) && !(ppu->screenEnabled[0] & 1) && ppu->addSubscreen &&
+             !ppu->subtractColor && ppu->mode != 7;
+  return sub && (((ppu->mathEnabled & 2) && ppu->halfColor) || (ppu->mathEnabled & 0x20));
+}
+
+void HdWorld_SuppressOverlay(bool on) {
+  g_overlay_suppressed = on;
+}
+
+// Somma lo strato piatto, nella posizione dello schermo, su tutta la vista 3D
+// (terreno e cielo; HUD e sprite restano davanti, come gli sprite del gioco
+// con le palette 0-3). uniform: invece del disegno (gocce del gioco) si somma
+// solo il colore medio dello strato, cioe' il buio del temporale, quando le
+// gocce le disegna gia' la pioggia HD
+void HdWorld_OverlayFlat(uint8 *pixels, int pitch, int width, int height, bool uniform) {
+  bool org = g_overlay_suppressed;
+  g_overlay_suppressed = false;
+  OverlayCtx ov;
+  OverlayBegin(&ov, (width - 256) / 2);
+  g_overlay_suppressed = org;
+  if (!ov.on && !ov.sky)
+    return;
+  Ppu *ppu = g_zenv.ppu;
+  g_bright = ppu->forcedBlank ? 0 : ppu->brightness;
+  if (uniform && ov.on) {
+    // colore medio dei pixel opachi dello strato e quanta parte copre
+    int n = 0, opaque = 0, sr = 0, sg = 0, sb = 0;
+    for (int y = 0; y < height; y += 4) {
+      for (int x = 0; x < width; x += 4, n++) {
+        int col = OverlayColor(&ov, x, y);
+        if (col >= 0)
+          opaque++, sr += col & 31, sg += col >> 5 & 31, sb += col >> 10 & 31;
+      }
+    }
+    if (!opaque)
+      return;
+    int r = sr / opaque, g = sg / opaque, b = sb / opaque;
+    uint32 oc = Dim((uint32)(r << 3 | r >> 2) << 16 | (g << 3 | g >> 2) << 8 | (b << 3 | b >> 2));
+    int ar = oc >> 16 & 255, ag = oc >> 8 & 255, ab = oc & 255;
+    int k = opaque * 256 / n;   // c + k * ((c + oc) / 2 - c)
+    for (int y = 0; y < height; y++) {
+      uint32 *row = (uint32 *)(pixels + y * pitch);
+      for (int x = 0; x < width; x++) {
+        uint32 c = row[x], l = c >> 24 & 0xf;
+        int bit = l == 7 ? 1 : l == 3 ? 5 : l;
+        if (l == 2 || l == 4 || !(ppu->mathEnabled & (1 << bit)))
+          continue;
+        int cr = c >> 16 & 255, cg = c >> 8 & 255, cb = c & 255;
+        cr += (((cr + ar) >> 1) - cr) * k >> 8;
+        cg += (((cg + ag) >> 1) - cg) * k >> 8;
+        cb += (((cb + ab) >> 1) - cb) * k >> 8;
+        row[x] = (c & 0xff000000) | cr << 16 | cg << 8 | cb;
+      }
+    }
+    return;
+  }
+  for (int y = 0; y < height; y++) {
+    uint32 *row = (uint32 *)(pixels + y * pitch);
+    for (int x = 0; x < width; x++) {
+      uint32 l = row[x] >> 24 & 0xf;
+      if (l == 2 || l == 4)
+        continue;
+      // stessi strati a cui il gioco somma lo strato (7 = acqua, e' BG2;
+      // 3 = fondale e cielo della vista 3D, come il colore di fondo)
+      int bit = l == 7 ? 1 : l == 3 ? 5 : l;
+      if (ov.on && !(ppu->mathEnabled & (1 << bit)))
+        continue;
+      row[x] = OverlayBlend(&ov, row[x], x, y);
+    }
+  }
 }
