@@ -1140,6 +1140,7 @@ uint8 g_oam_real_f0[128];
 static uint8 g_sprite_offscreen[16];
 // Vista 3D (hd_3d.c): fuori dalla vista ma entro la distanza di disegno
 static uint8 g_sprite_far[16];
+bool g_oam_keep_far;
 
 void Sprite_Main() {  // 868328
   if (!player_is_indoors) {
@@ -1936,7 +1937,7 @@ bool Sprite_PrepOamCoordOrDoubleRet(int k, PrepOamCoordsRet *ret) {  // 86e41e
   // Vista 3D con distanza di disegno: oltre la vista ma entro la distanza il
   // nemico si disegna (e si muove) come sullo schermo, senza suoni (Sprite_Main)
   int mx, mt, mb;
-  if (outside && live && !g_hd_neighbor_tick && Hd3d_FarSprites(&mx, &mt, &mb) &&
+  if (outside && (live || player_is_indoors) && !g_hd_neighbor_tick && Hd3d_FarSprites(&mx, &mt, &mb) &&
       (uint16)(kx + 0x40 + xt + mx) < (0x170 + xt * 2 + 2 * mx) &&
       ((uint16)(ky + 0x40 + mt) < (0x170 + mt + mb) || (sprite_flags4[k] & 0x20))) {
     g_sprite_far[k] = 1;

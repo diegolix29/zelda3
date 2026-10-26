@@ -168,9 +168,9 @@ void Hd3d_CycleDrawDistance(void) {
 }
 
 bool Hd3d_FarSprites(int *margin_x, int *margin_top, int *margin_bottom) {
-  // the 3D view was drawn last frame, and the continuous world is on (it
-  // keeps every enemy of the area alive and gives sprites their true position)
-  if (!g_active_last || g_view3d_dist == 0 || !HdWorld_Active())
+  // the 3D view was drawn last frame; outdoors only with the continuous world
+  // (it keeps every enemy of the area alive), indoors in any room
+  if (!g_active_last || g_view3d_dist == 0 || !(HdWorld_Active() || player_is_indoors))
     return false;
   *margin_x = 256 * g_view3d_dist;
   *margin_top = 256 * g_view3d_dist;   // far away = up the screen
@@ -615,12 +615,49 @@ static const uint8 kObjSizes[8][2] = {   // same as kSpriteSizes in snes/ppu.c
   {16, 64}, {32, 64}, {16, 32}, {16, 32}
 };
 
+// Group of each OAM entry this frame (OamGroups)
+static int g_key_of[128];
+
 static int GroupKey(int oam) {
-  if (g_link_oam_mask[oam])
-    return 0;                              // Link (body, shield, sword, shadow)
-  if (g_sprite_oam_owner[oam] < 16)
-    return 1 + g_sprite_oam_owner[oam];    // an enemy / NPC slot
-  return 32 + oam;                         // anything else: each OAM entry alone
+  return g_key_of[oam];
+}
+
+static int UfFind(int *parent, int i) {
+  while (parent[i] != i)
+    i = parent[i] = parent[parent[i]];
+  return i;
+}
+
+// Link's pieces are one group, each enemy/NPC slot one group. Pieces with no
+// owner (Zelda and the other followers, items, effects) are joined when they
+// touch, so a follower's head and body stand up together as one cutout.
+static void OamGroups(const bool *vis, const int *fx, const int *fy, const int *sz) {
+  int parent[128];
+  for (int i = 0; i < 128; i++)
+    parent[i] = i;
+  for (int i = 0; i < 128; i++) {
+    if (!vis[i] || g_link_oam_mask[i] || g_sprite_oam_owner[i] < 16)
+      continue;
+    for (int j = i + 1; j < 128; j++) {
+      if (!vis[j] || g_link_oam_mask[j] || g_sprite_oam_owner[j] < 16)
+        continue;
+      // rectangles overlap or touch (1 pixel gap allowed)
+      if (fx[i] <= fx[j] + sz[j] && fx[j] <= fx[i] + sz[i] &&
+          fy[i] <= fy[j] + sz[j] && fy[j] <= fy[i] + sz[i]) {
+        int a = UfFind(parent, i), b = UfFind(parent, j);
+        if (a != b)
+          parent[a > b ? a : b] = a < b ? a : b;
+      }
+    }
+  }
+  for (int i = 0; i < 128; i++) {
+    if (g_link_oam_mask[i])
+      g_key_of[i] = 0;                               // Link (body, shield, sword, shadow)
+    else if (g_sprite_oam_owner[i] < 16)
+      g_key_of[i] = 1 + g_sprite_oam_owner[i];       // an enemy / NPC slot
+    else
+      g_key_of[i] = 32 + UfFind(parent, i);          // touching unowned pieces
+  }
 }
 
 static int CompareGroups(const void *a, const void *b) {
@@ -628,16 +665,28 @@ static int CompareGroups(const void *a, const void *b) {
   return ga->y1 - gb->y1;   // smaller y1 = farther away, drawn first
 }
 
-// OAM entry: visible, frame position and size. Needs the true positions
-// (objXValid / objYValid, set with the continuous world or the smooth camera)
+// OAM entry: visible, frame position and size, the way the PPU places it
+// (true positions when ResolveSpritePositions found them, else the raw OAM)
 static bool OamEntry(Ppu *ppu, int i, int *fx, int *fy, int *size) {
   int yy = ppu->oam[i * 2] >> 8;
-  if (yy == 0xf0 && !ppu->objShowF0[i])
+  if (yy == 0xf0 && !(ppu->objYValid && ppu->objShowF0[i]))
     return false;
   int high = ppu->oam[0x100 + (i >> 3)] >> ((i & 7) * 2);
   *size = kObjSizes[ppu->objSize][(high >> 1) & 1];
-  *fx = ppu->objX[i] - ppu->objBiasX + ppu->extraLeftRight;
-  *fy = ppu->objY[i] - ppu->objBiasY;
+  int x, y;
+  if (ppu->objXValid) {
+    x = ppu->objX[i];
+  } else {
+    x = (ppu->oam[i * 2] & 0xff) + (high & 1) * 256;
+    if (x >= 256 + ppu->extraLeftRight)
+      x -= 512;
+  }
+  if (ppu->objYValid)
+    y = ppu->objY[i];
+  else
+    y = yy >= g_h ? yy - 256 : yy;
+  *fx = x - ppu->objBiasX + ppu->extraLeftRight;
+  *fy = y - ppu->objBiasY;
   return true;
 }
 
@@ -670,12 +719,16 @@ static int DrawSprites(uint32 *out, int pitch_px, const Cam *cm, Ppu *ppu) {
   // OAM table (the PPU only drew their on-screen part)
   bool far_key[32 + 128];
   memset(far_key, 0, sizeof(far_key));
+  // far pieces need their true positions (ResolveSpritePositions runs while
+  // the draw distance is on)
   bool far_ok = ppu->objXValid && ppu->objYValid && g_view3d_dist > 0;
   int efx[128], efy[128], esz[128];
   bool evis[128];
+  for (int i = 0; i < 128; i++)
+    evis[i] = OamEntry(ppu, i, &efx[i], &efy[i], &esz[i]);
+  OamGroups(evis, efx, efy, esz);
   for (int i = 0; i < 128; i++) {
-    evis[i] = far_ok && OamEntry(ppu, i, &efx[i], &efy[i], &esz[i]);
-    if (evis[i] && (efx[i] < 0 || efy[i] < 0 || efx[i] + esz[i] > w || efy[i] + esz[i] > h))
+    if (far_ok && evis[i] && (efx[i] < 0 || efy[i] < 0 || efx[i] + esz[i] > w || efy[i] + esz[i] > h))
       far_key[GroupKey(i)] = true;
   }
 

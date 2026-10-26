@@ -56,11 +56,15 @@ extern bool g_view_valid, g_hd_neighbor_tick;
 // restava senza corpo); si azzera a ogni frame con il buffer OAM
 extern uint8 g_oam_real_f0[128];
 
+// Vista 3D con distanza di disegno (hd_3d.c): i pezzi fuori dallo schermo
+// tengono la loro y vera, come con il mondo continuo
+extern bool g_oam_keep_far;
+
 static inline void SetOamHelper0(OamEnt *oam, uint16 x, uint16 y, uint8 charnum, uint8 flags, uint8 big) {
   oam->x = x;
-  oam->y = (uint16)(y + 0x10) < 0x100 || (g_view_valid && !g_hd_neighbor_tick) ? y : 0xf0;
+  oam->y = (uint16)(y + 0x10) < 0x100 || ((g_view_valid || g_oam_keep_far) && !g_hd_neighbor_tick) ? y : 0xf0;
   if (!g_hd_neighbor_tick)
-    g_oam_real_f0[oam - oam_buf] = (uint8)y == 0xf0 && g_view_valid;
+    g_oam_real_f0[oam - oam_buf] = (uint8)y == 0xf0 && (g_view_valid || g_oam_keep_far);
   oam->charnum = charnum;
   oam->flags = flags;
   bytewise_extended_oam[oam - oam_buf] = big | (x >> 8 & 1);

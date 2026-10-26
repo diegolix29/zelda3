@@ -19,6 +19,7 @@
 #include "hd_menu.h"
 #include "hd_3d.h"
 #include "hd_icegba.h"
+extern bool g_oam_keep_far;  // sprite.c
 #include "hud.h"
 #include "messaging.h"
 ZeldaEnv g_zenv;
@@ -484,11 +485,14 @@ static void ResolveSpritePositions(Ppu *ppu) {
   ppu->objYValid = ppu->objXValid = false;
   // col mondo continuo anche senza spostamento: i nemici fuori dallo schermo
   // del gioco hanno la posizione vera (SetOamHelper0 non li nasconde)
-  if (ppu->objBiasY == 0 && ppu->objBiasX == 0 && !g_view_valid && !(g_trans_link_dx | g_trans_link_dy))
-    return;
-  int link_x = (int16)(link_x_coord - BG2HOFS_copy2) + 8;
+  // (e con la vista 3D a distanza di disegno, anche al chiuso: i nemici
+  // lontani hanno la y vera, vedi SetOamHelper0)
   int fmx, fmt, fmb;
   bool far = Hd3d_FarSprites(&fmx, &fmt, &fmb);   // vista 3D: nemici lontani disegnati
+  g_oam_keep_far = far;
+  if (ppu->objBiasY == 0 && ppu->objBiasX == 0 && !g_view_valid && !far && !(g_trans_link_dx | g_trans_link_dy))
+    return;
+  int link_x = (int16)(link_x_coord - BG2HOFS_copy2) + 8;
   // Si confronta anche la x: un nemico fermo 256 pixel piu' in alto ma
   // lontano in orizzontale non deve "rubare" i pezzi di uno sprite vicino
   // (il corpo del vecchio della Montagna spariva sopra lo schermo)
