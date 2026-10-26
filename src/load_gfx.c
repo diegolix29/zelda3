@@ -6,6 +6,7 @@
 #include "player.h"
 #include "sprite.h"
 #include "assets.h"
+#include "hd_art.h"
 
 // Allow this to be overwritten
 uint16 kGlovesColor[2] = {0x52f6, 0x376};
@@ -1004,14 +1005,18 @@ int Decomp_spr(uint8 *dst, int gfx) {  // 80e772
   MemBlk blk = kSprGfx(gfx);
   const uint8 *sprite_data = GetCompSpritePtr(gfx);
   // If the size is not 0x600 then it's compressed
+  int len = 0x600;
   if (gfx >= 103 || blk.size != 0x600)
-    return Decompress(dst, blk.ptr);
-  memcpy(dst, blk.ptr, 0x600);
-  return 0x600;
+    len = Decompress(dst, blk.ptr);
+  else
+    memcpy(dst, blk.ptr, 0x600);
+  return len;
 }
 
 int Decomp_bg(uint8 *dst, int gfx) {  // 80e78f
-  return Decompress(dst, kBgGfx(gfx).ptr);
+  int len = Decompress(dst, kBgGfx(gfx).ptr);
+  HdArt_PatchBgSheet(dst, gfx);
+  return len;
 }
 
 int Decompress(uint8 *dst, const uint8 *src) {  // 80e79e
@@ -2034,6 +2039,10 @@ void Palette_Load_SpriteMain() {  // 9bec9e
 
 void Palette_Load_Sp5L() {  // 9becc5
   const uint16 *src = kPalette_SpriteAux1 + (palette_sp5l) * 7;
+  // Agahnim (nel mondo esterno il 14 c'e' solo in sp6l); non nella sala del
+  // trono del prologo, dove con la stessa palette c'e' solo il re
+  if (palette_sp5l == 14 && !(main_module_index == 20 && sprite_graphics_index == 0x7e))
+    src = HdArt_AgahnimPalette(src);
   Palette_LoadSingle(src, kPal_sp5l, 6);
 }
 
@@ -2180,7 +2189,7 @@ void Palette_LoadForFileSelect_Shield(int k, uint8 shield) {  // 9bf09a
 }
 
 void Palette_LoadAgahnim() {  // 9bf0c2
-  const uint16 *src = kPalette_SpriteAux1 + 14 * 7;
+  const uint16 *src = HdArt_AgahnimPalette(kPalette_SpriteAux1 + 14 * 7);
   Palette_LoadMultiple_Arbitrary(src, 0x162, 6);
   Palette_LoadMultiple_Arbitrary(src, 0x182, 6);
   Palette_LoadMultiple_Arbitrary(src, 0x1a2, 6);

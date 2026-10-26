@@ -4546,6 +4546,12 @@ void Ancilla2A_SpinAttackSparkleA(int k) {  // 88d7b2
 }
 
 void SpinAttackSparkleA_TransmuteToNextSpark(int k) {  // 88d86d
+  SpinAttackSparkleB_Init(k);
+  Ancilla2B_SpinAttackSparkleB(k);
+}
+
+// anche per i giri successivi della Giravolta Tornado (player.c)
+void SpinAttackSparkleB_Init(int k) {
   static const uint8 kTransmuteSpinSpark_Arr[16] = {0x21, 0x20, 0x1f, 0x1e, 3, 2, 1, 0, 0x12, 0x11, 0x10, 0xf, 0x31, 0x30, 0x2f, 0x2e};
   static const int8 kTransmuteSpinSpark_X[4] = {-3, 21, 25, -8};
   static const int8 kTransmuteSpinSpark_Y[4] = {28, -2, 24, 6};
@@ -4571,7 +4577,6 @@ void SpinAttackSparkleA_TransmuteToNextSpark(int k) {  // 88d86d
   Ancilla_SetXY(k,
       link_x_coord + kTransmuteSpinSpark_X[j],
       link_y_coord + kTransmuteSpinSpark_Y[j]);
-  Ancilla2B_SpinAttackSparkleB(k);
 }
 
 void Ancilla2B_SpinAttackSparkleB(int k) {  // 88d8fd

@@ -166,6 +166,7 @@ void Ancilla3F_BushPoof(int k);
 void Ancilla26_SwordSwingSparkle(int k);
 void Ancilla2A_SpinAttackSparkleA(int k);
 void SpinAttackSparkleA_TransmuteToNextSpark(int k);
+void SpinAttackSparkleB_Init(int k);
 void Ancilla2B_SpinAttackSparkleB(int k);
 Point16U Sparkle_PrepOamFromRadial(AncillaRadialProjection p);
 void SpinAttackSparkleB_Closer(int k);

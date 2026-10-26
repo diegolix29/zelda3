@@ -3,6 +3,7 @@
 #include "hd_hud.h"
 #include "hd_menu.h"
 #include "hd_burn.h"
+#include "hd_icegba.h"
 #include "sprite.h"
 #include "dungeon.h"
 #include "hud.h"
@@ -3746,7 +3747,7 @@ void Sprite_DisableAll() {  // 89c22f
 }
 
 void Dungeon_LoadSprites() {  // 89c290
-  const uint8 *src = kDungeonSprites + kDungeonSpriteOffs[dungeon_room_index2];
+  const uint8 *src = HdIce_Sprites(dungeon_room_index2, kDungeonSprites + kDungeonSpriteOffs[dungeon_room_index2]);
   byte_7E0FB1 = dungeon_room_index2 >> 3 & 0xfe;
   byte_7E0FB0 = (dungeon_room_index2 & 0xf) << 1;
   sort_sprites_setting = *src++;

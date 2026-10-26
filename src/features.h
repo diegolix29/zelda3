@@ -30,9 +30,9 @@ enum {
   // Suprema rompe i cartelli, la Spada d'Oro rompe i vasi; le frecce rompono
   // i vasi (quelle d'argento tutti quelli sul percorso), il martello rompe
   // cespugli e rocce piccole chiare; la Lanterna ferisce i nemici davanti a
-  // Link; il primo oggetto magico ricevuto riempie la barra della magia;
-  // con le pinne B fa immergere Link (player.c, PlayerHandler_04_Swimming);
-  // la super bomba si gonfia e si sgonfia (hd_fx.c, HdFx_SuperBombBeforeRender)
+  // Link; la super bomba si gonfia e si sgonfia (hd_fx.c,
+  // HdFx_SuperBombBeforeRender). Danni dei nemici e immersione con le pinne
+  // sono opzioni a parte (g_config.gba_damage, g_config.flipper_dive)
   kFeatures0_SwordAndItems = 16,
   // Punto di volo 9 dell'uccello: in cima al Monte della Morte a est, sulla
   // piattaforma dei pioli della Roccia della Tartaruga (prima era
@@ -96,6 +96,13 @@ enum {
   // di rimettere quelli di ripartenza (messaging.c, Death_Func15); nella scelta
   // del salvataggio i cuori non salvati sono neri (select_file.c)
   kFeatures0_SaveHeartsAndMagic = 1 << 28,
+  // Oggetti riempiono le risorse, come su GBA: ricevere un oggetto magico
+  // riempie la barra della magia, la Spada Suprema anche i cuori; l'Arco
+  // arriva con 10 frecce (misc.c, AncillaAdd_ItemReceipt)
+  kFeatures0_ItemsRefillResources = 1 << 29,
+  // Palazzo 6 come GBA: l'enigma dei blocchi delle stanze 0x9E e 0xBE del
+  // Palazzo del Ghiaccio come nella versione GBA (hd_icegba.c)
+  kFeatures0_IcePalaceGba = 1 << 30,
 };
 
 #define enhanced_features0 (*(uint32*)(g_ram+0x64c))

@@ -1,5 +1,6 @@
 #include "player.h"
 #include "zelda_rtl.h"
+#include "config.h"
 #include "variables.h"
 #include "tile_detect.h"
 #include "ancilla.h"
@@ -1709,11 +1710,11 @@ void PlayerHandler_04_Swimming() {  // 87963b
   if (!link_item_flippers)
     return;
 
-  // Spada e oggetti: come su GBA (0x8098bae) B fa immergere Link per 32
+  // Immersione con le pinne (FlipperDive): come su GBA (0x8098bae) B fa immergere Link per 32
   // fotogrammi con uno spruzzo; riemerso, la prossima volta solo dopo 64.
   // Sott'acqua si vede solo l'ombra (al chiuso Link passa dietro l'acqua,
   // player_oam.c); si nuota e si fanno le bracciate come prima
-  if (enhanced_features0 & kFeatures0_SwordAndItems) {
+  if (g_config.flipper_dive) {
     if (g_link_dive_timer == 0) {
       if ((g_link_dive_wait == 0 || --g_link_dive_wait == 0) && (filtered_joypad_H & kJoypadH_B)) {
         g_link_dive_timer = 32;
@@ -2260,6 +2261,40 @@ void Link_CheckForSwordSwing() {  // 879cd9
   CalculateSwordHitBox();
 }
 
+// Giravolta Tornado (HurricaneSpin), come su GBA: la insegna l'intagliatore di
+// legno della casa dei taglialegna dopo i suoi indovinelli (sprite GBA 0xF3,
+// flag SRAM 0x20023f0); sul GBA servono il Retino e 10 medaglie di Four
+// Swords, qui basta il Retino. Tenendo la carica fino a 96 (GBA 0x809de74) il colpo
+// rotante diventa lungo: premendo B durante il giro ne parte un altro
+// (0x809d828), con 2 di magia (1/2: 2, 1/4: 0 come sul GBA), e nei giri
+// successivi Link si muove con la croce (0x809d2ac).
+static uint8 g_hurricane_spin;  // 0x80 carica lunga, 0x40 altro giro prenotato, 1 giri successivi
+
+static bool HurricaneSpin_Unlocked() {
+  return g_config.hurricane_spin && link_item_bug_net;
+}
+
+static bool HurricaneSpin_PayMagic() {  // GBA 0x80a4734 con indice 9
+  static const uint8 kHurricaneSpinMagic[3] = { 2, 2, 0 };
+  uint8 a = link_magic_power;
+  if (a && (a -= kHurricaneSpinMagic[link_magic_consumption]) < 0x80) {
+    link_magic_power = a;
+    return true;
+  }
+  Ancilla_Sfx2_Near(60);
+  return false;
+}
+
+static void HurricaneSpin_AddSpark() {  // GBA 0x80c2790: riusa la scia 0x2b o ne crea una
+  int k = kAncilla_Slots - 1;
+  while (k >= 0 && ancilla_type[k] != 0x2b)
+    k--;
+  if (k < 0)
+    k = Ancilla_AddAncilla(0x2b, 0);
+  if (k >= 0)
+    SpinAttackSparkleB_Init(k);
+}
+
 void HandleSwordControls() {  // 879d72
   if (joypad1H_last & kJoypadH_B) {
     Player_Sword_SpinAttackJerks_HoldDown();
@@ -2267,6 +2302,7 @@ void HandleSwordControls() {  // 879d72
     if (link_spin_attack_step_counter < 48) {
       Link_ResetSwordAndItemUsage();
     } else {
+      g_hurricane_spin = (link_spin_attack_step_counter >= 96) ? 0x80 : 0;
       Link_ResetSwordAndItemUsage();
       link_spin_attack_step_counter = 0;
       Link_ActivateSpinAttack();
@@ -2302,7 +2338,16 @@ void Player_Sword_SpinAttackJerks_HoldDown() {  // 879d9f
         if (link_spin_attack_step_counter >= 6 && (frame_counter & 3) == 0)
           AncillaSpawn_SwordChargeSparkle();
 
-        if (link_spin_attack_step_counter < 64 && ++link_spin_attack_step_counter == 48) {
+        bool hurricane = HurricaneSpin_Unlocked();
+        if (hurricane && link_spin_attack_step_counter >= 96) {
+          // carica lunga della Giravolta Tornado: secondo suono e scintille
+          if (link_spin_attack_step_counter == 96) {
+            Ancilla_Sfx2_Near(55);
+            link_spin_attack_step_counter++;
+          }
+          if ((frame_counter & 7) == 0)
+            AncillaAdd_ChargedSpinAttackSparkle();
+        } else if (link_spin_attack_step_counter < (hurricane ? 96 : 64) && ++link_spin_attack_step_counter == 48) {
           Ancilla_Sfx2_Near(55);
           AncillaAdd_ChargedSpinAttackSparkle();
         }
@@ -2913,6 +2958,7 @@ void LinkState_SpinAttack() {  // 87a804
   CacheCameraPropertiesIfOutdoors();
 
   if (link_auxiliary_state) {
+    g_hurricane_spin = 0;
     int i = kAncilla_LinkSlots - 1;
     do {
       if (ancilla_type[i] == 0x2a || ancilla_type[i] == 0x2b)
@@ -2949,13 +2995,19 @@ void LinkState_SpinAttack() {  // 87a804
   if (link_incapacitated_timer) {
     Link_HandleRecoilAndTimer(false);
   } else {
-    link_direction = 0;
+    // nei giri successivi della Giravolta Tornado Link si muove con la croce
+    link_direction = (g_hurricane_spin & 1) ? (joypad1H_last & 0xf) : 0;
     Link_HandleVelocity();
     Link_HandleCardinalCollision();
     link_player_handler_state = kPlayerState_SpinAttacking;
     fallhole_var1 = 0;
     HandleIndoorCameraAndDoors();
   }
+
+  // Giravolta Tornado: B premuto nei passi 3-11 prenota un altro giro
+  if ((g_hurricane_spin & 0x80) && (filtered_joypad_H & kJoypadH_B) &&
+      step_counter_for_spin_attack >= 3 && step_counter_for_spin_attack <= 11)
+    g_hurricane_spin |= 0x40;
 
   if (!sign8(--link_delay_timer_spin_attack))
     return;
@@ -2975,6 +3027,20 @@ void LinkState_SpinAttack() {  // 87a804
       button_mask_b_y = (button_b_frames) ? (joypad1H_last & kJoypadH_B) : 0; // wtf, it's zero,
     }
     link_player_handler_state = kPlayerState_Ground;
+    if ((g_hurricane_spin & 0x40) && HurricaneSpin_PayMagic()) {
+      // un altro giro (GBA 0x809d8ec): riparte dal passo 3 con una scia nuova
+      g_hurricane_spin = (g_hurricane_spin | 1) & ~0x40;
+      button_b_frames = 144;
+      step_counter_for_spin_attack = 3;
+      link_player_handler_state = kPlayerState_SpinAttacking;
+      Ancilla_Sfx3_Near(35);
+      HurricaneSpin_AddSpark();
+      state_for_spin_attack = kLinkSpinGraphicsByDir[step_counter_for_spin_attack + link_spin_offsets];
+      link_delay_timer_spin_attack = kLinkSpinDelays[step_counter_for_spin_attack];
+      TileDetect_MainHandler(8);
+    } else {
+      g_hurricane_spin = 0;
+    }
   } else {
     state_for_spin_attack = kLinkSpinGraphicsByDir[step_counter_for_spin_attack + link_spin_offsets];
     link_delay_timer_spin_attack = kLinkSpinDelays[step_counter_for_spin_attack];

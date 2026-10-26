@@ -17,6 +17,7 @@
 #include "hd_fx.h"
 #include "hd_water.h"
 #include "hd_hud.h"
+#include "hd_art.h"
 
 void ZeldaApuLock();
 void ZeldaApuUnlock();
@@ -32,7 +33,6 @@ enum {
 
 enum {
   kNumQuickSlots = 20,
-  kMaxAutosaves = 9,
   kMaxItems = 40,
   kRowHeight = 16,
 };
@@ -57,7 +57,6 @@ static bool g_capture_pad;
 static bool g_slot_action_save;
 static char g_message[96];
 static int g_message_timer;
-static int g_save_icon_timer;  // icona del salvataggio automatico
 static bool g_last_input_pad;  // ultimo tasto premuto sul pad (non sulla tastiera)
 static bool g_controls_dirty, g_msu_dirty, g_lang_dirty;
 static bool g_msu_on;
@@ -86,18 +85,22 @@ static const FeatureOption kFeatureOptions[] = {
   { "Mappa dungeon migliorata", "ImprovedDungeonMap", kFeatures0_ImprovedDungeonMap },
   { "Mappa progressiva", "ProgressiveMap", kFeatures0_ProgressiveMap },
   { "Cambio oggetti con L e R", "ItemSwitchLR", kFeatures0_SwitchLR },
+  { "L/R solo sui primi 4 oggetti", "ItemSwitchLRLimit", kFeatures0_SwitchLRLimit },
   { "Inventario esteso", "ExtendedInventory", kFeatures0_ExtendedInventory },
   { "Spada e oggetti interazione ambiente", "SwordAndItemsInteraction", kFeatures0_SwordAndItems },
+  { "Oggetti riempiono le risorse", "ItemsRefillResources", kFeatures0_ItemsRefillResources },
   { "Interazione bruciatura e congelamento", "BurnAndFreezeInteraction", kFeatures0_BurnAndFreeze },
   { "Sterza durante lo scatto", "TurnWhileDashing", kFeatures0_TurnWhileDashing },
   { "Fino a 10 bombe insieme", "MoreActiveBombs", kFeatures0_MoreActiveBombs },
   { "Massimi in giallo nell'HUD", "ShowMaxItemsInYellow", kFeatures0_ShowMaxItemsInYellow },
+  { "Borsa pi\xc3\xb9 grande", "CarryMoreRupees", kFeatures0_CarryMoreRupees },
   { "Disattiva bip vita bassa", "DisableLowHealthBeep", kFeatures0_DisableLowHealthBeep },
   { "Salva stato cuori e magia", "SaveHeartsAndMagic", kFeatures0_SaveHeartsAndMagic },
   { "Annulla il volo con X", "CancelBirdTravel", kFeatures0_CancelBirdTravel },
   { "Punto di volo 9", "BirdTravelPoint9", kFeatures0_BirdTravel9 },
   { "Specchio verso il Mondo delle Tenebre", "MirrorToDarkworld", kFeatures0_MirrorToDarkworld },
   { "Correzioni di bug", "MiscBugFixes", kFeatures0_MiscBugFixes },
+  { "Correzioni maggiori", "GameChangingBugFixes", kFeatures0_GameChangingBugFixes },
 };
 
 static const char *const kControlNames[12] = {
@@ -272,10 +275,6 @@ static void QuickSlotName(int i, char *buf, size_t size) {
   snprintf(buf, size, "saves/save%d.sav", i);
 }
 
-static void AutosaveName(int i, char *buf, size_t size) {
-  snprintf(buf, size, "saves/auto%d.sav", i);
-}
-
 static bool FileTime(const char *name, time_t *t) {
   struct stat st;
   if (stat(name, &st) != 0)
@@ -297,50 +296,6 @@ static void FormatFileTime(const char *name, char *buf, size_t size) {
     snprintf(buf, size, "%02d/%02d  %02d:%02d", tm->tm_mday, tm->tm_mon + 1, tm->tm_hour, tm->tm_min);
 }
 
-static int AutosaveCount() {
-  int n = g_config.autosave_slots;
-  return n < 1 ? 3 : n > kMaxAutosaves ? kMaxAutosaves : n;
-}
-
-static int g_autosave_newest = -1;  // ultimo slot automatico scritto in questa sessione
-
-// Restituisce lo slot automatico piu' recente (newest=true) o da sovrascrivere.
-// Gli slot si scrivono a rotazione (0, 1, 2, 0...): quello da sovrascrivere e'
-// il successivo al piu' recente. L'orario dei file ha la precisione di un
-// secondo, quindi a parita' di orario il piu' recente e' l'ultimo nell'ordine
-// di rotazione.
-static int FindAutosave(bool newest) {
-  int n = AutosaveCount();
-  bool has[kMaxAutosaves];
-  time_t t[kMaxAutosaves];
-  char name[64];
-  int any = -1;
-  for (int i = 0; i < n; i++) {
-    AutosaveName(i, name, sizeof(name));
-    has[i] = FileTime(name, &t[i]);
-    if (!has[i] && !newest)
-      return i;  // slot libero
-    if (has[i] && (any < 0 || t[i] > t[any]))
-      any = i;
-  }
-  if (any < 0)
-    return 0;
-  int last = (g_autosave_newest >= 0 && g_autosave_newest < n && has[g_autosave_newest]) ? g_autosave_newest : -1;
-  if (last < 0) {
-    // fra gli slot con l'orario piu' recente, quello dopo il quale la
-    // rotazione non continua
-    last = any;
-    for (int i = 0; i < n; i++) {
-      int next = (i + 1) % n;
-      if (has[i] && t[i] == t[any] && !(has[next] && t[next] == t[any])) {
-        last = i;
-        break;
-      }
-    }
-  }
-  return newest ? last : (last + 1) % n;
-}
-
 static void ShowMessage(const char *msg) {
   snprintf(g_message, sizeof(g_message), "%s", Tr(msg));
   g_message_timer = 150;
@@ -350,52 +305,10 @@ void HdMenu_ShowMessage(const char *msg) {
   ShowMessage(msg);
 }
 
-static int g_autosave_last_key = -1;
-enum { kSaveIconFrames = 120 };
-
 void HdMenu_AfterFrame(bool is_replay) {
   UpdateDungeonName();
   if (g_message_timer)
     g_message_timer--;
-  if (g_save_icon_timer)
-    g_save_icon_timer--;
-  if (is_replay || !g_config.autosave_areas)
-    return;
-  int mod = main_module_index;
-  if ((mod != 7 && mod != 9) || submodule_index != 0 || link_health_current == 0)
-    return;
-  // Chiave del "luogo": area esterna, oppure dungeon/casa
-  int key = (mod == 9) ? 0x1000 | overworld_screen_index : 0x2000 | cur_palace_index_x2;
-  if (key == g_autosave_last_key)
-    return;
-  bool first = (g_autosave_last_key < 0);
-  g_autosave_last_key = key;
-  if (first)
-    return;  // non salvare appena caricato
-  char name[64];
-  int slot = FindAutosave(false);
-  AutosaveName(slot, name, sizeof(name));
-  // Salvataggio silenzioso: un messaggio a ogni cambio di area disturberebbe
-  SaveLoadNamed(kSaveLoad_Save, name);
-  g_autosave_newest = slot;
-  g_save_icon_timer = kSaveIconFrames;
-}
-
-static void LoadLatestAutosave() {
-  char name[64];
-  time_t t;
-  AutosaveName(FindAutosave(true), name, sizeof(name));
-  if (!FileTime(name, &t)) {
-    ShowMessage("Nessun salvataggio automatico");
-    return;
-  }
-  ZeldaApuLock();
-  bool ok = SaveLoadNamed(kSaveLoad_Load, name);
-  ZeldaApuUnlock();
-  g_autosave_last_key = -1;
-  ShowMessage(ok ? "Salvataggio automatico caricato" : "Caricamento non riuscito");
-  if (ok)
-    HdMenu_Close();
 }
 
 static void QuickSlotAction(int slot) {
@@ -413,7 +326,6 @@ static void QuickSlotAction(int slot) {
   snprintf(msg, sizeof(msg), Tr(g_slot_action_save ? "Salvato nello slot %d" : "Slot %d caricato"), slot + 1);
   ShowMessage(msg);
   if (!g_slot_action_save) {
-    g_autosave_last_key = -1;
     HdMenu_Close();
   }
 }
@@ -449,10 +361,10 @@ static const char *Tr(const char *it) {
     { "Oggetti X, L, R nell'HUD", "X, L, R items in the HUD" },
     { "Richiede Cambio oggetti con L e R", "Requires Switch items with L and R" },
     { "Richiede la PPU ottimizzata (NewRenderer)", "Requires the optimized PPU (NewRenderer)" },
-    { "Richiede Salva a ogni cambio di area", "Requires Save on every area change" },
     { "Nomi dei dungeon", "Dungeon names" },
     { "Cambio oggetti con L e R", "Switch items with L and R" },
     { "Spada e oggetti interazione ambiente", "Sword and items interaction" },
+    { "Oggetti riempiono le risorse", "Items refill resources" },
     { "Interazione bruciatura e congelamento", "Burn and freeze interaction" },
     { "Inventario esteso", "Extended inventory" },
     { "Mappa migliorata", "Improved map" },
@@ -467,6 +379,9 @@ static const char *Tr(const char *it) {
     { "Punto di volo 9", "Bird travel point 9" },
     { "Specchio verso il Mondo delle Tenebre", "Mirror to the Dark World" },
     { "Correzioni di bug", "Bug fixes" },
+    { "Correzioni maggiori", "Game changing bug fixes" },
+    { "L/R solo sui primi 4 oggetti", "Limit L/R to the first 4 items" },
+    { "Borsa pi\xc3\xb9 grande", "Larger wallet" },
     { "Su", "Up" },
     { "Gi\xc3\xb9", "Down" },
     { "Sinistra", "Left" },
@@ -502,6 +417,11 @@ static const char *Tr(const char *it) {
     { "Cerchio di transizione morbido", "Soft transition circle" },
     { "Suggerimenti dei tasti", "Button hints" },
     { "Distingui vortici da Zora", "Tell whirlpools from Zoras" },
+    { "Aspetto dei disegni ufficiali", "Official artwork look" },
+    { "Link biondo", "Blond Link" },
+    { "Immersione con le pinne", "Dive with the flippers" },
+    { "Frecce piantate nei muri", "Arrows stuck in walls" },
+    { "Giravolta Tornado", "Hurricane Spin" },
     { "Solo 16:9 e 16:10", "Only 16:9 and 16:10" },
     { "Richiede lo schermo 16:9 o 16:10", "Requires a 16:9 or 16:10 screen" },
     { "Velocit\xc3\xa0 del testo", "Text speed" },
@@ -510,17 +430,11 @@ static const char *Tr(const char *it) {
     { "(al riavvio)", "(on restart)" },
     { "Menu opzioni", "Options menu" },
     { "Ripristina tasti predefiniti", "Restore default keys" },
-    { "Salva a ogni cambio di area", "Save on every area change" },
-    { "Salvataggi automatici da tenere", "Autosaves to keep" },
-    { "Carica l'ultimo automatico", "Load the latest autosave" },
     { "Azione sugli slot", "Slot action" },
     { "Salva", "Save" },
     { "Carica", "Load" },
     { "vuoto", "empty" },
     { "S\xc3\xac", "Yes" },
-    { "Nessun salvataggio automatico", "No autosave" },
-    { "Salvataggio automatico caricato", "Autosave loaded" },
-    { "Caricamento non riuscito", "Loading failed" },
     { "Lo slot e' vuoto", "The slot is empty" },
     { "Salvato nello slot %d", "Saved to slot %d" },
     { "Slot %d caricato", "Slot %d loaded" },
@@ -595,8 +509,11 @@ static void SaveSettings() {
   AddIni(v, &n, "[Graphics]", "FxSoftIris", "%d", g_config.fx_soft_iris);
   AddIni(v, &n, "[Graphics]", "FxButtonHints", "%d", g_config.fx_button_hints);
   AddIni(v, &n, "[Graphics]", "FxWhirlpoolGlow", "%d", g_config.fx_whirlpool);
-  AddIni(v, &n, "[General]", "AutosaveOnAreaChange", "%d", g_config.autosave_areas);
-  AddIni(v, &n, "[General]", "AutosaveSlots", "%d", AutosaveCount());
+  AddIni(v, &n, "[Graphics]", "OfficialArtwork", "%d", g_config.official_artwork);
+  AddIni(v, &n, "[Graphics]", "BlondLink", "%d", g_config.blond_link);
+  AddIni(v, &n, "[Features]", "FlipperDive", "%d", g_config.flipper_dive);
+  AddIni(v, &n, "[Features]", "StuckArrows", "%d", g_config.stuck_arrows);
+  AddIni(v, &n, "[Features]", "HurricaneSpin", "%d", g_config.hurricane_spin);
   // La lingua si scrive solo se cambiata dal menu (altrimenti resta quella
   // dell'ini, anche de, fr...)
   if (g_lang_dirty) {
@@ -702,12 +619,17 @@ static void BuildItems() {
     AddItem(15, "Suggerimenti dei tasti", g_zenv.ppu->extraLeftRight > 0 ? YesNo(g_config.fx_button_hints) : "Solo 16:9 e 16:10");
     AddItem(16, "Acqua e cascate realistiche", YesNo(g_config.fx_water));
     AddItem(17, "Distingui vortici da Zora", YesNo(g_config.fx_whirlpool));
+    AddItem(18, "Aspetto dei disegni ufficiali", YesNo(g_config.official_artwork));
+    AddItem(19, "Link biondo", YesNo(g_config.blond_link));
     break;
   case kPage_Game:
     AddItem(100, "Velocit\xc3\xa0 del testo", kTextSpeedNames[g_config.text_speed % 3]);
     AddItem(101, "Lingua dei dialoghi", IsItalian() ? "Italiano" : "English");
     for (int i = 0; i < countof(kFeatureOptions); i++)
       AddItem(i, kFeatureOptions[i].label, YesNo((g_config.features0 & kFeatureOptions[i].bit) != 0));
+    AddItem(102, "Immersione con le pinne", YesNo(g_config.flipper_dive));
+    AddItem(103, "Frecce piantate nei muri", YesNo(g_config.stuck_arrows));
+    AddItem(104, "Giravolta Tornado", YesNo(g_config.hurricane_spin));
     break;
   case kPage_Audio:
     snprintf(buf, sizeof(buf), "%d%%", Host_GetVolume());
@@ -727,10 +649,6 @@ static void BuildItems() {
     AddItem(13, "Ripristina tasti predefiniti", NULL);
     break;
   case kPage_Saves:
-    AddItem(100, "Salva a ogni cambio di area", YesNo(g_config.autosave_areas));
-    snprintf(buf, sizeof(buf), "%d", AutosaveCount());
-    AddItem(101, "Salvataggi automatici da tenere", buf);
-    AddItem(102, "Carica l'ultimo automatico", NULL);
     AddItem(103, "Azione sugli slot", g_slot_action_save ? "Salva" : "Carica");
     for (int i = 0; i < kNumQuickSlots; i++) {
       char name[64];
@@ -775,6 +693,13 @@ static void Activate(int id, int dir) {
     } else if (id == 6) {
       g_config.dynamic_light = !g_config.dynamic_light;
       g_dynamic_light = g_config.dynamic_light;
+    } else if (id == 18) {
+      // Agahnim, re e medaglione dal prossimo caricamento
+      g_config.official_artwork = !g_config.official_artwork;
+    } else if (id == 19) {
+      // Link e la sua palette subito
+      g_config.blond_link = !g_config.blond_link;
+      HdArt_Apply();
     } else if (id == 15 && g_zenv.ppu->extraLeftRight == 0) {
       ShowMessage("Richiede lo schermo 16:9 o 16:10");
     } else if (id >= 7 && id <= 17 && id != 10) {
@@ -795,16 +720,22 @@ static void Activate(int id, int dir) {
       g_lang_dirty = true;
       ZeldaSetLanguage(g_config.language);
       Font_Load();
+    } else if (id == 102) {
+      g_config.flipper_dive = !g_config.flipper_dive;
+    } else if (id == 103) {
+      g_config.stuck_arrows = !g_config.stuck_arrows;
+    } else if (id == 104) {
+      g_config.hurricane_spin = !g_config.hurricane_spin;
     } else {
       uint32 bit = kFeatureOptions[id].bit;
       // oggetti X, L, R nell'HUD solo con il cambio oggetti con L e R
-      if (bit == kFeatures0_ShowXLRItemsInHud && !(g_config.features0 & kFeatures0_SwitchLR)) {
+      if ((bit == kFeatures0_ShowXLRItemsInHud || bit == kFeatures0_SwitchLRLimit) && !(g_config.features0 & kFeatures0_SwitchLR)) {
         ShowMessage("Richiede Cambio oggetti con L e R");
         break;
       }
       SetFeature(bit, !(g_config.features0 & bit));
       if (bit == kFeatures0_SwitchLR && !(g_config.features0 & bit))
-        SetFeature(kFeatures0_ShowXLRItemsInHud, false);
+        SetFeature(kFeatures0_ShowXLRItemsInHud, false), SetFeature(kFeatures0_SwitchLRLimit, false);
     }
     break;
   case kPage_Audio:
@@ -825,16 +756,7 @@ static void Activate(int id, int dir) {
     }
     break;
   case kPage_Saves:
-    if (id == 100) {
-      g_config.autosave_areas = !g_config.autosave_areas;
-    } else if (id == 101 && !g_config.autosave_areas) {
-      ShowMessage("Richiede Salva a ogni cambio di area");
-    } else if (id == 101) {
-      int n = AutosaveCount() + (dir < 0 ? -1 : 1);
-      g_config.autosave_slots = n < 1 ? kMaxAutosaves : n > kMaxAutosaves ? 1 : n;
-    } else if (id == 102) {
-      if (dir == 0) LoadLatestAutosave();
-    } else if (id == 103) {
+    if (id == 103) {
       g_slot_action_save = !g_slot_action_save;
     } else if (dir == 0) {
       QuickSlotAction(id);
@@ -1011,33 +933,6 @@ static void BlendPixel(Canvas *cv, int x, int y, uint32 c, float a) {
       int b = (int)((o & 0xff) * (1 - a) + (c & 0xff) * a);
       row[xx] = 0x02000000 | r << 16 | g << 8 | b;
     }
-  }
-}
-
-// Icona del salvataggio automatico: una piccola Triforce in basso a destra che
-// compare e scompare con una dissolvenza, con un riflesso che la attraversa
-static void DrawSaveIcon(Canvas *cv) {
-  if (!g_save_icon_timer)
-    return;
-  int t = kSaveIconFrames - g_save_icon_timer;
-  float a = t < 12 ? t / 12.0f : g_save_icon_timer < 30 ? g_save_icon_timer / 30.0f : 1.0f;
-  // tre triangoli quasi equilateri alti 9 pixel (meta' larghezza per riga)
-  static const uint8 kHalf[9] = { 0, 1, 1, 2, 2, 3, 4, 4, 5 };
-  int x0 = cv->width - 8 - 21, y0 = cv->height - 8 - 18;
-  int shine = (t * 2) % 100 - 20;  // posizione della diagonale del riflesso
-  for (int tri = 0; tri < 3; tri++) {
-    // le punte dei triangoli in basso toccano gli angoli di quello in alto
-    int cx = x0 + 10 + (tri == 1 ? -5 : tri == 2 ? 5 : 0), cy = y0 + (tri ? 9 : 0);
-    for (int r = 0; r < 9; r++)
-      for (int dx = -kHalf[r]; dx <= kHalf[r]; dx++) {
-        int x = cx + dx, y = cy + r;
-        bool edge = (dx == -kHalf[r] || dx == kHalf[r] || r == 8);
-        uint32 c = edge ? 0xb07808 : (r < 3 ? 0xfff070 : 0xf8d030);
-        int d = (x - x0) + (y - y0) - shine;
-        if (d >= 0 && d < 3)
-          c = 0xfffff0;
-        BlendPixel(cv, x, y, c, a);
-      }
   }
 }
 
@@ -1566,7 +1461,6 @@ void HdMenu_Draw(uint8 *pixels, int pitch, int width, int height, int scale) {
     HdHud_Draw(pixels, pitch, width, height, scale);
     DrawDungeonMapStatus(&cv);
     DrawDungeonEntryName(&cv);
-    DrawSaveIcon(&cv);
     DrawInventoryLetterOutlines(&cv);
     DrawButtonHints(&cv);
     DrawMessage(&cv);

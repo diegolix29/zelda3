@@ -716,7 +716,7 @@ void TriforceRoom_LinkApproachTriforce() {  // 87f49c
 }
 
 // Oggetti che riempiono la barra della magia quando si ricevono, come su GBA
-// (Spada e oggetti interazione ambiente). Elenco preso dalla ROM GBA europea
+// (Oggetti riempiono le risorse). Elenco preso dalla ROM GBA europea
 // (0x80ad5ee): la Polvere Magica e i medaglioni no; la Spada Suprema (0x01)
 // riempie anche i cuori (0x80ab3cc)
 static bool IsMagicItemReceipt(int j) {
@@ -749,13 +749,13 @@ void AncillaAdd_ItemReceipt(uint8 ain, uint8 yin, int chest_pos) {  // 8985e8
   uint8 v = kValueToGiveItemTo[j];
   uint8 *p = &g_ram[kMemoryLocationToGiveItemTo[j]];
   // come su GBA a ogni consegna (questi oggetti si ricevono una volta sola)
-  if ((enhanced_features0 & kFeatures0_SwordAndItems) && IsMagicItemReceipt(j)) {
+  if ((enhanced_features0 & kFeatures0_ItemsRefillResources) && IsMagicItemReceipt(j)) {
     link_magic_filler = 0x80;
     if (j == 1 && link_health_current < link_health_capacity)
       link_hearts_filler = 0xa0;
   }
   // l'Arco arriva con 10 frecce, come su GBA (0x80ad638)
-  if ((enhanced_features0 & kFeatures0_SwordAndItems) && j == 0x0b)
+  if ((enhanced_features0 & kFeatures0_ItemsRefillResources) && j == 0x0b)
     link_arrow_filler = 10;
   if (!sign8(v))
     *p = v;

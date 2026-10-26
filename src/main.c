@@ -27,6 +27,7 @@
 #include "util.h"
 #include "audio.h"
 #include "hd_menu.h"
+#include "hd_art.h"
 
 static bool g_run_without_emu = 0;
 
@@ -354,6 +355,7 @@ int main(int argc, char** argv) {
   ParseConfigFile(config_file);
   LoadAssets();
   LoadLinkGraphics();
+  HdArt_Apply();
 
   ZeldaInitialize();
   g_zenv.ppu->extraLeftRight = UintMin(g_config.extended_aspect_ratio, kPpuExtraLeftRight);

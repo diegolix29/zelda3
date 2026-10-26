@@ -14,6 +14,7 @@
 #include "ancilla.h"
 #include "hud.h"
 #include "assets.h"
+#include "hd_art.h"
 
 static const uint16 kPolyhedralPalette[8] = { 0, 0x14d, 0x1b0, 0x1f3, 0x256, 0x279, 0x2fd, 0x35f };
 
@@ -1471,6 +1472,8 @@ void Credits_HandleSceneFade() {  // 8e9a2a
     }
     for (int k = 1; k >= 0; k--) {
       sprite_oam_flags[k] = kEndSequence_Case0_OamFlags[k];
+      if (k == 0)  // il re di Hyrule
+        sprite_oam_flags[k] = HdArt_KingOamFlags(sprite_oam_flags[k]);
       Credits_SpriteDraw_Single(k, kEndSequence_Case0_Tab0[k], kEndSequence_Case0_Tab1[k]);
     }
     break;

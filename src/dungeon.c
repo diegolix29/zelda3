@@ -18,6 +18,7 @@
 #include "hd_trans.h"
 #include "hd_water.h"
 #include "hd_menu.h"
+#include "hd_icegba.h"
 
 // todo: move to config
 static const uint16 kBossRooms[] = {
@@ -2263,11 +2264,11 @@ void Door_Draw_Helper4(uint8 door_type, uint16 dsto) {
 }
 
 const uint16 *GetRoomDoorInfo(int room) {
-  return (uint16 *)(kDungeonRoom + kDungeonRoomDoorOffs[room]);
+  return HdIce_DoorInfo(room, (uint16 *)(kDungeonRoom + kDungeonRoomDoorOffs[room]));
 }
 
 const uint8 *GetRoomHeaderPtr(int room) {
-  return kDungeonRoomHeaders + kDungeonRoomHeadersOffs[room];
+  return HdIce_Header(room, kDungeonRoomHeaders + kDungeonRoomHeadersOffs[room]);
 }
 
 const uint8 *GetDefaultRoomLayout(int i) {
@@ -2275,7 +2276,7 @@ const uint8 *GetDefaultRoomLayout(int i) {
 }
 
 const uint8 *GetDungeonRoomLayout(int i) {
-  return kDungeonRoom + kDungeonRoomOffs[i];
+  return HdIce_RoomLayout(i, kDungeonRoom + kDungeonRoomOffs[i]);
 }
 
 static inline void WriteAttr1(int j, uint16 attr) {
@@ -2643,7 +2644,8 @@ void Dungeon_LoadRoom() {  // 81873a
   memcpy(&dung_line_ptrs_row0, kDungeon_DrawObjectOffsets_BG1, 33);
   RoomDraw_DrawAllObjects(cur_p0);  // Draw Layer 3 objects to BG2
 
-  for (dung_load_ptr_offs = 0; dung_load_ptr_offs != 0x18C; dung_load_ptr_offs += 4) {
+  int num_blocks = HdIce_NumMovableBlocks();  // 99, o 100 con Palazzo 6 come GBA
+  for (dung_load_ptr_offs = 0; dung_load_ptr_offs != num_blocks * 4; dung_load_ptr_offs += 4) {
     MovableBlockData m = movable_block_datas[dung_load_ptr_offs >> 2];
     if (m.room == dungeon_room_index)
       DrawObjects_PushableBlock(m.tilemap, dung_load_ptr_offs);
@@ -5659,7 +5661,8 @@ void ManipBlock_Something(Point16U *pt) {  // 81db41
 void RevealPotItem(uint16 pos6, uint16 pos4) {  // 81e6b2
   BYTE(dung_secrets_unk1) = 0;
 
-  const uint8 *src_ptr = kDungeonSecrets + WORD(kDungeonSecrets[dungeon_room_index * 2]);
+  const uint8 *src_ptr = HdIce_Secrets(dungeon_room_index,
+      kDungeonSecrets + WORD(kDungeonSecrets[dungeon_room_index * 2]));
 
   int index = 0;
   for (;;) {
@@ -8648,6 +8651,7 @@ void Dungeon_LoadEntrance() {  // 82d8b3
   BYTE(link_z_coord) = link_actual_vel_z = 0xff;
   memcpy(movable_block_datas, kMovableBlockDataInit, kMovableBlockDataInit_SIZE);
   memcpy(&movable_block_datas[99], kTorchDataInit, 116); // junk
+  HdIce_ApplyMovableBlocks();
   memcpy(dung_torch_data, kTorchDataInit, kTorchDataInit_SIZE);
   memcpy(&dung_torch_data[144], kTorchDataJunk, kTorchDataJunk_SIZE);
 

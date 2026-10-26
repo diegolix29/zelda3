@@ -19,6 +19,7 @@
 #include <string.h>
 #include "hd_world.h"
 #include "zelda_rtl.h"
+#include "config.h"
 #include "variables.h"
 #include "features.h"
 #include "assets.h"
@@ -1098,10 +1099,10 @@ static bool ShowsRoom(void) {
           (sub == 1 || sub == 2 || sub == 4 || sub == 8 || sub == 9 || sub == 11));
 }
 
-// Le frecce piantate restano solo con "Interazione bruciatura e congelamento"
-// (il mondo reagisce fisicamente); senza, spariscono come nel gioco originale
+// Le frecce piantate restano solo con "Frecce piantate nei muri" (StuckArrows,
+// prima dentro BurnAndFreezeInteraction); senza, spariscono come nel gioco originale
 static bool ArrowsKept(void) {
-  if (!(enhanced_features0 & kFeatures0_BurnAndFreeze))
+  if (!g_config.stuck_arrows)
     return false;
   if (player_is_indoors)
     return main_module_index == 7 && !dung_want_lights_out;

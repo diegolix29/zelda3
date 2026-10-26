@@ -322,6 +322,8 @@ static bool ParseBoolBit(const char *value, uint32 *data, uint32 mask) {
 }
 
 static bool g_fx_heat_key_seen;  // l'ini ha gia' FxHeatAndFlames
+// chiavi divise da opzioni piu' vecchie: se mancano prendono il valore di quella
+static bool g_blond_link_seen, g_gba_damage_seen, g_flipper_dive_seen, g_stuck_arrows_seen, g_hurricane_spin_seen;
 
 static bool HandleIniConfig(int section, const char *key, char *value) {
   if (section == 0) {
@@ -418,6 +420,11 @@ static bool HandleIniConfig(int section, const char *key, char *value) {
       return ParseBool(value, &g_config.fx_button_hints);
     } else if (StringEqualsNoCase(key, "FxWhirlpoolGlow")) {
       return ParseBool(value, &g_config.fx_whirlpool);
+    } else if (StringEqualsNoCase(key, "OfficialArtwork")) {
+      return ParseBool(value, &g_config.official_artwork);
+    } else if (StringEqualsNoCase(key, "BlondLink")) {
+      g_blond_link_seen = true;
+      return ParseBool(value, &g_config.blond_link);
     } else if (StringEqualsNoCase(key, "DynamicLighting")) {
       return ParseBool(value, &g_config.dynamic_light);
     } else if (StringEqualsNoCase(key, "HighRefreshInterpolation")) {
@@ -500,11 +507,8 @@ static bool HandleIniConfig(int section, const char *key, char *value) {
     } else if (StringEqualsNoCase(key, "Language")) {
       g_config.language = value;
       return true;
-    } else if (StringEqualsNoCase(key, "AutosaveOnAreaChange")) {
-      return ParseBool(value, &g_config.autosave_areas);
-    } else if (StringEqualsNoCase(key, "AutosaveSlots")) {
-      g_config.autosave_slots = (uint8)strtol(value, (char**)NULL, 10);
-      return true;
+    } else if (StringEqualsNoCase(key, "AutosaveOnAreaChange") || StringEqualsNoCase(key, "AutosaveSlots")) {
+      return true;  // vecchio salvataggio automatico ai cambi di area, tolto
     }
   } else if (section == 4) {
     if (StringEqualsNoCase(key, "ItemSwitchLR")) {
@@ -517,8 +521,24 @@ static bool HandleIniConfig(int section, const char *key, char *value) {
       return ParseBoolBit(value, &g_config.features0, kFeatures0_MirrorToDarkworld);
     } else if (StringEqualsNoCase(key, "SwordAndItemsInteraction")) {
       return ParseBoolBit(value, &g_config.features0, kFeatures0_SwordAndItems);
+    } else if (StringEqualsNoCase(key, "GbaEnemyDamage")) {
+      g_gba_damage_seen = true;
+      return ParseBool(value, &g_config.gba_damage);
+    } else if (StringEqualsNoCase(key, "FlipperDive")) {
+      g_flipper_dive_seen = true;
+      return ParseBool(value, &g_config.flipper_dive);
+    } else if (StringEqualsNoCase(key, "HurricaneSpin")) {
+      g_hurricane_spin_seen = true;
+      return ParseBool(value, &g_config.hurricane_spin);
+    } else if (StringEqualsNoCase(key, "StuckArrows")) {
+      g_stuck_arrows_seen = true;
+      return ParseBool(value, &g_config.stuck_arrows);
     } else if (StringEqualsNoCase(key, "CollectItemsWithSword") || StringEqualsNoCase(key, "BreakPotsWithSword")) {
       return true;  // vecchie opzioni, ora dentro SwordAndItemsInteraction
+    } else if (StringEqualsNoCase(key, "ItemsRefillResources")) {
+      return ParseBoolBit(value, &g_config.features0, kFeatures0_ItemsRefillResources);
+    } else if (StringEqualsNoCase(key, "IcePalaceGba")) {
+      return ParseBoolBit(value, &g_config.features0, kFeatures0_IcePalaceGba);
     } else if (StringEqualsNoCase(key, "SaveHeartsAndMagic")) {
       return ParseBoolBit(value, &g_config.features0, kFeatures0_SaveHeartsAndMagic);
     } else if (StringEqualsNoCase(key, "DisableLowHealthBeep")) {
@@ -610,6 +630,17 @@ static bool ParseOneConfigFile(const char *filename, int depth) {
 // - con l'MSU la frequenza e' quella dei suoi file: 48000 per gli opuz,
 //   44100 per i pcm.
 static void ApplyConfigRules(void) {
+  // opzioni divise: un ini di prima le accende come l'opzione da cui vengono
+  if (!g_blond_link_seen)
+    g_config.blond_link = g_config.official_artwork;
+  if (!g_gba_damage_seen)
+    g_config.gba_damage = (g_config.features0 & kFeatures0_SwordAndItems) != 0;
+  if (!g_flipper_dive_seen)
+    g_config.flipper_dive = (g_config.features0 & kFeatures0_SwordAndItems) != 0;
+  if (!g_hurricane_spin_seen)
+    g_config.hurricane_spin = (g_config.features0 & kFeatures0_SwordAndItems) != 0;
+  if (!g_stuck_arrows_seen)
+    g_config.stuck_arrows = (g_config.features0 & kFeatures0_BurnAndFreeze) != 0;
   if (!(g_config.features0 & kFeatures0_SwitchLR))
     g_config.features0 &= ~kFeatures0_ShowXLRItemsInHud;
   if (!g_config.new_renderer) {

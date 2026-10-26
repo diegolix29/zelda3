@@ -1,4 +1,5 @@
 #include "overworld.h"
+#include "config.h"
 #include "hd_fx.h"
 #include "hud.h"
 #include "load_gfx.h"
@@ -2940,9 +2941,9 @@ void DecompressEnemyDamageSubclasses() {  // 82fe71
     enemy_damage_data[i + 0] = t >> 4;
     enemy_damage_data[i + 1] = t & 0xf;
   }
-  // Spada e oggetti: i valori che la versione GBA ha cambiato (tabella nemico x
+  // Danni come su GBA (GbaEnemyDamage): i valori che la versione GBA ha cambiato (tabella nemico x
   // classe a 0x817f18c), senza le Bacchette del Fuoco e del Ghiaccio
-  if (enhanced_features0 & kFeatures0_SwordAndItems) {
+  if (g_config.gba_damage) {
     static const uint16 kGbaDamage[][2] = {
       {0x0ee, 2}, {0x13e, 2}, {0x22e, 2}, {0x8be, 2}, {0x8ee, 2},  // Etere: 64 invece di congelare
       {0x4cd, 3}, {0x64d, 3}, {0x81d, 2}, {0xa1d, 2},  // Bombos

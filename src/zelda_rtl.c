@@ -17,6 +17,7 @@
 #include "hd_water.h"
 #include "hd_hud.h"
 #include "hd_menu.h"
+#include "hd_icegba.h"
 #include "hud.h"
 #include "messaging.h"
 ZeldaEnv g_zenv;
@@ -1163,6 +1164,8 @@ bool ZeldaRunFrame(int inputs) {
         enhanced_features0 = g_wanted_zelda_features;
         if (changed & kFeatures0_ExtendedInventory)
           Hud_ChangeInventoryStyle((enhanced_features0 & kFeatures0_ExtendedInventory) != 0);
+        if (changed & kFeatures0_IcePalaceGba)
+          HdIce_ApplyMovableBlocks();
         EmuSyncMemoryRegion(&enhanced_features0, sizeof(enhanced_features0));
         StateRecorder_RecordPatchByte(&state_recorder, kRam_Features0, (uint8 *)&enhanced_features0, 4);
       }

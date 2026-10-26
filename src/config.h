@@ -71,8 +71,6 @@ typedef struct Config {
   uint32 features0;
   // Migliorie HD
   uint8 smooth_camera;      // 0 = spenta, 1-3 = intensita'
-  bool autosave_areas;      // salvataggio automatico ai cambi di area
-  uint8 autosave_slots;     // quanti salvataggi automatici tenere a rotazione
   bool hd_text;
   bool high_refresh;
   bool dynamic_light;
@@ -81,6 +79,15 @@ typedef struct Config {
   // animazioni del fondale al chiuso a meta' velocita'
   bool fx_heat, fx_window_rays, fx_item_glow, fx_rain;
   bool fx_menu_blur, fx_sprite_shadows, fx_soft_iris, fx_button_hints, fx_water, fx_whirlpool;
+  // aspetto dei disegni ufficiali (hd_art.c): Agahnim rosso, re in rosso,
+  // medaglione con la stella della versione giapponese; Link biondo a parte
+  bool official_artwork, blond_link;
+  // divise da SwordAndItemsInteraction: danni dei nemici come su GBA (si
+  // applicano a inizio partita) e immersione con le pinne; divisa da
+  // BurnAndFreezeInteraction: frecce che restano piantate nei muri
+  bool gba_damage, flipper_dive, stuck_arrows;
+  // Giravolta Tornado come su GBA, sbloccata dal Retino per Farfalle
+  bool hurricane_spin;
   uint8 text_speed;         // 0 = originale, 1 = veloce, 2 = istantaneo
 
   const char *link_graphics;
