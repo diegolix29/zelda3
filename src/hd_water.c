@@ -839,6 +839,7 @@ static void FindWaterColors(int n, int n_water) {
       cnt[j] = 0;
   g_num_water_colors = 0;
   g_water_min_luma = 1 << 30;
+  int found[kMaxWaterColors];
   for (int k = 0; k < kMaxWaterColors; k++) {
     int best = -1;
     for (int j = 0; j < nc; j++)
@@ -855,11 +856,27 @@ static void FindWaterColors(int n, int n_water) {
       k--;
       continue;
     }
+    found[g_num_water_colors] = cnt[best];
     g_water_colors[g_num_water_colors++] = col[best];
     if (Luma(col[best]) < g_water_min_luma)
       g_water_min_luma = Luma(col[best]);
     cnt[best] = 0;
   }
+  // Il primo colore e' quello delle onde animate della riva (BlurRows). Con due
+  // colori quasi alla pari (acqua alta e bassa, Laghetto della Montagna) il piu'
+  // frequente cambiava a ogni fase delle onde (9 fotogrammi) e la fascia lungo
+  // la riva si schiariva e si scuriva: resta quello di prima finche' e' ancora
+  // un colore dell'acqua con almeno il 60% dei pixel del primo
+  static uint32 prev_first;
+  for (int j = 1; j < g_num_water_colors; j++) {
+    if (g_water_colors[j] == prev_first && found[j] * 10 >= found[0] * 6) {
+      uint32 c = g_water_colors[0];
+      g_water_colors[0] = g_water_colors[j], g_water_colors[j] = c;
+      break;
+    }
+  }
+  if (g_num_water_colors)
+    prev_first = g_water_colors[0];
 }
 
 // Luminosita' dello schermo (INIDISP, 1-15): nelle dissolvenze (mappa del
