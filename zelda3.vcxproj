@@ -33,6 +33,14 @@
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
     <ProjectName>zelda3</ProjectName>
   </PropertyGroup>
+  <!-- SDL2: use third_party\SDL2-2.28.2 when present (needed for DualSense / PS4 / Switch pads),
+       otherwise fall back to the old NuGet sdl2 2.0.5 package. -->
+  <PropertyGroup>
+    <Zelda3Sdl2Dir>$(MSBuildThisFileDirectory)third_party\SDL2-2.28.2\</Zelda3Sdl2Dir>
+    <Zelda3UseLocalSdl2 Condition="Exists('$(Zelda3Sdl2Dir)include\SDL.h')">true</Zelda3UseLocalSdl2>
+    <Zelda3Sdl2Arch Condition="'$(Platform)'=='x64'">x64</Zelda3Sdl2Arch>
+    <Zelda3Sdl2Arch Condition="'$(Platform)'!='x64'">x86</Zelda3Sdl2Arch>
+  </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
@@ -222,6 +230,15 @@
       <AdditionalDependencies>kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <ProgramDatabaseFile>$(IntDir)$(TargetName).pdb</ProgramDatabaseFile>
       <AdditionalOptions>/PDBALTPATH:%_PDB% %(AdditionalOptions)</AdditionalOptions>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Zelda3UseLocalSdl2)'=='true'">
+    <ClCompile>
+      <PreprocessorDefinitions>HAS_SDL2;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(Zelda3Sdl2Dir)include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <Link>
+      <AdditionalDependencies>$(Zelda3Sdl2Dir)lib\$(Zelda3Sdl2Arch)\SDL2main.lib;$(Zelda3Sdl2Dir)lib\$(Zelda3Sdl2Arch)\SDL2.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
@@ -835,10 +852,14 @@
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
-    <Import Project="packages\sdl2.redist.2.0.5\build\native\sdl2.redist.targets" Condition="Exists('packages\sdl2.redist.2.0.5\build\native\sdl2.redist.targets')" />
-    <Import Project="packages\sdl2.2.0.5\build\native\sdl2.targets" Condition="Exists('packages\sdl2.2.0.5\build\native\sdl2.targets')" />
+    <Import Project="packages\sdl2.redist.2.0.5\build\native\sdl2.redist.targets" Condition="'$(Zelda3UseLocalSdl2)'!='true' And Exists('packages\sdl2.redist.2.0.5\build\native\sdl2.redist.targets')" />
+    <Import Project="packages\sdl2.2.0.5\build\native\sdl2.targets" Condition="'$(Zelda3UseLocalSdl2)'!='true' And Exists('packages\sdl2.2.0.5\build\native\sdl2.targets')" />
   </ImportGroup>
-  <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
+  <Target Name="Zelda3CopyLocalSdl2" AfterTargets="Build" Condition="'$(Zelda3UseLocalSdl2)'=='true'">
+    <Copy SourceFiles="$(Zelda3Sdl2Dir)lib\$(Zelda3Sdl2Arch)\SDL2.dll" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
+    <Message Importance="high" Text="zelda3: using SDL2 from $(Zelda3Sdl2Dir)" />
+  </Target>
+  <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild" Condition="'$(Zelda3UseLocalSdl2)'!='true'">
     <PropertyGroup>
       <ErrorText>This project references NuGet package(s) that are missing on this computer. Use NuGet Package Restore to download them.  For more information, see http://go.microsoft.com/fwlink/?LinkID=322105. The missing file is {0}.</ErrorText>
     </PropertyGroup>

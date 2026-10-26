@@ -3,6 +3,7 @@
 #include <string.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <stdarg.h>
 #include <SDL.h>
 #ifdef _WIN32
 #include "platform/win32/volume_control.h"
@@ -42,6 +43,10 @@ static int RemapSdlButton(int button);
 static void HandleGamepadInput(int button, bool pressed);
 static void HandleGamepadAxisInput(int gamepad_id, int axis, int value);
 static void OpenOneGamepad(int i);
+static void GamepadSetHints(void);
+static void GamepadInit(void);
+static void GamepadJoystickAdded(int i);
+static void CloseOneGamepad(SDL_JoystickID id);
 static void HandleVolumeAdjustment(int volume_adjustment);
 static void LoadAssets();
 static void SwitchDirectory();
@@ -398,6 +403,7 @@ int main(int argc, char** argv) {
     g_config.audio_samples = kDefaultSamples;
 
   // set up SDL
+  GamepadSetHints();
   if(SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMECONTROLLER) != 0) {
     printf("Failed to init SDL: %s\n", SDL_GetError());
     return 1;
@@ -459,6 +465,7 @@ int main(int argc, char** argv) {
 
   ZeldaReadSram();
 
+  GamepadInit();
   for (int i = 0; i < SDL_NumJoysticks(); i++)
     OpenOneGamepad(i);
 
@@ -476,6 +483,12 @@ int main(int argc, char** argv) {
       switch(event.type) {
       case SDL_CONTROLLERDEVICEADDED:
         OpenOneGamepad(event.cdevice.which);
+        break;
+      case SDL_CONTROLLERDEVICEREMOVED:
+        CloseOneGamepad(event.cdevice.which);
+        break;
+      case SDL_JOYDEVICEADDED:
+        GamepadJoystickAdded(event.jdevice.which);
         break;
       case SDL_CONTROLLERAXISMOTION:
         HandleGamepadAxisInput(event.caxis.which, event.caxis.axis, event.caxis.value);
@@ -796,12 +809,164 @@ static void HandleInput(int keyCode, int keyMod, bool pressed) {
   }
 }
 
-static void OpenOneGamepad(int i) {
-  if (SDL_IsGameController(i)) {
-    SDL_GameController *controller = SDL_GameControllerOpen(i);
-    if (!controller)
-      fprintf(stderr, "Could not open gamepad %d: %s\n", i, SDL_GetError());
+// ---------------------------------------------------------------------------
+// Controller support (Xbox, PlayStation, Switch, generic pads).
+// All pads go through the SDL GameController API, which presents every pad
+// with an Xbox-style layout: A = bottom face button (Cross on PlayStation),
+// B = right, X = left, Y = top. So the [GamepadMap] in zelda3.ini works the
+// same for every brand. Detection is written to zelda3_controllers.log.
+// ---------------------------------------------------------------------------
+#define kMaxOpenPads 8
+static SDL_GameController *g_open_pads[kMaxOpenPads];
+static SDL_JoystickID g_open_pad_ids[kMaxOpenPads];
+static FILE *g_pad_log;
+
+static void PadLog(const char *fmt, ...) {
+  char buf[512];
+  va_list va;
+  va_start(va, fmt);
+  vsnprintf(buf, sizeof(buf), fmt, va);
+  va_end(va);
+  printf("[pad] %s\n", buf);
+  if (!g_pad_log) {
+    g_pad_log = fopen("zelda3_controllers.log", "w");
+    if (!g_pad_log)
+      return;
   }
+  fprintf(g_pad_log, "[%8.2fs] %s\n", SDL_GetTicks() / 1000.0, buf);
+  fflush(g_pad_log);
+}
+
+// Called before SDL_Init: these hints let SDL talk to PlayStation and Switch
+// pads directly (USB and Bluetooth). They need SDL 2.0.9+ (DualSense: 2.0.14+)
+// and are simply ignored by older SDL versions. Set with "default" priority,
+// so environment variables can still override them.
+static void GamepadSetHints(void) {
+  SDL_SetHintWithPriority("SDL_JOYSTICK_HIDAPI", "1", SDL_HINT_DEFAULT);
+  SDL_SetHintWithPriority("SDL_JOYSTICK_HIDAPI_PS4", "1", SDL_HINT_DEFAULT);
+  SDL_SetHintWithPriority("SDL_JOYSTICK_HIDAPI_PS5", "1", SDL_HINT_DEFAULT);
+  SDL_SetHintWithPriority("SDL_JOYSTICK_HIDAPI_SWITCH", "1", SDL_HINT_DEFAULT);
+  // Nintendo pads: map face buttons by position (like Xbox), not by label.
+  SDL_SetHintWithPriority("SDL_GAMECONTROLLER_USE_BUTTON_LABELS", "0", SDL_HINT_DEFAULT);
+}
+
+// Called after SDL_Init: log versions and load an optional gamecontrollerdb.txt
+// (community mapping database, adds mappings for many generic pads).
+static void GamepadInit(void) {
+  SDL_version compiled, linked;
+  SDL_VERSION(&compiled);
+  SDL_GetVersion(&linked);
+  char cwd[512] = "?";
+#if defined(_WIN32)
+  if (!_getcwd(cwd, sizeof(cwd))) strcpy(cwd, "?");
+#else
+  if (!getcwd(cwd, sizeof(cwd))) strcpy(cwd, "?");
+#endif
+  PadLog("SDL compiled %d.%d.%d, SDL2.dll loaded %d.%d.%d", compiled.major, compiled.minor, compiled.patch,
+         linked.major, linked.minor, linked.patch);
+  PadLog("Log folder: %s", cwd);
+  if (SDL_VERSIONNUM(linked.major, linked.minor, linked.patch) < SDL_VERSIONNUM(2, 0, 14))
+    PadLog("WARNING: this SDL2.dll is too old for DualSense and direct PS4/Switch support (needs 2.0.14+)");
+
+  const char *db_name = "gamecontrollerdb.txt";
+  int n = SDL_GameControllerAddMappingsFromFile(db_name);
+  if (n < 0) {
+    char *base = SDL_GetBasePath();
+    if (base) {
+      char path[1024];
+      snprintf(path, sizeof(path), "%s%s", base, db_name);
+      SDL_free(base);
+      n = SDL_GameControllerAddMappingsFromFile(path);
+      if (n >= 0) db_name = "gamecontrollerdb.txt (next to exe)";
+    }
+  }
+  if (n >= 0)
+    PadLog("Loaded %d extra mappings from %s", n, db_name);
+  else
+    PadLog("No gamecontrollerdb.txt found (optional, only built-in mappings used)");
+  PadLog("%d joystick device(s) found at startup", SDL_NumJoysticks());
+}
+
+static const char *GamepadTypeName(SDL_GameController *c) {
+#if SDL_VERSION_ATLEAST(2, 0, 12)
+  SDL_version v;
+  SDL_GetVersion(&v);
+  if (SDL_VERSIONNUM(v.major, v.minor, v.patch) >= SDL_VERSIONNUM(2, 0, 12)) {
+    switch (SDL_GameControllerGetType(c)) {
+    case SDL_CONTROLLER_TYPE_XBOX360: return "Xbox 360";
+    case SDL_CONTROLLER_TYPE_XBOXONE: return "Xbox One/Series";
+    case SDL_CONTROLLER_TYPE_PS3: return "PS3";
+    case SDL_CONTROLLER_TYPE_PS4: return "PS4 (DualShock 4)";
+#if SDL_VERSION_ATLEAST(2, 0, 14)
+    case SDL_CONTROLLER_TYPE_PS5: return "PS5 (DualSense)";
+#endif
+    case SDL_CONTROLLER_TYPE_NINTENDO_SWITCH_PRO: return "Switch Pro";
+    default: return "generic";
+    }
+  }
+#endif
+  (void)c;
+  return "unknown (old SDL)";
+}
+
+static void OpenOneGamepad(int i) {
+  char guid[64];
+  SDL_JoystickGetGUIDString(SDL_JoystickGetDeviceGUID(i), guid, sizeof(guid));
+  const char *name = SDL_JoystickNameForIndex(i);
+  if (!SDL_IsGameController(i)) {
+    PadLog("Device %d \"%s\" GUID %s: NO MAPPING, ignored (try adding gamecontrollerdb.txt)",
+           i, name ? name : "?", guid);
+    return;
+  }
+  SDL_GameController *controller = SDL_GameControllerOpen(i);
+  if (!controller) {
+    PadLog("Device %d \"%s\" GUID %s: could not open: %s", i, name ? name : "?", guid, SDL_GetError());
+    return;
+  }
+  SDL_JoystickID id = SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(controller));
+  int slot = -1;
+  for (int k = 0; k < kMaxOpenPads; k++) {
+    if (g_open_pads[k] && g_open_pad_ids[k] == id) {
+      // Already open (SDL also sends "added" events for pads present at startup).
+      SDL_GameControllerClose(controller);
+      return;
+    }
+    if (!g_open_pads[k] && slot < 0)
+      slot = k;
+  }
+  if (slot >= 0) {
+    g_open_pads[slot] = controller;
+    g_open_pad_ids[slot] = id;
+  }
+  PadLog("Connected: \"%s\" type=%s GUID %s id=%d", SDL_GameControllerName(controller),
+         GamepadTypeName(controller), guid, (int)id);
+  char *mapping = SDL_GameControllerMapping(controller);
+  if (mapping) {
+    PadLog("  mapping: %s", mapping);
+    SDL_free(mapping);
+  }
+}
+
+// Joystick added: only log devices that have no controller mapping, since
+// mapped ones are handled by SDL_CONTROLLERDEVICEADDED / OpenOneGamepad.
+static void GamepadJoystickAdded(int i) {
+  if (!SDL_IsGameController(i))
+    OpenOneGamepad(i);
+}
+
+static void CloseOneGamepad(SDL_JoystickID id) {
+  for (int k = 0; k < kMaxOpenPads; k++) {
+    if (g_open_pads[k] && g_open_pad_ids[k] == id) {
+      PadLog("Disconnected: id=%d", (int)id);
+      SDL_GameControllerClose(g_open_pads[k]);
+      g_open_pads[k] = NULL;
+    }
+  }
+  // Release any buttons still held so nothing gets stuck after unplugging.
+  for (int b = 0; b < 32; b++)
+    if (g_gamepad_modifiers & (1u << b))
+      HandleGamepadInput(b, false);
+  g_gamepad_buttons = 0;
 }
 
 static int RemapSdlButton(int button) {
