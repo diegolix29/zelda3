@@ -46,6 +46,7 @@ extern uint8 g_sprite_oam_owner[128];   // sprite.c
 int g_view3d;
 int g_view3d_curve;
 int g_view3d_dist;
+int g_view3d_walls;
 
 static const char *const kDistNames[kHd3d_NumDists] = { "Screen", "2x", "3x" };
 
@@ -76,6 +77,7 @@ static uint32 *g_side;           // full frame, sprites and BG3 included
 static uint8 *g_owner;           // OAM index per pixel of g_side, 0xff = no sprite
 static uint32 *g_floor;          // copy of the ground before re-projection
 static uint8 *g_group_map;       // sprite group + 1 per pixel, 0 = none
+static float *g_depth;           // camera depth per screen pixel (indoor walls)
 
 // stats for the log
 static uint64 g_stat_ticks;
@@ -105,12 +107,13 @@ void Hd3d_Init(void) {
   g_view3d = g_config.view3d % kHd3d_NumLevels;
   g_view3d_curve = g_config.view3d_curve % kHd3d_NumCurves;
   g_view3d_dist = g_config.view3d_dist % kHd3d_NumDists;
+  g_view3d_walls = g_config.view3d_walls & 1;
   g_angle = kLevelDegrees[g_view3d];
   g_radius_inv = RadiusInv(g_view3d_curve);
-  Hd3d_Log("3D view init: View3D=%d (%s deg), View3DCurve=%d (%s), View3DDrawDistance=%d (%s), NewRenderer=%d, "
+  Hd3d_Log("3D view init: View3D=%d (%s deg), View3DCurve=%d (%s), View3DDrawDistance=%d (%s), View3DWalls=%d, NewRenderer=%d, "
            "OutputMethod=%d, ExtendedAspectRatio=%d, ContinuousWorld=%d, shader='%s'",
            g_view3d, kLevelNames[g_view3d], g_view3d_curve, kCurveNames[g_view3d_curve],
-           g_view3d_dist, kDistNames[g_view3d_dist],
+           g_view3d_dist, kDistNames[g_view3d_dist], g_view3d_walls,
            g_config.new_renderer, g_config.output_method, g_config.extended_aspect_ratio,
            (g_config.features0 & kFeatures0_ContinuousWorld) != 0, g_config.shader ? g_config.shader : "");
   if (!g_config.new_renderer)
@@ -167,6 +170,18 @@ void Hd3d_CycleDrawDistance(void) {
   Hd3d_SetDrawDistance(g_view3d_dist + 1, "hotkey");
 }
 
+void Hd3d_SetWalls(int on, const char *why) {
+  on &= 1;
+  if (on != g_view3d_walls)
+    Hd3d_Log("indoor walls -> %s (%s)", on ? "on" : "off", why);
+  g_view3d_walls = on;
+  g_config.view3d_walls = (uint8)on;
+}
+
+void Hd3d_ToggleWalls(void) {
+  Hd3d_SetWalls(!g_view3d_walls, "hotkey");
+}
+
 bool Hd3d_FarSprites(int *margin_x, int *margin_top, int *margin_bottom) {
   // the 3D view was drawn last frame; outdoors only with the continuous world
   // (it keeps every enemy of the area alive), indoors in any room
@@ -206,12 +221,13 @@ static bool IsGameplayModule(void) {
 static bool EnsureBuffers(int w, int h) {
   if (w == g_w && h == g_h && g_side)
     return true;
-  free(g_side), free(g_owner), free(g_floor), free(g_group_map);
+  free(g_side), free(g_owner), free(g_floor), free(g_group_map), free(g_depth);
   g_side = (uint32 *)malloc(sizeof(uint32) * w * h);
   g_owner = (uint8 *)malloc(w * h);
   g_floor = (uint32 *)malloc(sizeof(uint32) * w * h);
   g_group_map = (uint8 *)malloc(w * h);
-  if (!g_side || !g_owner || !g_floor || !g_group_map) {
+  g_depth = (float *)malloc(sizeof(float) * w * h);
+  if (!g_side || !g_owner || !g_floor || !g_group_map || !g_depth) {
     Hd3d_Log("ERROR: out of memory for %dx%d buffers", w, h);
     g_w = g_h = 0;
     return false;
@@ -358,9 +374,9 @@ static uint32 SampleVram(Ppu *ppu, int fx, int fy) {
 
 static void Ground_Setup(Ground *g, Ppu *ppu, int width) {
   g->ppu = ppu;
+  HdWorld_ViewOrigin(width, &g->org_x, &g->org_y);
   if (HdWorld_Active()) {
     g->source = kSource_World;
-    HdWorld_ViewOrigin(width, &g->org_x, &g->org_y);
   } else {
     g->source = kSource_Vram;
   }
@@ -451,8 +467,10 @@ static bool Cam_Ray(const Cam *cm, float sx, float sy, float *u, float *v, float
 }
 
 // ground (u, v) -> screen point and scale (screen pixels per ground pixel)
-static bool Cam_ToScreen(const Cam *cm, float u, float v, float *sx, float *sy, float *scale) {
-  float x = u, y = v, z = 0.0f;
+// ground (u, v) lifted by `height` pixels (along the sphere's normal when
+// curved) -> screen point and scale
+static bool Cam_ToScreenH(const Cam *cm, float u, float v, float height, float *sx, float *sy, float *scale) {
+  float x = u, y = v, z = height;
   if (cm->R != 0.0f) {
     float hx = u - cm->cx, hy = v - cm->p;
     float r = sqrtf(hx * hx + hy * hy);
@@ -460,9 +478,9 @@ static bool Cam_ToScreen(const Cam *cm, float u, float v, float *sx, float *sy, 
       float phi = r / cm->R;
       if (phi > 1.5f)
         return false;
-      float k = cm->R * sinf(phi) / r;
+      float k = (cm->R + height) * sinf(phi) / r;
       x = cm->cx + hx * k, y = cm->p + hy * k;
-      z = cm->R * cosf(phi) - cm->R;
+      z = (cm->R + height) * cosf(phi) - cm->R;
     }
   }
   float rx = x - cm->ox, ry = y - cm->oy, rz = z - cm->oz;
@@ -474,6 +492,10 @@ static bool Cam_ToScreen(const Cam *cm, float u, float v, float *sx, float *sy, 
   *sy = cm->cy - cm->D * up / zc;
   *scale = cm->D / zc;
   return true;
+}
+
+static bool Cam_ToScreen(const Cam *cm, float u, float v, float *sx, float *sy, float *scale) {
+  return Cam_ToScreenH(cm, u, v, 0.0f, sx, sy, scale);
 }
 
 // ---------------------------------------------------------------------------
@@ -599,6 +621,128 @@ static void DrawGround(uint32 *out, int pitch_px, const Cam *cm, const Ground *g
         px = (px & 0xff000000) | Lerp(px, fog, f > 256 ? 256 : f);
       }
       dst[x] = px;
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Indoor walls
+//
+// Every 8x8 tile of a room has a collision type in the game (the attribute
+// tables, one per floor layer); types 0x01-0x03 are walls. Walls are raised:
+// each north-south run of wall tiles gets the height of the run (capped), so
+// a room's north wall stands up as tall as it is painted.
+//
+// The SNES draws walls in 3/4 view: a wall's face is painted on the ground
+// just north of its base. So a wall surface point at height z shows the art
+// z pixels further north ("fold-up"): the painted face stands upright and the
+// floor behind it stays where it is.
+//
+// Drawing is column by column, front to back (like a heightmap "voxel space"
+// renderer): walk up a screen column, find the ground under each row, and
+// when that ground is a wall, fill the rows its face and top cover above what
+// is already drawn. A depth buffer keeps characters behind walls hidden.
+
+enum { kWallMax = 32 };          // tallest wall, pixels
+static uint8 g_hmap[64 * 64];    // wall height per 8x8 tile of the room
+static bool g_depth_valid;
+static int g_stat_wall_cells;
+
+static bool IsWallAttr(uint8 a) {
+  return a >= 0x01 && a <= 0x03;
+}
+
+static void BuildHeightMap(void) {
+  // the table of the layer Link is on, as the game's tile detection reads it
+  const uint8 *attr = dung_bg2_attr_table + (link_is_on_lower_level ? 0x1000 : 0);
+  int cells = 0;
+  for (int cx = 0; cx < 64; cx++) {
+    int cy = 0;
+    while (cy < 64) {
+      if (!IsWallAttr(attr[cy * 64 + cx])) {
+        g_hmap[cy * 64 + cx] = 0;
+        cy++;
+        continue;
+      }
+      int y0 = cy;
+      while (cy < 64 && IsWallAttr(attr[cy * 64 + cx]))
+        cy++;
+      int hgt = (cy - y0) * 8;
+      if (hgt > kWallMax)
+        hgt = kWallMax;
+      for (int y = y0; y < cy; y++)
+        g_hmap[y * 64 + cx] = (uint8)hgt;
+      cells += cy - y0;
+    }
+  }
+  g_stat_wall_cells += cells;
+}
+
+static inline int HeightAt(const Ground *gr, float u, float v) {
+  int wx = gr->org_x + (int)floorf(u), wy = gr->org_y + (int)floorf(v);
+  return g_hmap[((wy >> 3) & 63) * 64 + ((wx >> 3) & 63)];
+}
+
+// ground color at frame coordinates (u, v): the PPU frame inside the SNES
+// screen, past it the room tiles
+static bool SampleSurface(const Ground *gr, float u, float v, uint32 *out) {
+  int ui = (int)floorf(u), vi = (int)floorf(v);
+  if (ui >= 0 && ui < g_w && vi >= 0 && vi < g_h) {
+    *out = g_floor[vi * g_w + ui];
+    return true;
+  }
+  g_stat_outside++;
+  return Ground_Sample(gr, ui, vi, out);
+}
+
+static void DrawTerrain(uint32 *out, int pitch_px, const Cam *cm, const Ground *gr, const Sky *sk) {
+  int w = g_w, h = g_h;
+  uint32 fog = sk->outdoors ? 3u << 24 | sk->horizon : 5u << 24;
+  for (int x = 0; x < w; x++) {
+    int ybuf = h;   // rows ybuf..h-1 of this column are drawn
+    for (int y = h - 1; y >= 0 && ybuf > 0; y--) {
+      float u, v, depth;
+      if (!Cam_Ray(cm, x + 0.5f, y + 0.5f, &u, &v, &depth) || depth >= kFogEnd) {
+        for (int r = 0; r < ybuf; r++) {
+          out[r * pitch_px + x] = Sky_Color(sk, cm, x + 0.5f, r + 0.5f, x, r);
+          g_depth[r * w + x] = 1e9f;
+        }
+        ybuf = 0;
+        break;
+      }
+      int f = depth > kFogStart ? (int)((depth - kFogStart) * (256.0f / (kFogEnd - kFogStart))) : 0;
+      if (f > 256) f = 256;
+      int hgt = HeightAt(gr, u, v);
+      int top = y;
+      float sy_top = y + 0.5f;
+      if (hgt) {
+        float sx_t, sc_t;
+        if (Cam_ToScreenH(cm, u, v, (float)hgt, &sx_t, &sy_top, &sc_t)) {
+          top = (int)floorf(sy_top);
+          if (top < 0) top = 0;
+        }
+      }
+      if (top >= ybuf)
+        continue;   // hidden behind what is already drawn
+      float span = (y + 0.5f) - sy_top;
+      for (int r = ybuf - 1; r >= top; r--) {
+        // height of this row on the face, then fold-up: art z pixels north
+        float z = 0.0f;
+        if (hgt && span > 0.01f) {
+          z = hgt * ((y + 0.5f) - (r + 0.5f)) / span;
+          z = z < 0 ? 0 : z > hgt ? (float)hgt : z;
+        }
+        uint32 px;
+        if (!SampleSurface(gr, u, v - z, &px)) {
+          g_stat_missing++;
+          px = fog;
+        } else if (f) {
+          px = (px & 0xff000000) | Lerp(px, fog, f);
+        }
+        out[r * pitch_px + x] = px;
+        g_depth[r * w + x] = depth;
+      }
+      ybuf = top;
     }
   }
 }
@@ -897,6 +1041,8 @@ static int DrawSprites(uint32 *out, int pitch_px, const Cam *cm, Ppu *ppu) {
                depth >= kFogEnd ? " NOT DRAWN (past the fog)" : "");
     if (depth >= kFogEnd)
       continue;
+    // behind a wall: the wall's pixels are nearer than the feet
+    float zlimit = depth - 4.0f;
     float inv = 1.0f / sc;
     int dx0 = (int)floorf(sx + (g->x0 - ax) * sc), dx1 = (int)ceilf(sx + (g->x1 + 1 - ax) * sc);
     int dy0 = (int)floorf(sy + (g->y0 - ay) * sc), dy1 = (int)ceilf(sy);
@@ -914,7 +1060,8 @@ static int DrawSprites(uint32 *out, int pitch_px, const Cam *cm, Ppu *ppu) {
         const uint32 *src = g_side + vy * w;
         for (int x = dx0; x < dx1; x++) {
           int vx = (int)floorf(ax + (x + 0.5f - sx) * inv);
-          if (vx >= g->x0 && vx <= g->x1 && gm[vx] == id)
+          if (vx >= g->x0 && vx <= g->x1 && gm[vx] == id &&
+              !(g_depth_valid && g_depth[y * w + x] < zlimit))
             dst[x] = src[vx];
         }
       } else {
@@ -927,7 +1074,8 @@ static int DrawSprites(uint32 *out, int pitch_px, const Cam *cm, Ppu *ppu) {
             uint32 c;
             if ((unsigned)lx < (unsigned)esz[i] && (unsigned)ly < (unsigned)esz[i] &&
                 OamPixel(ppu, ecf[i], lx, ly, esz[i], &c)) {
-              dst[x] = c;
+              if (!(g_depth_valid && g_depth[y * w + x] < zlimit))
+                dst[x] = c;
               break;
             }
           }
@@ -965,7 +1113,14 @@ void Hd3d_EndFrame(uint8 *pixels, int pitch, int width, int height) {
   Sky sk;
   Sky_Setup(&sk, outdoors, width);
   uint32 *out = (uint32 *)pixels;
-  DrawGround(out, pitch_px, &cm, &gr, &sk);
+  bool walls = g_view3d_walls && player_is_indoors;
+  if (walls) {
+    BuildHeightMap();
+    DrawTerrain(out, pitch_px, &cm, &gr, &sk);
+  } else {
+    DrawGround(out, pitch_px, &cm, &gr, &sk);
+  }
+  g_depth_valid = walls;
   int groups = DrawSprites(out, pitch_px, &cm, g_zenv.ppu);
   if (g_weather) {
     // the game's weather layer, flat over ground and sky (not sprites). With
@@ -984,13 +1139,15 @@ void Hd3d_EndFrame(uint8 *pixels, int pitch, int width, int height) {
     double ms = g_stat_ticks * 1000.0 / SDL_GetPerformanceFrequency() / g_stat_frames;
     Hd3d_Log("stats: %d frames, 3D compose %.3f ms/frame, sprite groups avg %.1f max %d, tilt %.1f, curve R=%.0f, "
              "past-screen px/frame %d (missing %d), source %s, far sprites avg %.1f (draw distance %s, %s), "
+             "walls %s (wall tiles avg %d), "
              "frame %dx%d, module=%d area=0x%02x",
              g_stat_frames, ms, (double)g_stat_groups / g_stat_frames, g_stat_max_groups, g_angle, cm.R,
              g_stat_outside / g_stat_frames, g_stat_missing / g_stat_frames, kSourceNames[gr.source],
              (double)g_stat_far_groups / g_stat_frames, kDistNames[g_view3d_dist],
              g_view3d_dist && !(HdWorld_Active() || player_is_indoors) ? "needs continuous world outdoors" : "ok",
+             g_view3d_walls ? (player_is_indoors ? "on" : "on (indoors only)") : "off", g_stat_wall_cells / g_stat_frames,
              width, height, main_module_index, BYTE(overworld_screen_index));
     g_stat_ticks = 0, g_stat_frames = 0, g_stat_groups = 0, g_stat_max_groups = 0;
-    g_stat_outside = 0, g_stat_missing = 0, g_stat_far_groups = 0;
+    g_stat_outside = 0, g_stat_missing = 0, g_stat_far_groups = 0, g_stat_wall_cells = 0;
   }
 }

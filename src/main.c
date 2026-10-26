@@ -790,6 +790,7 @@ static void HandleCommand_Locked(uint32 j, bool pressed) {
     case kKeys_View3DCurve: Hd3d_CycleCurve(); break;
     case kKeys_View3DDrawDistance: Hd3d_CycleDrawDistance(); break;
     case kKeys_View3DDump: Hd3d_RequestDump(); break;
+    case kKeys_View3DWalls: Hd3d_ToggleWalls(); break;
     default: assert(0);
     }
   }

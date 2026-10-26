@@ -11,7 +11,11 @@ enum {
   kHd3d_NumDists = 3,    // sprite draw distance: screen, 2x, 3x
 };
 
-extern int g_view3d, g_view3d_curve, g_view3d_dist;
+extern int g_view3d, g_view3d_curve, g_view3d_dist, g_view3d_walls;
+
+// Indoor walls raised in 3D (0 = flat, 1 = on)
+void Hd3d_SetWalls(int on, const char *why);
+void Hd3d_ToggleWalls(void);
 
 void Hd3d_SetDrawDistance(int dist, const char *why);
 void Hd3d_CycleDrawDistance(void);
@@ -40,6 +44,9 @@ void Hd3d_CaptureLine(Ppu *ppu, int line);
 void Hd3d_AfterLines(Ppu *ppu);
 void Hd3d_EndFrame(uint8 *pixels, int pitch, int width, int height);
 
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((format(printf, 1, 2)))   // the compiler checks the arguments
+#endif
 void Hd3d_Log(const char *fmt, ...);
 // Writes every sprite piece and group of the next 3D frame to the log (key 6)
 void Hd3d_RequestDump(void);
