@@ -102,8 +102,13 @@ static float RadiusInv(int curve) {
 }
 
 void Hd3d_Init(void) {
-  if (!g_log)
+  if (!g_log) {
+    // keep the previous run's log: a dump taken before restarting the game
+    // is not lost
+    remove("zelda3_3d.prev.log");
+    rename("zelda3_3d.log", "zelda3_3d.prev.log");
     g_log = fopen("zelda3_3d.log", "w");
+  }
   g_view3d = g_config.view3d % kHd3d_NumLevels;
   g_view3d_curve = g_config.view3d_curve % kHd3d_NumCurves;
   g_view3d_dist = g_config.view3d_dist % kHd3d_NumDists;
@@ -375,6 +380,13 @@ static uint32 SampleVram(Ppu *ppu, int fx, int fy) {
 static void Ground_Setup(Ground *g, Ppu *ppu, int width) {
   g->ppu = ppu;
   HdWorld_ViewOrigin(width, &g->org_x, &g->org_y);
+  if (player_is_indoors) {
+    // indoors: the scroll this frame was really drawn with (the game's camera
+    // copy can be a frame ahead, and the walls slid against their art)
+    BgLayer *bg = &ppu->bgLayer[1];
+    g->org_x = bg->hScroll + ppu->bgBiasX - ppu->extraLeftRight;
+    g->org_y = bg->vScroll + ppu->bgBiasY + 1;
+  }
   if (HdWorld_Active()) {
     g->source = kSource_World;
   } else {
@@ -819,7 +831,7 @@ static void RoomDump(const uint8 *attr, const uint8 *cls) {
              o->tiles, kClsName[o->cls]);
   }
   Hd3d_Log("  class map, then heights (64x64 tiles of 8 px; . floor W wall C ceiling D door r rail f furniture "
-           "o small b block T tall t torch; w = wall class but not solid, so flat; heights in 8 px):");
+           "o small b block T tall t torch; w = wall tile that is walkable for the game; heights in 8 px):");
   char line[3 * 64 + 8];
   for (int y = 0; y < 64; y++) {
     int n = 0;
@@ -858,13 +870,25 @@ static void BuildHeightMap(void) {
     for (int i = 0; i < 64 * 64; i++)
       cls[i] = IsWallAttr(attr[i]) ? kCls_Wall : kCls_Floor;
   } else {
-    for (int i = 0; i < 64 * 64; i++)
+    for (int i = 0; i < 64 * 64; i++) {
       cls[i] = (uint8)CellClass(i);
+      // decorations drawn on a wall (shelves, the pot rack, bars...) are wall
+      if (cls[i] == kCls_Floor && IsWallAttr(attr[i]))
+        cls[i] = kCls_Wall;
+    }
   }
-  // raised wall tiles: wall class and solid for the game
-  uint8 wall[64 * 64];
-  for (int i = 0; i < 64 * 64; i++)
-    wall[i] = IsWallClass(cls[i]) && IsWallAttr(attr[i]);
+  // Wall tiles: the wall objects' tiles. Only the top rows of a north wall
+  // are solid for the game; its painted face below them is walkable, but it
+  // is part of the wall and stands up with it. A run of wall tiles with no
+  // solid tile at all (a doorway) stays flat. The ceiling (the dark void
+  // above walls) does not count toward a wall's height: it becomes a flat
+  // dark top at the height of the wall in front of it.
+  uint8 wall[64 * 64], ceil[64 * 64], solid[64 * 64];
+  for (int i = 0; i < 64 * 64; i++) {
+    ceil[i] = cls[i] == kCls_Ceiling;
+    wall[i] = IsWallClass(cls[i]) && !ceil[i];
+    solid[i] = wall[i] || ceil[i];
+  }
 
   memset(g_hmap, 0, sizeof(g_hmap));
   memset(g_hfold, 0, sizeof(g_hfold));
@@ -874,10 +898,13 @@ static void BuildHeightMap(void) {
       int c = cy * 64 + cx;
       if (wall[c]) {
         int y0 = cy;
+        bool any_solid = false;
         while (cy < 64 && wall[cy * 64 + cx])
-          cy++;
-        bool floor_n = y0 > 0 && !wall[(y0 - 1) * 64 + cx];
-        bool floor_s = cy < 64 && !wall[cy * 64 + cx];
+          any_solid |= IsWallAttr(attr[cy * 64 + cx]), cy++;
+        if (!any_solid)
+          continue;   // a doorway: walkable all the way
+        bool floor_n = y0 > 0 && !solid[(y0 - 1) * 64 + cx];
+        bool floor_s = cy < 64 && !solid[cy * 64 + cx];
         int hgt = (cy - y0) * 8;
         bool fold = true;
         if (floor_n && !floor_s) {
@@ -905,6 +932,27 @@ static void BuildHeightMap(void) {
         continue;
       }
       cy++;
+    }
+  }
+  // ceilings: flat and dark, as high as the wall next to them (south first)
+  for (int cx = 0; cx < 64; cx++) {
+    int cy = 0;
+    while (cy < 64) {
+      if (!ceil[cy * 64 + cx]) {
+        cy++;
+        continue;
+      }
+      int y0 = cy;
+      while (cy < 64 && ceil[cy * 64 + cx])
+        cy++;
+      int hgt = 0;
+      if (cy < 64 && wall[cy * 64 + cx])
+        hgt = g_hmap[cy * 64 + cx];
+      else if (y0 > 0 && wall[(y0 - 1) * 64 + cx])
+        hgt = g_hmap[(y0 - 1) * 64 + cx];
+      for (int y = y0; y < cy; y++)
+        g_hmap[y * 64 + cx] = (uint8)hgt, g_hfold[y * 64 + cx] = 0;
+      cells += cy - y0;
     }
   }
   g_stat_wall_cells += cells;
