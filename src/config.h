@@ -35,6 +35,7 @@ enum {
   kKeys_VolumeUp,
   kKeys_VolumeDown,
   kKeys_HdMenu,
+  kKeys_View3D,
   kKeys_Total,
 };
 
@@ -89,6 +90,7 @@ typedef struct Config {
   // Giravolta Tornado come su GBA, sbloccata dal Retino per Farfalle
   bool hurricane_spin;
   uint8 text_speed;         // 0 = originale, 1 = veloce, 2 = istantaneo
+  uint8 view3d;             // vista 3D: 0 = spenta, 1-3 = inclinazione (hd_3d.c)
 
   const char *link_graphics;
   char *memory_buffer;

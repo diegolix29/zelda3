@@ -220,6 +220,21 @@ void ppu_runLine(Ppu *ppu, int line) {
   }
 }
 
+void ppu_redrawLine(Ppu *ppu, int line, uint8_t *buffer, size_t pitch, uint8_t skip_layers) {
+  if (line == 0 || line >= 225 + ppu->extraBottomCur || !(ppu->renderFlags & kPpuRenderFlags_NewRenderer) || ppu->mode == 7)
+    return;
+  uint8_t *org_buf = ppu->renderBuffer;
+  uint32_t org_pitch = ppu->renderPitch;
+  uint8_t org_skip = ppu->skipLayers;
+  ppu->renderBuffer = buffer;
+  ppu->renderPitch = (uint32_t)pitch;
+  ppu->skipLayers = skip_layers;
+  PpuDrawWholeLine(ppu, line);
+  ppu->renderBuffer = org_buf;
+  ppu->renderPitch = org_pitch;
+  ppu->skipLayers = org_skip;
+}
+
 typedef struct PpuWindows {
   int16 edges[6];
   uint8 nr;
@@ -929,7 +944,7 @@ static void PpuDrawBackgrounds(Ppu *ppu, int y, bool sub) {
 //  0: backdrop
 
   if (ppu->mode == 1) {
-    if (ppu->lineHasSprites)
+    if (ppu->lineHasSprites && !(ppu->skipLayers & 16))
       PpuDrawSprites(ppu, y, sub, true);
 
     bool cone = sub && ppu->bg1ConeQuadrant >= 0 && IS_SCREEN_ENABLED(ppu, sub, 0);
@@ -948,7 +963,9 @@ static void PpuDrawBackgrounds(Ppu *ppu, int y, bool sub) {
     else
       PpuDrawBackground_4bpp(ppu, y, sub, 1, 0xb100, 0x7100);
 
-    if (IS_MOSAIC_ENABLED(ppu, 2))
+    if (ppu->skipLayers & 4)
+      ;  // BG3 (HUD, testi) disegnato a parte dalla vista 3D
+    else if (IS_MOSAIC_ENABLED(ppu, 2))
       PpuDrawBackground_2bpp_mosaic(ppu, y, sub, 2, 0xf200, 0x1200);
     else
       PpuDrawBackground_2bpp(ppu, y, sub, 2, 0xf200, 0x1200);
@@ -1471,6 +1488,7 @@ static bool ppu_evaluateSprites(Ppu* ppu, int line) {
         if (pixel != 0 && ((dst[0] & 0xff) == 0 || (game_shadow[bx] && !is_shadow))) {
           dst[0] = z + (ice ? ice[pixel] : pixel);
           ppu->objShadowLine[bx] = cast;
+          ppu->objOwnerLine[bx] = (uint8)(index >> 1);
           game_shadow[bx] = is_shadow;
         }
       }
@@ -1502,6 +1520,7 @@ static bool ppu_evaluateSprites(Ppu* ppu, int line) {
           if (pixel != 0 && ((dst[0] & 0xff) == 0 || (game_shadow[bx] && !is_shadow))) {
             dst[0] = z + (ice ? ice[pixel] : pixel);
             ppu->objShadowLine[bx] = cast;
+            ppu->objOwnerLine[bx] = (uint8)(index >> 1);
             game_shadow[bx] = is_shadow;
           }
         }

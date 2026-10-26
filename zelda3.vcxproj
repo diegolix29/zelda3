@@ -242,6 +242,7 @@
     <ClCompile Include="src\hd_art.c" />
     <ClCompile Include="src\hd_hud.c" />
     <ClCompile Include="src\hd_world.c" />
+    <ClCompile Include="src\hd_3d.c" />
     <ClCompile Include="src\hd_trans.c" />
     <ClCompile Include="src\hud.c" />
     <ClCompile Include="src\load_gfx.c" />
@@ -457,6 +458,7 @@
     <ClInclude Include="src\assets.h" />
     <ClInclude Include="src\attract.h" />
     <ClInclude Include="src\config.h" />
+    <ClInclude Include="src\hd_3d.h" />
     <ClInclude Include="src\dungeon.h" />
     <ClInclude Include="src\ending.h" />
     <ClInclude Include="src\features.h" />

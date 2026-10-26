@@ -17,6 +17,7 @@
 #include "hd_water.h"
 #include "hd_hud.h"
 #include "hd_menu.h"
+#include "hd_3d.h"
 #include "hd_icegba.h"
 #include "hud.h"
 #include "messaging.h"
@@ -605,6 +606,8 @@ void ZeldaDrawPpuFrame(uint8 *pixel_buffer, size_t pitch, uint32 render_flags) {
   if (g_zenv.ppu->bg3MaxDigits)
     g_zenv.ppu->cgram[0x10] = 0x2b7f;
   HdWorld_WarpLine(0);
+  // Vista 3D: la PPU disegna solo il terreno, sprite e BG3 vanno a parte
+  bool view3d = Hd3d_BeginFrame(g_zenv.ppu, 256 + 2 * g_zenv.ppu->extraLeftRight, height);
   for (int i = 0; i <= height; i++) {
     if (i == 128 && irq_flag) {
       zelda_ppu_write(BG3HOFS, selectfile_var8);
@@ -617,10 +620,14 @@ void ZeldaDrawPpuFrame(uint8 *pixel_buffer, size_t pitch, uint32 render_flags) {
       }
     }
     ppu_runLine(g_zenv.ppu, i);
+    if (view3d)
+      Hd3d_CaptureLine(g_zenv.ppu, i);
     SimpleHdma_DoLine(&hdma_chans[0]);
     SimpleHdma_DoLine(&hdma_chans[1]);
     HdWorld_WarpLine(i + 1);
   }
+  if (view3d)
+    Hd3d_AfterLines(g_zenv.ppu);
   HdWorld_WarpAfterRender();
   if (g_zenv.ppu->bg3MaxDigits)
     g_zenv.ppu->cgram[0x10] = cg10;
@@ -652,6 +659,8 @@ void ZeldaDrawPpuFrame(uint8 *pixel_buffer, size_t pitch, uint32 render_flags) {
     HdFx_SoftIris(pixel_buffer, (int)pitch, frame_w, height);
     HdFx_MenuBlur(pixel_buffer, (int)pitch, frame_w, height);
   }
+  if (view3d)
+    Hd3d_EndFrame(pixel_buffer, (int)pitch, 256 + 2 * g_zenv.ppu->extraLeftRight, height);
   RoomSeamRestore(g_zenv.ppu);
 }
 

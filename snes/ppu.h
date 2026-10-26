@@ -81,6 +81,11 @@ struct Ppu {
   // Scala delle voci OAM in 1/256 (0 = normale): lo sprite si disegna
   // ingrandito o rimpicciolito attorno al suo centro (super bomba, hd_fx.c)
   uint16_t objScale[128];
+  // Vista 3D (hd_3d.c): strati da non disegnare (bit = indice dello strato:
+  // 1 BG1, 2 BG2, 4 BG3, 8 BG4, 16 OBJ) e, per ogni pixel della riga, la voce
+  // OAM (0-127) dello sprite che ci e' finito sopra
+  uint8_t skipLayers;
+  uint8_t objOwnerLine[kPpuXPixels];
   float mode7PerspectiveLow, mode7PerspectiveHigh;
   // Spostamento visivo della telecamera fluida (non tocca la logica di gioco)
   int16_t bgBiasX, bgBiasY, objBiasX, objBiasY;
@@ -176,6 +181,9 @@ void ppu_free(Ppu* ppu);
 void ppu_reset(Ppu* ppu);
 void ppu_handleVblank(Ppu* ppu);
 void ppu_runLine(Ppu* ppu, int line);
+// Ridisegna la riga gia' valutata da ppu_runLine in un altro buffer, con altri
+// strati nascosti (vista 3D). Solo con il NewRenderer e fuori dal Mode 7.
+void ppu_redrawLine(Ppu *ppu, int line, uint8_t *buffer, size_t pitch, uint8_t skip_layers);
 uint8_t ppu_read(Ppu* ppu, uint8_t adr);
 void ppu_write(Ppu* ppu, uint8_t adr, uint8_t val);
 void ppu_saveload(Ppu *ppu, SaveLoadFunc *func, void *ctx);

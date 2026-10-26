@@ -17,6 +17,7 @@
 #include "hd_fx.h"
 #include "hd_water.h"
 #include "hd_hud.h"
+#include "hd_3d.h"
 #include "hd_art.h"
 
 void ZeldaApuLock();
@@ -109,6 +110,7 @@ static const char *const kControlNames[12] = {
 };
 
 static const char *const kSmoothCameraNames[4] = { "Spenta", "Leggera", "Media", "Forte" };
+static const char *const kView3dNames[kHd3d_NumLevels] = { "Spenta", "20\xc2\xb0", "35\xc2\xb0", "50\xc2\xb0" };
 static const char *const kTextSpeedNames[3] = { "Originale", "Veloce con A o B", "Istantanea" };
 
 // ---------------------------------------------------------------------------
@@ -403,6 +405,7 @@ static const char *Tr(const char *it) {
     { "Riprendi", "Resume" },
     { "Esci dal gioco", "Quit game" },
     { "Telecamera fluida", "Smooth camera" },
+    { "Vista 3D (inclinazione)", "3D view (tilt)" },
     { "Schermo intero", "Fullscreen" },
     { "Mappa del mondo in HD", "HD world map" },
     { "Mostra FPS", "Show FPS" },
@@ -500,6 +503,7 @@ static void SaveSettings() {
   IniValue v[64];
   int n = 0;
   AddIni(v, &n, "[Graphics]", "SmoothCamera", "%d", g_config.smooth_camera);
+  AddIni(v, &n, "[Graphics]", "View3D", "%d", g_config.view3d);
   AddIni(v, &n, "[Graphics]", "EnhancedMode7", "%d", g_config.enhanced_mode7);
   AddIni(v, &n, "[Graphics]", "HdText", "%d", g_config.hd_text);
   AddIni(v, &n, "[Graphics]", "HighRefreshInterpolation", "%d", g_config.high_refresh);
@@ -628,6 +632,7 @@ static void BuildItems() {
     AddItem(17, "Distingui vortici da Zora", YesNo(g_config.fx_whirlpool));
     AddItem(18, "Aspetto dei disegni ufficiali", YesNo(g_config.official_artwork));
     AddItem(19, "Link biondo", g_config.link_graphics ? "Link personalizzato" : YesNo(g_config.blond_link));
+    AddItem(18, "Vista 3D (inclinazione)", kView3dNames[g_view3d % kHd3d_NumLevels]);
     break;
   case kPage_Game:
     AddItem(100, "Velocit\xc3\xa0 del testo", kTextSpeedNames[g_config.text_speed % 3]);

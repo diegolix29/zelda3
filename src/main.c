@@ -27,6 +27,7 @@
 #include "util.h"
 #include "audio.h"
 #include "hd_menu.h"
+#include "hd_3d.h"
 #include "hd_art.h"
 
 static bool g_run_without_emu = 0;
@@ -367,6 +368,7 @@ int main(int argc, char** argv) {
   // Delay actually setting those features in ram until any snapshots finish playing.
   g_wanted_zelda_features = g_config.features0;
   HdMenu_ApplyConfig();
+  Hd3d_Init();
 
   g_ppu_render_flags = g_config.new_renderer * kPpuRenderFlags_NewRenderer |
                        g_config.enhanced_mode7 * kPpuRenderFlags_4x4Mode7 |
@@ -771,6 +773,7 @@ static void HandleCommand_Locked(uint32 j, bool pressed) {
     case kKeys_VolumeUp:
     case kKeys_VolumeDown: HandleVolumeAdjustment(j == kKeys_VolumeUp ? 1 : -1); break;
     case kKeys_HdMenu: HdMenu_Open(); break;
+    case kKeys_View3D: Hd3d_CycleLevel(); break;
     default: assert(0);
     }
   }
