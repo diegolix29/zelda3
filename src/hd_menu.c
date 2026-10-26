@@ -423,6 +423,8 @@ static const char *Tr(const char *it) {
     { "Frecce piantate nei muri", "Arrows stuck in walls" },
     { "Giravolta Tornado", "Hurricane Spin" },
     { "Solo 16:9 e 16:10", "Only 16:9 and 16:10" },
+    { "Link personalizzato", "Custom Link" },
+    { "Non con un Link personalizzato", "Not with a custom Link" },
     { "Richiede lo schermo 16:9 o 16:10", "Requires a 16:9 or 16:10 screen" },
     { "Velocit\xc3\xa0 del testo", "Text speed" },
     { "Lingua dei dialoghi", "Dialogue language" },
@@ -620,7 +622,7 @@ static void BuildItems() {
     AddItem(16, "Acqua e cascate realistiche", YesNo(g_config.fx_water));
     AddItem(17, "Distingui vortici da Zora", YesNo(g_config.fx_whirlpool));
     AddItem(18, "Aspetto dei disegni ufficiali", YesNo(g_config.official_artwork));
-    AddItem(19, "Link biondo", YesNo(g_config.blond_link));
+    AddItem(19, "Link biondo", g_config.link_graphics ? "Link personalizzato" : YesNo(g_config.blond_link));
     break;
   case kPage_Game:
     AddItem(100, "Velocit\xc3\xa0 del testo", kTextSpeedNames[g_config.text_speed % 3]);
@@ -696,6 +698,8 @@ static void Activate(int id, int dir) {
     } else if (id == 18) {
       // Agahnim, re e medaglione dal prossimo caricamento
       g_config.official_artwork = !g_config.official_artwork;
+    } else if (id == 19 && g_config.link_graphics) {
+      ShowMessage("Non con un Link personalizzato");
     } else if (id == 19) {
       // Link e la sua palette subito
       g_config.blond_link = !g_config.blond_link;
