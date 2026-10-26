@@ -175,8 +175,9 @@ bool Hd3d_BeginFrame(Ppu *ppu, int width, int height) {
 void Hd3d_CaptureLine(Ppu *ppu, int line) {
   if (line < 1 || line > g_h)
     return;
+  // ppu_redrawLine writes row (line - 1) of the buffer itself: pass the start
   uint32 *row = g_side + (line - 1) * g_w;
-  ppu_redrawLine(ppu, line, (uint8 *)row, g_w * 4, 0);
+  ppu_redrawLine(ppu, line, (uint8 *)g_side, g_w * 4, 0);
   // pixel column c <-> PPU line buffer index (see PpuDrawWholeLine)
   uint8 *own = g_owner + (line - 1) * g_w;
   int base = kPpuExtraLeftRight - ppu->extraLeftRight;
