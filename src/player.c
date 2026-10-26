@@ -2267,8 +2267,10 @@ void Link_CheckForSwordSwing() {  // 879cd9
 // Swords, qui basta il Retino. Tenendo la carica fino a 96 (GBA 0x809de74) il colpo
 // rotante diventa lungo: premendo B durante il giro ne parte un altro
 // (0x809d828), con 2 di magia (1/2: 2, 1/4: 0 come sul GBA), e nei giri
-// successivi Link si muove con la croce (0x809d2ac).
+// successivi Link avanza da solo (0x809d2ac).
 static uint8 g_hurricane_spin;  // 0x80 carica lunga, 0x40 altro giro prenotato, 1 giri successivi
+static uint8 g_hurricane_dir;   // direzione dei giri successivi (bit della croce)
+static bool g_link_on_stairs;    // la collisione ha messo Link sulle scale (in verticale)
 
 static bool HurricaneSpin_Unlocked() {
   return g_config.hurricane_spin && link_item_bug_net;
@@ -2283,6 +2285,45 @@ static bool HurricaneSpin_PayMagic() {  // GBA 0x80a4734 con indice 9
   }
   Ancilla_Sfx2_Near(60);
   return false;
+}
+
+// Giri successivi: come su GBA (misurato con mGBA) Link avanza sempre a 2,5 pixel
+// per fotogramma, 2 per asse in diagonale; la croce cambia subito la direzione
+// ma non la velocita', e lasciandola Link continua nell'ultima direzione
+static void HurricaneSpin_Move() {
+  uint8 d = joypad1H_last & 0xf;
+  if ((d & 3) == 3)
+    d &= ~3;
+  if ((d & 0xc) == 0xc)
+    d &= ~0xc;
+  if (d)
+    g_hurricane_dir = d;
+  // come la corsa: contro un muro in diagonale resta l'asse libero
+  link_direction = g_hurricane_dir;
+  Link_HandleDiagonalCollision();
+  d = link_direction;
+  int8 vel = ((d & 3) && (d & 0xc)) ? 32 : 40;
+  link_actual_vel_x = (d & 3) ? ((d & 2) ? -vel : vel) : 0;
+  link_actual_vel_y = (d & 0xc) ? ((d & 8) ? -vel : vel) : 0;
+  link_y_page_movement_delta = link_x_page_movement_delta = 0;
+  link_actual_vel_z = 0xff;
+  link_z_coord = 0xffff;
+  link_subpixel_z = 0;
+  Link_MovePosition();
+}
+
+// fine anticipata dei giri successivi: toglie le scie e azzera il colpo rotante
+static void HurricaneSpin_Stop() {
+  g_hurricane_spin = 0;
+  for (int i = kAncilla_LinkSlots - 1; i >= 0; i--)
+    if (ancilla_type[i] == 0x2a || ancilla_type[i] == 0x2b)
+      ancilla_type[i] = 0;
+  link_cant_change_direction &= ~1;
+  link_delay_timer_spin_attack = 0;
+  button_b_frames = 0;
+  button_mask_b_y = 0;
+  state_for_spin_attack = 0;
+  step_counter_for_spin_attack = 0;
 }
 
 static void HurricaneSpin_AddSpark() {  // GBA 0x80c2790: riusa la scia 0x2b o ne crea una
@@ -2995,14 +3036,34 @@ void LinkState_SpinAttack() {  // 87a804
   if (link_incapacitated_timer) {
     Link_HandleRecoilAndTimer(false);
   } else {
-    // nei giri successivi della Giravolta Tornado Link si muove con la croce
-    link_direction = (g_hurricane_spin & 1) ? (joypad1H_last & 0xf) : 0;
-    Link_HandleVelocity();
+    // nei giri successivi della Giravolta Tornado Link avanza da solo
+    if (g_hurricane_spin & 1) {
+      HurricaneSpin_Move();
+    } else {
+      link_direction = 0;
+      Link_HandleVelocity();
+    }
+    g_link_on_stairs = false;
     Link_HandleCardinalCollision();
+    // come su GBA, se avanzando la collisione fa saltare Link da un bordo
+    // (dopo 20 fotogrammi contro il dislivello) la giravolta finisce e resta il salto;
+    // sulle scale finisce e Link resta in piedi, senza salirle
+    if ((g_hurricane_spin & 1) && (link_player_handler_state != kPlayerState_SpinAttacking || g_link_on_stairs)) {
+      HurricaneSpin_Stop();
+      if (link_player_handler_state == kPlayerState_SpinAttacking)
+        link_player_handler_state = kPlayerState_Ground;
+      fallhole_var1 = 0;
+      HandleIndoorCameraAndDoors();
+      return;
+    }
     link_player_handler_state = kPlayerState_SpinAttacking;
     fallhole_var1 = 0;
     HandleIndoorCameraAndDoors();
   }
+
+  // nei giri successivi della Giravolta Tornado la scia segue Link
+  if (g_hurricane_spin & 1)
+    SpinAttackSparkleB_FollowLink();
 
   // Giravolta Tornado: B premuto nei passi 3-11 prenota un altro giro
   if ((g_hurricane_spin & 0x80) && (filtered_joypad_H & kJoypadH_B) &&
@@ -3028,7 +3089,11 @@ void LinkState_SpinAttack() {  // 87a804
     }
     link_player_handler_state = kPlayerState_Ground;
     if ((g_hurricane_spin & 0x40) && HurricaneSpin_PayMagic()) {
-      // un altro giro (GBA 0x809d8ec): riparte dal passo 3 con una scia nuova
+      // un altro giro (GBA 0x809d8ec): riparte dal passo 3 con una scia nuova;
+      // il primo dei giri successivi parte verso dove Link guarda
+      static const uint8 kFacingToDir[4] = { 8, 4, 2, 1 };
+      if (!(g_hurricane_spin & 1))
+        g_hurricane_dir = kFacingToDir[(link_direction_facing >> 1) & 3];
       g_hurricane_spin = (g_hurricane_spin | 1) & ~0x40;
       button_b_frames = 144;
       step_counter_for_spin_attack = 3;
@@ -4394,6 +4459,7 @@ endif_19:
     if ((link_last_direction_moved_towards & 2) == 0) {
       link_speed_setting = 2;
       link_speed_modifier = 1;
+      g_link_on_stairs = true;
       return;
     }
   }
@@ -4671,6 +4737,7 @@ void StartMovementCollisionChecks_Y_HandleOutdoors() {  // 87beaf
     } else if (!(link_last_direction_moved_towards & 2)) {
       link_speed_setting = 2;
       link_speed_modifier = 1;
+      g_link_on_stairs = true;
       return;
     }
   }  // endif_8

@@ -4579,6 +4579,24 @@ void SpinAttackSparkleB_Init(int k) {
       link_y_coord + kTransmuteSpinSpark_Y[j]);
 }
 
+// Giravolta Tornado: nei giri successivi Link si muove e la scia lo segue,
+// come su GBA (il centro della scia si fissa solo quando parte il giro)
+void SpinAttackSparkleB_FollowLink() {
+  int dx = (uint16)(link_x_coord + 8 - swordbeam_temp_x);
+  int dy = (uint16)(link_y_coord + 12 - swordbeam_temp_y);
+  dx = (int16)dx, dy = (int16)dy;
+  if (!dx && !dy)
+    return;
+  for (int k = kAncilla_Slots - 1; k >= 0; k--)
+    if (ancilla_type[k] == 0x0c)
+      return;  // un raggio della spada in volo usa lo stesso centro
+  swordbeam_temp_x += dx;
+  swordbeam_temp_y += dy;
+  for (int k = kAncilla_Slots - 1; k >= 0; k--)
+    if (ancilla_type[k] == 0x2b)
+      Ancilla_SetXY(k, Ancilla_GetX(k) + dx, Ancilla_GetY(k) + dy);
+}
+
 void Ancilla2B_SpinAttackSparkleB(int k) {  // 88d8fd
   static const uint8 kSpinSpark_Char[4] = {0xd7, 0xb7, 0x80, 0x83};
 
