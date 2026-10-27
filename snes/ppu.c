@@ -669,12 +669,16 @@ static inline int Mode7Fog(const uint8 *fog, uint32 x, uint32 y) {
 }
 
 // Casella di nuvola per la casella (tx, ty) fuori dalla mappa o sotto la
-// nebbia: con la mappa progressiva la fascia di 16x64 caselle senza cuciture
-// (spostata di 23 caselle a ogni ripetizione, cosi' non si vede la griglia),
-// altrimenti le prime 8 righe della mappa
+// nebbia: con la mappa progressiva dentro la mappa quella tutta coperta,
+// fuori la fascia di 16x64 caselle senza cuciture (spostata di 23 caselle a
+// ogni ripetizione, cosi' non si vede la griglia), altrimenti le prime 8
+// righe della mappa
 static inline uint32 Mode7CloudTile(Ppu *ppu, int32 tx, int32 ty) {
-  if (ppu->m7FogClouds)
+  if (ppu->m7FogClouds) {
+    if ((uint32)tx < 64 && (uint32)ty < 64)
+      return ppu->m7FogClouds[16 * 64 + (ty << 6 | tx)];
     return ppu->m7FogClouds[(ty & 15) << 6 | ((tx + (ty >> 4) * 23) & 63)];
+  }
   return ppu->vram[(ty & 7) * 128 + (tx & 0x3f)] & 0xff;
 }
 

@@ -95,7 +95,8 @@ struct Ppu {
   // tutta visibile (messaging.c, MapFog_BuildMask)
   const uint8 *m7Fog;
   // Mappa progressiva: fascia di nuvole di 16x64 caselle che si ripete senza
-  // cuciture (MapFog_CloudTiles); NULL = le prime 8 righe della mappa
+  // cuciture, seguita dalla mappa tutta coperta di 64x64 (MapFog_CloudTiles);
+  // NULL = le prime 8 righe della mappa
   const uint8 *m7FogClouds;
 
   // TMW / TSW etc

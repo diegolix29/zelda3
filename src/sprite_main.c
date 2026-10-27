@@ -10,6 +10,7 @@
 #include "dungeon.h"
 #include "player.h"
 #include "misc.h"
+#include <time.h>
 
 #define byte_7FFE01 (*(uint8*)(g_ram+0x1FE01))
 static const int8 kSpriteKeese_Tab2[16] = {0, 8, 11, 14, 16, 14, 11, 8, 0, -8, -11, -14, -16, -14, -11, -8};
@@ -6730,6 +6731,8 @@ void SpritePrep_PotionShop(int k) {  // 85f529
   MagicShopAssistant_SpawnGreenCauldron(k);
   MagicShopAssistant_SpawnBlueCauldron(k);
   MagicShopAssistant_SpawnRedCauldron(k);
+  if (enhanced_features0 & kFeatures0_GoldPotion)
+    MagicShopAssistant_SpawnGoldCauldron(k);
   sprite_ignore_projectile[k]++;
 }
 
@@ -6751,7 +6754,8 @@ void MagicShopAssistant_SpawnGreenCauldron(int k) {  // 85f58e
   SpriteSpawnInfo info;
   int j = Sprite_SpawnDynamically(k, 0xe9, &info);
   sprite_subtype2[j] = 2;
-  Sprite_SetX(j, info.r0_x - 40);
+  // con la pozione d'oro i calderoni stanno a 32 pixel invece di 48
+  Sprite_SetX(j, info.r0_x + ((enhanced_features0 & kFeatures0_GoldPotion) ? -56 : -40));
   Sprite_SetY(j, info.r2_y - 72);
   sprite_flags4[j] = 3;
   sprite_defl_bits[j] |= 0x20;
@@ -6761,7 +6765,7 @@ void MagicShopAssistant_SpawnBlueCauldron(int k) {  // 85f5bf
   SpriteSpawnInfo info;
   int j = Sprite_SpawnDynamically(k, 0xe9, &info);
   sprite_subtype2[j] = 3;
-  Sprite_SetX(j, info.r0_x + 8);
+  Sprite_SetX(j, info.r0_x + ((enhanced_features0 & kFeatures0_GoldPotion) ? -24 : 8));
   Sprite_SetY(j, info.r2_y - 72);
   sprite_flags4[j] = 3;
   sprite_defl_bits[j] |= 0x20;
@@ -6777,6 +6781,36 @@ void MagicShopAssistant_SpawnRedCauldron(int k) {  // 85f5f0
   sprite_defl_bits[j] |= 0x20;
 }
 
+// Giorno dell'ultimo acquisto della pozione d'oro, nel salvataggio (byte
+// $7EF4F0-$7EF4F3, non usati dal gioco): anno * 1000 + giorno dell'anno,
+// 0 nei salvataggi di prima = mai comprata
+#define gold_potion_day (*(uint32*)(g_ram+0xF4F0))
+
+// Oggi secondo l'orologio del computer (ora locale: si cambia a mezzanotte)
+static uint32 GoldPotion_Today(void) {
+  time_t t = time(NULL);
+  struct tm *tm = localtime(&t);
+  return tm ? (uint32)(tm->tm_year + 1900) * 1000 + tm->tm_yday + 1 : 0;
+}
+
+// Quarta pozione (opzione GoldPotion), da BS Zelda - Le Antiche Tavole di
+// Pietra (1f996e): come la' i calderoni stanno a 32 pixel l'uno dall'altro
+// invece di 48. Una al giorno: comprata oggi, il calderone non c'e' fino a
+// mezzanotte (in BS una per puntata)
+void MagicShopAssistant_SpawnGoldCauldron(int k) {
+  if (gold_potion_day == GoldPotion_Today())
+    return;
+  SpriteSpawnInfo info;
+  int j = Sprite_SpawnDynamically(k, 0xe9, &info);
+  if (j < 0)
+    return;
+  sprite_subtype2[j] = 5;
+  Sprite_SetX(j, info.r0_x + 8);
+  Sprite_SetY(j, info.r2_y - 72);
+  sprite_flags4[j] = 3;
+  sprite_defl_bits[j] |= 0x20;
+}
+
 void Sprite_E9_PotionShop(int k) {  // 85f633
   switch(sprite_subtype2[k]) {
   case 0: Sprite_MagicShopAssistant_Main(k); return;
@@ -6784,6 +6818,7 @@ void Sprite_E9_PotionShop(int k) {  // 85f633
   case 2: Sprite_GreenCauldron(k); return;
   case 3: Sprite_BlueCauldron(k); return;
   case 4: Sprite_RedCauldron(k); return;
+  case 5: Sprite_GoldCauldron(k); return;
   }
 }
 
@@ -6918,6 +6953,74 @@ void Sprite_RedCauldron(int k) {  // 85f7d0
   link_rupees_goal -= 120;
   item_receipt_method = 0;
   Link_ReceiveItem(0x2e, 0);
+}
+
+// Pozione d'oro: 50 rupie come in BS Zelda (1f9c40). Come la' il calderone
+// sparisce dopo l'acquisto
+void Sprite_GoldCauldron(int k) {
+  GoldPotionItem_Draw(k);
+  if (Sprite_ReturnIfInactive(k))
+    return;
+  Sprite_BehaveAsBarrier(k);
+  if (sprite_delay_main[k])
+    return;
+  if (!PotionCauldron_CheckBottles()) {
+    if (Sprite_ShowMessageOnContact(k, 0x4f) & 0x100)
+      PotionCauldron_GoBeep(k);
+    return;
+  }
+  if (!Sprite_CheckDamageToLink_same_layer(k) || !(filtered_joypad_L & 0x80))
+    return;
+  if (link_rupees_goal < 50) {
+    Sprite_ShowMessageUnconditional(0x17c);
+    PotionCauldron_GoBeep(k);
+    return;
+  }
+  if (Sprite_Find_EmptyBottle() < 0) {
+    Sprite_ShowMessageUnconditional(0x50);
+    PotionCauldron_GoBeep(k);
+    return;
+  }
+  SpriteSfx_QueueSfx3WithPan(k, 0x1d);
+  link_rupees_goal -= 50;
+  item_receipt_method = 0;
+  g_gold_potion_next = true;
+  gold_potion_day = GoldPotion_Today();
+  GoldPotion_SetPalette(true);
+  Link_ReceiveItem(0x30, 0);
+  sprite_state[k] = 0;
+}
+
+// Colori della pozione d'oro agli indici 9-14 (9 e 14 bastone, 11-12 liquido,
+// 13 bordo), nella seconda meta' di una tavolozza che nella bottega nessuno
+// usa: la 3 per il calderone, la 0 per la bottiglia sollevata, cosi' si
+// vedono insieme. Sono quelli di BS Zelda. Calderone: foglio 0x47, casella
+// 0x20, tavolozza 1 (bianco, giallo 133f, arancio 19df, bordo 14a5), con il
+// giallo anche sul bastone. Bottiglia (bottle = true): disegno 0x2b con la
+// tavolozza 4, liquido oro scuro 1237 e oro 1f5f
+void GoldPotion_SetPalette(bool bottle) {
+  static const uint16 kGoldPotion_Colors[2][6] = {
+    {0x7fff, 0x19df, 0x19df, 0x133f, 0x14a5, 0x133f},
+    {0x7fff, 0x1237, 0x1237, 0x1f5f, 0x14a5, 0x7fff},
+  };
+  const uint16 *c = kGoldPotion_Colors[bottle];
+  int pal = 8 + (bottle ? kGoldPotion_BottlePal : kGoldPotion_SprPal);
+  uint16 *p = main_palette_buffer + pal * 16 + 9;
+  if (memcmp(p, c, sizeof(kGoldPotion_Colors[0])) == 0)
+    return;
+  memcpy(p, c, sizeof(kGoldPotion_Colors[0]));
+  memcpy(aux_palette_buffer + pal * 16 + 9, c, sizeof(kGoldPotion_Colors[0]));
+  flag_update_cgram_in_nmi++;
+}
+
+void GoldPotionItem_Draw(int k) {
+  GoldPotion_SetPalette(false);
+  static const DrawMultipleData kGoldPotionItem_Dmd[3] = {
+    { 0,  0, 0x00c0 | kGoldPotion_SprPal << 9, 2},
+    { 8, 18, 0x0a30, 0},
+    {-1, 18, 0x0a13, 0},
+  };
+  Sprite_DrawMultiplePlayerDeferred(k, kGoldPotionItem_Dmd, 3, NULL);
 }
 
 void PotionCauldron_GoBeep(int k) {  // 85f846

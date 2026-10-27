@@ -62,6 +62,16 @@ static bool HudContext(bool *in_dialog) {
     *in_dialog = true;
     return true;
   }
+  // Pozioni (4 rossa, 8 verde, 9 blu e d'oro) e preghiera nel deserto (5): il
+  // gioco resta in vista mentre si riempiono cuori e magia, e li' tornava
+  // l'HUD originale
+  if (mod == 14 && (submodule_index == 4 || submodule_index == 5 || submodule_index == 8 ||
+                    submodule_index == 9) && IsPlayModule(saved_module_for_menu))
+    return true;
+  // Morte di Link (18) e fata che lo fa rialzare: l'HUD sparisce solo con la
+  // scritta GAME OVER e il menu per continuare (7-9)
+  if (mod == 18 && (submodule_index < 7 || submodule_index > 9))
+    return true;
   return false;
 }
 

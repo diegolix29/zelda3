@@ -4,6 +4,11 @@
 extern const uint8 kSwimmingTab1[4];
 extern const uint8 kSwimmingTab2[2];
 extern uint8 g_link_dive_timer;
+extern uint16 g_gold_potion_timer;
+extern bool g_gold_potion_next, g_gold_potion_receipt;
+// tavolozze degli sprite della pozione d'oro (calderone nella bottega e
+// bottiglia sollevata): i colori li mette GoldPotion_SetPalette
+enum { kGoldPotion_SprPal = 3, kGoldPotion_BottlePal = 0 };
 
 enum {
   kPlayerState_Ground = 0,

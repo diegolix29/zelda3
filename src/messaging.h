@@ -103,6 +103,10 @@ void Text_Initialize();
 void Text_Initialize_initModuleStateLoop();
 void Text_InitVwfState();
 void Text_LoadCharacterBuffer();
+// messaggi aggiunti dopo i 397 del gioco: possono mancare nei dialoghi di una
+// lingua, quindi prima di usarli si controlla con Dialogue_HasMessage
+enum { kMsg_GoldPotion = 397 };
+bool Dialogue_HasMessage(int i);
 uint8 *Text_WritePlayerName(uint8 *p);
 uint8 Text_FilterPlayerNameCharacters(uint8 a);
 void Text_Render();

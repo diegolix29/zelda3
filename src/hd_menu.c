@@ -89,6 +89,7 @@ static const FeatureOption kFeatureOptions[] = {
   { "Inventario esteso", "ExtendedInventory", kFeatures0_ExtendedInventory },
   { "Spada e oggetti interazione ambiente", "SwordAndItemsInteraction", kFeatures0_SwordAndItems },
   { "Oggetti riempiono le risorse", "ItemsRefillResources", kFeatures0_ItemsRefillResources },
+  { "Pozione d'oro", "GoldPotion", kFeatures0_GoldPotion },
   { "Interazione bruciatura e congelamento", "BurnAndFreezeInteraction", kFeatures0_BurnAndFreeze },
   { "Sterza durante lo scatto", "TurnWhileDashing", kFeatures0_TurnWhileDashing },
   { "Fino a 10 bombe insieme", "MoreActiveBombs", kFeatures0_MoreActiveBombs },

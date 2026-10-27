@@ -1231,14 +1231,20 @@ static void MapMarkers_Save() {
 // ---------------------------------------------------------------------------
 // Mappa progressiva: per ogni file un byte per area 512x512 del mondo (8x8,
 // Mondo della Luce e Mondo delle Tenebre separati), 1 = Link ci e' passato.
-// Le aree grandi si scoprono tutte insieme. Salvata in saves/nebbia_fileN.dat:
-// se manca (file creati prima di questa opzione) la mappa e' tutta scoperta,
-// un file nuovo parte tutto coperto (si scopre subito l'area di Link).
+// Le aree grandi si scoprono tutte insieme. Sta nella partita, nei byte
+// $7EF410-$7EF48F che il gioco non usa, con $7EF490 = kMapFogValid: si salva
+// con la partita (il controllo di SaveGameFile li comprende), si copia con il
+// file e va negli stati salvati. Le partite di prima, senza il segno, prendono
+// la nebbia da saves/nebbia_fileN.dat dove stava prima (il file resta), e se
+// manca la mappa e' tutta scoperta. Un file nuovo parte tutto coperto (si
+// scopre subito l'area di Link).
 // Per la PPU si costruisce una maschera di 512x512 pixel della mappa con i
 // bordi a sbuffi, ricostruita solo quando qualcosa cambia.
 
-static uint8 g_map_fog[2][64];
-static int g_map_fog_slot = -1;
+#define g_map_fog ((uint8 (*)[64])(g_ram + 0xF410))
+#define map_fog_valid (g_ram[0xF490])
+enum { kMapFogSize = 128, kMapFogValid = 0xa5 };
+static uint8 g_map_fog_last[kMapFogSize];  // per accorgersi dei cambi
 static int g_map_fog_version;  // cresce a ogni cambio di g_map_fog
 static uint8 g_fog_mask[512 * 512];
 static int g_fog_mask_key = -1;
@@ -1247,37 +1253,26 @@ static void MapFog_FileName(char *buf, size_t size, int slot) {
   snprintf(buf, size, "saves/nebbia_file%d.dat", slot);
 }
 
-static void MapFog_Save() {
-  char name[64];
-  MapFog_FileName(name, sizeof(name), g_map_fog_slot);
-  FILE *f = fopen(name, "wb");
-  if (!f)
-    return;
-  fwrite(g_map_fog, 1, sizeof(g_map_fog), f);
-  fclose(f);
-}
-
-static void MapFog_Load(int slot) {
-  if (slot == g_map_fog_slot)
-    return;
-  g_map_fog_slot = slot;
-  g_map_fog_version++;
+// Partita di prima che la nebbia stesse nella partita
+static void MapFog_Migrate(int slot) {
   char name[64];
   MapFog_FileName(name, sizeof(name), slot);
   FILE *f = fopen(name, "rb");
-  if (!f || fread(g_map_fog, 1, sizeof(g_map_fog), f) != sizeof(g_map_fog))
-    memset(g_map_fog, 1, sizeof(g_map_fog));
+  if (!f || fread(g_map_fog, 1, kMapFogSize, f) != kMapFogSize)
+    memset(g_map_fog, 1, kMapFogSize);
   if (f)
     fclose(f);
+  map_fog_valid = kMapFogValid;
 }
 
+// File nuovo (slot 1-3): nella partita appena creata, prima del controllo
 void MapFog_NewFile(int slot) {
-  g_map_fog_slot = slot;
-  g_map_fog_version++;
-  memset(g_map_fog, 0, sizeof(g_map_fog));
-  MapFog_Save();
+  uint8 *sram = &g_zenv.sram[(slot - 1) * 0x500];
+  memset(sram + 0x410, 0, kMapFogSize);
+  sram[0x490] = kMapFogValid;
 }
 
+// La nebbia si copia con la partita; il file serve alle partite di prima
 void MapFog_CopyFile(int from, int to) {
   char src[64], dst[64];
   MapFog_FileName(src, sizeof(src), from);
@@ -1285,7 +1280,7 @@ void MapFog_CopyFile(int from, int to) {
   remove(dst);
   FILE *f = fopen(src, "rb");
   if (f) {
-    uint8 buf[sizeof(g_map_fog)];
+    uint8 buf[kMapFogSize];
     size_t n = fread(buf, 1, sizeof(buf), f);
     fclose(f);
     FILE *g = n == sizeof(buf) ? fopen(dst, "wb") : NULL;
@@ -1294,8 +1289,6 @@ void MapFog_CopyFile(int from, int to) {
       fclose(g);
     }
   }
-  if (to == g_map_fog_slot)
-    g_map_fog_slot = -1;
 }
 
 // Uno sbuffo largo w pixel e alto da amin ad amax (a caso) nel punto t di un bordo
@@ -1344,7 +1337,11 @@ static const uint8 *MapFog_LightMap() {
 // la nebbia copre solo il disegno di terra oltre il bordo. Prima, con un'area
 // del bordo scoperta, la striscia di nuvole vere fino al bordo della mappa
 // restava scoperta fra due contorni scuri e sembravano due righe.
-static bool MapFog_IsMapCloud(int x, int y) {
+// Nelle aree coperte (fog_cell 0) solo se la mappa tutta coperta tiene quella
+// casella: i ciuffi tolti perche' tagliati dalla costa diventano nebbia
+const uint8 *MapFog_CloudTiles();
+
+static bool MapFog_IsMapCloud(int x, int y, bool fog_cell) {
   static bool cloud[256], built;
   const uint8 *map = MapFog_LightMap();
   if (!built) {
@@ -1354,7 +1351,8 @@ static bool MapFog_IsMapCloud(int x, int y) {
   }
   if (x >= 128 && x < 384 && y >= 128 && y < 384)
     return false;
-  return cloud[map[(y >> 3) << 6 | (x >> 3)]];
+  int t = (y >> 3) << 6 | (x >> 3);
+  return cloud[map[t]] && (fog_cell || MapFog_CloudTiles()[kFogBandRows * 64 + t] == map[t]);
 }
 
 static void MapFog_BuildMask(const uint8 *fog) {
@@ -1394,7 +1392,7 @@ static void MapFog_BuildMask(const uint8 *fog) {
   }
   for (int y = 0; y < 512; y++)
     for (int x = 0; x < 512; x++)
-      if (MapFog_IsMapCloud(x, y))
+      if (MapFog_IsMapCloud(x, y, fog[MapFog_Cell(y) << 3 | MapFog_Cell(x)]))
         g_fog_mask[y << 9 | x] = 0;
   // il contorno scuro solo dove la nuvola tocca la terra visibile
   for (int y = 0; y < 512; y++) {
@@ -1406,7 +1404,7 @@ static void MapFog_BuildMask(const uint8 *fog) {
         for (int dx = -1; dx <= 1; dx++) {
           int xx = x + dx, yy = y + dy;
           if (xx >= 0 && xx < 512 && yy >= 0 && yy < 512 && !g_fog_mask[yy << 9 | xx] &&
-              !MapFog_IsMapCloud(xx, yy)) {
+              !MapFog_IsMapCloud(xx, yy, fog[MapFog_Cell(yy) << 3 | MapFog_Cell(xx)])) {
             land = true;
             break;
           }
@@ -1424,8 +1422,12 @@ static void MapFog_BuildMask(const uint8 *fog) {
 // che lasciavano le prime 8 righe ripetute (ciuffi tagliati a righe).
 uint8 Overworld_AreaHead(int square);
 
+static void MapFog_BuildCover(const uint8 *map, const uint8 *band, uint8 *cover,
+                              uint8 *seen, uint16 *stack, uint16 *comp);
+
+// Restituisce la fascia seguita dalla mappa tutta coperta (MapFog_BuildCover)
 const uint8 *MapFog_CloudTiles() {
-  static uint8 band[kFogBandRows * 64];
+  static uint8 band[kFogBandRows * 64 + 64 * 64];
   static bool built;
   if (built)
     return band;
@@ -1460,7 +1462,141 @@ const uint8 *MapFog_CloudTiles() {
       for (int k = 0; k < nc; k++)
         band[comp[k]] = map[comp[k]];
   }
+  MapFog_BuildCover(map, band, band + kFogBandRows * 64, seen, stack, comp);
   return band;
+}
+
+// Casella della fascia per la casella (x, y), come Mode7CloudTile (ppu.c)
+static uint8 MapFog_BandAt(const uint8 *band, int x, int y) {
+  return band[(y & 15) << 6 | ((x + (y >> 4) * 23) & 63)];
+}
+
+// Mappa tutta coperta, 64x64 caselle (dopo la fascia in MapFog_CloudTiles):
+// le nuvole vere della mappa restano, la terra diventa nuvola piatta e cosi'
+// i ciuffi veri che toccavano la terra (tagliati dalla costa). Sulla nuvola
+// piatta nuova vanno i ciuffi della fascia, solo quelli interi che non
+// toccano altri ciuffi. Prima sotto la nebbia c'era la fascia e fuori dal
+// mondo le nuvole vere: dove si incontravano i ciuffi restavano a meta'
+static void MapFog_BuildCover(const uint8 *map, const uint8 *band, uint8 *cover,
+                              uint8 *seen, uint16 *stack, uint16 *comp) {
+  static uint8 repl[64 * 64];
+  bool cloud[256] = { 0 };
+  for (int i = 0; i < 10 * 64; i++)
+    cloud[map[i]] = true;
+  for (int i = 0; i < 64 * 64; i++) {
+    repl[i] = !cloud[map[i]];
+    cover[i] = repl[i] ? kFogPlainTile : map[i];
+  }
+  // ciuffi veri accanto alla terra
+  memset(seen, 0, 64 * 64);
+  for (int i = 0; i < 64 * 64; i++) {
+    if (seen[i] || !cloud[map[i]] || map[i] == kFogPlainTile)
+      continue;
+    int ns = 0, nc = 0;
+    bool touch = false;
+    stack[ns++] = i, seen[i] = 1;
+    while (ns) {
+      int p = stack[--ns], y = p >> 6, x = p & 63;
+      comp[nc++] = p;
+      for (int dy = -1; dy <= 1; dy++) {
+        for (int dx = -1; dx <= 1; dx++) {
+          int yy = y + dy, xx = x + dx, q = yy * 64 + xx;
+          if (yy < 0 || yy > 63 || xx < 0 || xx > 63)
+            continue;
+          if (!cloud[map[q]])
+            touch = true;
+          else if (!seen[q] && map[q] != kFogPlainTile)
+            seen[q] = 1, stack[ns++] = q;
+        }
+      }
+    }
+    if (touch)
+      for (int k = 0; k < nc; k++)
+        repl[comp[k]] = 1, cover[comp[k]] = kFogPlainTile;
+  }
+  // ciuffi della fascia sulla nuvola piatta nuova
+  memset(seen, 0, 64 * 64);
+  for (int i = 0; i < 64 * 64; i++) {
+    if (seen[i] || !repl[i] || MapFog_BandAt(band, i & 63, i >> 6) == kFogPlainTile)
+      continue;
+    int ns = 0, nc = 0;
+    bool whole = true;
+    stack[ns++] = i, seen[i] = 1;
+    while (ns) {
+      int p = stack[--ns], y = p >> 6, x = p & 63;
+      comp[nc++] = p;
+      for (int dy = -1; dy <= 1; dy++) {
+        for (int dx = -1; dx <= 1; dx++) {
+          int yy = y + dy, xx = x + dx, q = yy * 64 + xx;
+          if (yy < 0 || yy > 63 || xx < 0 || xx > 63) {
+            whole = false;
+            continue;
+          }
+          if (!repl[q]) {
+            // il ciuffo esce dalla nuvola nuova o tocca un ciuffo vero
+            if (MapFog_BandAt(band, xx, yy) != kFogPlainTile || cover[q] != kFogPlainTile)
+              whole = false;
+          } else if (!seen[q] && MapFog_BandAt(band, xx, yy) != kFogPlainTile) {
+            seen[q] = 1, stack[ns++] = q;
+          }
+        }
+      }
+    }
+    if (whole)
+      for (int k = 0; k < nc; k++)
+        cover[comp[k]] = MapFog_BandAt(band, comp[k] & 63, comp[k] >> 6);
+  }
+  // Altri ciuffi della fascia sparsi sulla nuvola piatta nuova (con i soli
+  // ciuffi rimasti al loro posto restavano grandi zone vuote): un ciuffo va
+  // dove tutto intorno, per kFogPuffGap caselle, e' nuvola piatta
+  enum { kMaxPuffs = 64, kFogPuffGap = 2 };
+  static int8 pdx[kFogBandRows * 64], pdy[kFogBandRows * 64];
+  static uint8 ptile[kFogBandRows * 64];
+  int pstart[kMaxPuffs + 1], np = 0, nt = 0;
+  memset(seen, 0, kFogBandRows * 64);
+  for (int i = 0; i < kFogBandRows * 64 && np < kMaxPuffs; i++) {
+    if (seen[i] || band[i] == kFogPlainTile)
+      continue;
+    int ns = 0, x0 = i & 63, y0 = i >> 6;
+    pstart[np++] = nt;
+    stack[ns++] = i, seen[i] = 1;
+    while (ns) {
+      int p = stack[--ns], y = p >> 6, x = p & 63;
+      pdx[nt] = ((x - x0 + 96) & 63) - 32, pdy[nt] = y - y0, ptile[nt++] = band[p];
+      for (int dy = -1; dy <= 1; dy++) {
+        for (int dx = -1; dx <= 1; dx++) {
+          int yy = y + dy, q = yy * 64 + ((x + dx) & 63);
+          if (yy >= 0 && yy < kFogBandRows && !seen[q] && band[q] != kFogPlainTile)
+            seen[q] = 1, stack[ns++] = q;
+        }
+      }
+    }
+  }
+  pstart[np] = nt;
+  uint32 h = 12345;  // sempre la stessa disposizione
+  for (int y = 0; y < 64 && np; y++) {
+    for (int x = 0; x < 64; x++) {
+      h = h * 1103515245 + 12345;
+      if ((h >> 16) & 3)
+        continue;  // una posizione su quattro
+      int k = (h >> 18) % np;
+      bool fits = true;
+      for (int t = pstart[k]; t < pstart[k + 1] && fits; t++) {
+        int xx = x + pdx[t], yy = y + pdy[t];
+        if (xx < 1 || xx > 62 || yy < 1 || yy > 62 || !repl[yy * 64 + xx]) {
+          fits = false;
+          break;
+        }
+        for (int gy = yy - kFogPuffGap; gy <= yy + kFogPuffGap && fits; gy++)
+          for (int gx = xx - kFogPuffGap; gx <= xx + kFogPuffGap; gx++)
+            if (gx >= 0 && gx < 64 && gy >= 0 && gy < 64 && cover[gy * 64 + gx] != kFogPlainTile)
+              fits = false;
+      }
+      if (fits)
+        for (int t = pstart[k]; t < pstart[k + 1]; t++)
+          cover[(y + pdy[t]) * 64 + x + pdx[t]] = ptile[t];
+    }
+  }
 }
 
 // Maschera per la nebbia fog (64 aree); key cambia quando cambia la nebbia
@@ -1488,7 +1624,11 @@ const uint8 *MapFog_Frame() {
   int slot = srm_var1 >> 1;
   if (slot < 1 || slot > 3)
     return NULL;
-  MapFog_Load(slot);
+  // solo a partita caricata (la RAM e' quella della partita)
+  if (main_module_index < 6)
+    return NULL;
+  if (map_fog_valid != kMapFogValid)
+    MapFog_Migrate(slot);
   int dark = (overworld_screen_index & 0x40) != 0;
   // Link all'aperto (non nelle aree speciali come il Dominio di Zora)
   if (main_module_index == 9 && !player_is_indoors && overworld_screen_index < 0x80) {
@@ -1501,9 +1641,12 @@ const uint8 *MapFog_Frame() {
         for (int j = 0; j < n; j++)
           g_map_fog[dark][(y + i) << 3 | (x + j)] = 1;
       g_map_fog[dark][c] = 1;
-      g_map_fog_version++;
-      MapFog_Save();
     }
+  }
+  // cambiata qui, caricando una partita o uno stato salvato
+  if (memcmp(g_map_fog_last, g_map_fog, kMapFogSize)) {
+    memcpy(g_map_fog_last, g_map_fog, kMapFogSize);
+    g_map_fog_version++;
   }
   if (!(enhanced_features0 & kFeatures0_ProgressiveMap) || main_module_index != 14 ||
       (submodule_index != 7 && submodule_index != 10))
@@ -2731,6 +2874,11 @@ uint32 Text_DecodeCmd(uint8 a, const uint8 *src) {
       return TEXTCMD_MK(26, kTextCmd_IsLetter, 0);
     }
   }
+}
+
+bool Dialogue_HasMessage(int i) {
+  MemBlk dialogue = FindIndexInMemblk(g_zenv.dialogue_blk, 1);
+  return FindIndexInMemblk(dialogue, i).size != 0;
 }
 
 // Perform initial parsing of the string, expanding words, processing some commands, etc.

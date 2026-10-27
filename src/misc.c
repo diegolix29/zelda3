@@ -890,7 +890,8 @@ void ItemReceipt_GiveBottledItem(uint8 item) {  // 89893e
   if ((j = FindInByteArray(kPotionList, item, 5)) >= 0) {
     for (int i = 0; i != 4; i++) {
       if (link_bottle_info[i] == 2) {
-        link_bottle_info[i] = j + 3;
+        // la pozione d'oro arriva come la blu (vedi Sprite_GoldCauldron)
+        link_bottle_info[i] = (item == 0x30 && g_gold_potion_receipt) ? 9 : j + 3;
         return;
       }
     }

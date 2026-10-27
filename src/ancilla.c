@@ -8,6 +8,7 @@
 #include "tile_detect.h"
 #include "player.h"
 #include "misc.h"
+#include "messaging.h"
 #include "dungeon.h"
 #include "sprite_main.h"
 #include "assets.h"
@@ -3709,6 +3710,9 @@ endif_6:
       msg = kReceiveItemMsgs3[link_heart_pieces];
     else
       msg = kReceiveItemMsgs[ancilla_item_to_link[k]];
+    // pozione d'oro: messaggio nuovo, se c'e' nei dialoghi della lingua
+    if (ancilla_item_to_link[k] == 0x30 && g_gold_potion_receipt && Dialogue_HasMessage(kMsg_GoldPotion))
+      msg = kMsg_GoldPotion;
   }
   if (msg != -1) {
     dialogue_message_index = msg;
@@ -3774,6 +3778,8 @@ OamEnt *Ancilla_ReceiveItem_Draw(int k, int x, int y) {  // 88c690
   uint8 a = kWishPond2_OamFlags[j];
   if (sign8(a))
     a = ancilla_arr4[k];
+  if (j == 0x30 && g_gold_potion_receipt)
+    a = kGoldPotion_BottlePal;
   Ancilla_SetOam(oam, x, y, 0x24, a * 2 | 0x30, kReceiveItem_Tab1[j]);
   oam++;
   if (kReceiveItem_Tab1[j] == 0) {
@@ -7379,6 +7385,23 @@ void AncillaSpawn_SwordChargeSparkle() {  // 8ff979
   Ancilla_SetXY(k,
     link_x_coord + x + kSwordChargeSparkle_X[j] + ((r & m1) >> 4),
     link_y_coord + y + kSwordChargeSparkle_Y[j] + (r & m0));
+}
+
+// Scintilla della pozione d'oro attorno a Link (BS Zelda 89914b, ancilla 0x44:
+// qui si usa quella della carica della spada)
+void AncillaAdd_GoldPotionSparkle() {
+  static const int8 kGoldSparkle_FacingX[4] = {0, 0, 3, -3};
+  static const int8 kGoldSparkle_X[8] = {4, 7, 4, 3, 2, 9, 5, 2};
+  int k = Ancilla_AllocHigh();
+  if (k < 0)
+    return;
+  ancilla_type[k] = 0x3c;
+  ancilla_item_to_link[k] = 0;
+  ancilla_timer[k] = 3;
+  ancilla_floor[k] = link_is_on_lower_level;
+  Ancilla_SetXY(k,
+    link_x_coord + kGoldSparkle_FacingX[link_direction_facing >> 1 & 3] + kGoldSparkle_X[(frame_counter & 0xe) >> 1],
+    link_y_coord - link_z_coord + 7);
 }
 
 int DashTremor_TwiddleOffset(int k) {  // 8ffafe

@@ -172,6 +172,14 @@ static void Link_CheckMeltedIce(void) {
 // Immersione con le pinne (Spada e oggetti, come su GBA): fotogrammi che
 // restano sott'acqua e pausa prima della prossima immersione
 uint8 g_link_dive_timer;
+
+// Pozione d'oro (bottiglia 9), da BS Zelda - Le Antiche Tavole di Pietra:
+// fotogrammi che restano all'effetto (carica rapida e scintille)
+uint16 g_gold_potion_timer;
+// il negozio della strega da' la pozione d'oro come la blu (oggetto 0x30):
+// g_gold_potion_next lo chiede, g_gold_potion_receipt vale per l'oggetto
+// ricevuto adesso (bottiglia, colore e messaggio)
+bool g_gold_potion_next, g_gold_potion_receipt;
 static uint8 g_link_dive_wait;
 
 void Link_Main() {  // 878000
@@ -183,6 +191,8 @@ void Link_Main() {  // 878000
   link_x_coord_prev = link_x_coord;
   link_y_coord_prev = link_y_coord;
   flag_unk1 = 0;
+  if (g_gold_potion_timer)
+    g_gold_potion_timer--;
   if (!flag_is_link_immobilized) {
     Link_CheckMeltedIce();
     Link_ControlHandler();
@@ -678,9 +688,12 @@ void HandleSomariaAndGraves() {  // 878689
   do {
     if (ancilla_type[i] == 0x2C) {
       SomariaBlock_HandlePlayerInteraction(i);
-      return;
+      break;
     }
   } while (--i >= 0);
+  // pozione d'oro: una scintilla attorno a Link ogni 4 fotogrammi (BS 8786ae)
+  if (!flag_is_link_immobilized && g_gold_potion_timer && !(g_gold_potion_timer & 3))
+    AncillaAdd_GoldPotionSparkle();
 }
 
 void LinkState_Recoil() {  // 8786b5
@@ -1956,6 +1969,8 @@ void Link_ReceiveItem(uint8 item, int chest_position) {  // 8799ad
     link_state_bits = 0;
   }
   link_receiveitem_index = item;
+  g_gold_potion_receipt = g_gold_potion_next && item == 0x30;
+  g_gold_potion_next = false;
   if (item == 0x3e)
     Ancilla_Sfx3_Near(0x2e);
   link_receiveitem_var1 = 0x60;
@@ -2388,9 +2403,16 @@ void Player_Sword_SpinAttackJerks_HoldDown() {  // 879d9f
           }
           if ((frame_counter & 7) == 0)
             AncillaAdd_ChargedSpinAttackSparkle();
-        } else if (link_spin_attack_step_counter < (hurricane ? 96 : 64) && ++link_spin_attack_step_counter == 48) {
-          Ancilla_Sfx2_Near(55);
-          AncillaAdd_ChargedSpinAttackSparkle();
+        } else if (link_spin_attack_step_counter < (hurricane ? 96 : 64)) {
+          // con la pozione d'oro la carica va al doppio della velocita' (BS 87a099)
+          int lim = hurricane ? 96 : 64;
+          uint8 old = link_spin_attack_step_counter;
+          int c = old + (g_gold_potion_timer ? 2 : 1);
+          link_spin_attack_step_counter = c > lim ? lim : c;
+          if (old < 48 && link_spin_attack_step_counter >= 48) {
+            Ancilla_Sfx2_Near(55);
+            AncillaAdd_ChargedSpinAttackSparkle();
+          }
         }
       } else {
         CalculateSwordHitBox();
@@ -2627,9 +2649,14 @@ fail:
     main_module_index = 14;
     animate_heart_refill_countdown = 7;
     Hud_Rebuild();
-  } else if (b == 5) { // blue potion
-    if (link_health_capacity == link_health_current && link_magic_power == 128)
+  } else if (b == 5 || b == 9) { // blue potion, pozione d'oro
+    // la pozione d'oro si beve anche in piena salute, se l'effetto non e'
+    // gia' attivo, e lo fa durare 36000 fotogrammi (BS 87a447)
+    if (link_health_capacity == link_health_current && link_magic_power == 128 &&
+        (b == 5 || g_gold_potion_timer))
       goto fail;
+    if (b == 9)
+      g_gold_potion_timer = 36000;
     link_bottle_info[btidx] = 2;
     link_item_in_hand = 0;
     submodule_index = 9;

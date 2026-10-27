@@ -65,8 +65,11 @@ enum {
   kFeatures0_FastTransitions = 1 << 17,
   // Mostra nell'HUD gli oggetti assegnati a X/L/R
   kFeatures0_ShowXLRItemsInHud = 1 << 18,
-  // 1 << 19 era la transizione continua tra aree esterne (tolta: la fa meglio
-  // il mondo continuo)
+  // Pozione d'oro, da BS Zelda - Le Antiche Tavole di Pietra: quarto calderone
+  // nella bottega della strega, con i calderoni a 32 pixel l'uno dall'altro
+  // (sprite_main.c, Sprite_GoldCauldron). Prima 1 << 19 era la transizione
+  // continua tra aree esterne, tolta
+  kFeatures0_GoldPotion = 1 << 19,
   // HUD moderno: cuori e magia a sinistra, tasti Y/A/B a destra, scritta
   // dell'azione del tasto A
   kFeatures0_ModernHud = 1 << 20,

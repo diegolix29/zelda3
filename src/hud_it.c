@@ -197,9 +197,9 @@ void HudIt_DrawLabel(uint16 *dst, int label) {
 // Nome italiano dell'oggetto, con '\n' dove va a capo (righe al massimo di
 // 64 pixel); stessa scelta di Hud_DrawSelectedYButtonItem
 static const char *ItemName(int item, int btn_index) {
-  static const char *const kBottles[8] = {
+  static const char *const kBottles[9] = {
     "FUNGO", "AMPOLLA", "POZIONE\nVITA", "POZIONE\nMAGICA", "POZIONE\nCURATUTTO",
-    "FATA", "APE", "APE\nDORATA",
+    "FATA", "APE", "APE\nDORATA", "POZIONE\nD'ORO",
   };
   static const char *const kItems[20] = {
     "ARCO", "BOOMERANG", "ARPIONE", "BOMBA", "FUNGO",
@@ -211,12 +211,12 @@ static const char *ItemName(int item, int btn_index) {
   // originale la 16 e' la bottiglia scelta
   if (item >= kHudItem_Bottle1 && item <= kHudItem_Bottle4) {
     int bottle = link_bottle_info[item - kHudItem_Bottle1];
-    return bottle >= 1 && bottle <= 8 ? kBottles[bottle - 1] : "";
+    return bottle >= 1 && bottle <= 9 ? kBottles[bottle - 1] : "";
   }
   if (item == kHudItem_BottleOld && !Hud_ExtendedInventory()) {
     int i = link_item_bottle_index;
     int bottle = i >= 1 && i <= 4 ? link_bottle_info[i - 1] : 0;
-    return bottle >= 1 && bottle <= 8 ? kBottles[bottle - 1] : "";
+    return bottle >= 1 && bottle <= 9 ? kBottles[bottle - 1] : "";
   }
   switch (item) {
   case 0: return btn_index ? "NON\nASSEGNATO" : "";

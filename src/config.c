@@ -535,6 +535,8 @@ static bool HandleIniConfig(int section, const char *key, char *value) {
       return ParseBool(value, &g_config.stuck_arrows);
     } else if (StringEqualsNoCase(key, "CollectItemsWithSword") || StringEqualsNoCase(key, "BreakPotsWithSword")) {
       return true;  // vecchie opzioni, ora dentro SwordAndItemsInteraction
+    } else if (StringEqualsNoCase(key, "GoldPotion")) {
+      return ParseBoolBit(value, &g_config.features0, kFeatures0_GoldPotion);
     } else if (StringEqualsNoCase(key, "ItemsRefillResources")) {
       return ParseBoolBit(value, &g_config.features0, kFeatures0_ItemsRefillResources);
     } else if (StringEqualsNoCase(key, "IcePalaceGba")) {

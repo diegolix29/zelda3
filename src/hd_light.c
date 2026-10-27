@@ -71,7 +71,10 @@ static bool InGameplay(int *mod_out) {
     // e di chiusura (fasi 7-8) si vede ancora la stanza. Senza luci tornava per
     // un attimo il cono della Lanterna del gioco
     bool dung_map_fade = sub == 3 && (overworld_map_state == 0 || overworld_map_state >= 7);
-    if (sub != 1 && sub != 2 && sub != 11 && !dung_map_fade)
+    // pozioni (4, 8, 9) e preghiera nel deserto (5): si vede il gioco, prima
+    // la stanza si scuriva per tutta la ricarica
+    bool refill = sub == 4 || sub == 5 || sub == 8 || sub == 9;
+    if (sub != 1 && sub != 2 && sub != 11 && !refill && !dung_map_fade)
       return false;  // mappe e altri menu: niente luci
     mod = saved_module_for_menu;
   }
@@ -648,8 +651,29 @@ void HdLight_FairyGlow(uint8 *pixels, int pitch, int width, int height) {
   g_num_fairies = 0;
 }
 
+// Fata che fa rialzare Link dopo la morte (Module12, fasi 11-13): e' l'ancilla
+// 0 (RevivalFairy_Main, ancilla.c), non uno sprite, e nel modulo 18 le luci
+// non si calcolano. Si aggiunge da sola all'elenco delle fate
+static void CollectRevivalFairy(int width, int bias_x, int bias_y) {
+  if (main_module_index != 18 || submodule_index < 11 || submodule_index > 13 ||
+      ancilla_step[0] > 2 || g_num_fairies >= kMaxFairies)
+    return;
+  int ext = (width - 256) / 2;
+  int cam_x = BG2HOFS_copy2 + bias_x, cam_y = BG2VOFS_copy2 + bias_y;
+  float tf = g_fx_frames * 0.21f * 0.5f;
+  g_fairy_x[g_num_fairies] = (ancilla_x_hi[0] << 8 | ancilla_x_lo[0]) + 8 - cam_x + ext;
+  g_fairy_y[g_num_fairies] = (ancilla_y_hi[0] << 8 | ancilla_y_lo[0]) + 8 - (int8)ancilla_z[0] - cam_y;
+  // sprite da 16x16, piu' grande della fata 0xe3: con raggio 9 l'alone
+  // restava quasi tutto sotto la fata
+  g_fairy_r[g_num_fairies] = 16.0f;
+  g_fairy_box[g_num_fairies] = 6;
+  g_fairy_m[g_num_fairies++] = 0.82f + 0.12f * sinf(tf * 1.6f) + 0.06f * sinf(tf * 4.1f);
+}
+
 static void ApplyLights(uint8 *pixels, int pitch, int width, int height, int bias_x, int bias_y) {
   int mod;
+  if (g_dynamic_light)
+    CollectRevivalFairy(width, bias_x, bias_y);
   g_hd_num_fire = 0;
   g_hd_light_sub = 0;
   if (!InGameplay(&mod) || (!g_dynamic_light && !g_fx_heat)) {

@@ -271,6 +271,7 @@ uint8 Ancilla_CalculateSfxPan(int k);
 int Ancilla_AllocInit(uint8 type, uint8 y);
 void AddSwordBeam(uint8 y);
 void AncillaSpawn_SwordChargeSparkle();
+void AncillaAdd_GoldPotionSparkle();
 int DashTremor_TwiddleOffset(int k);
 void Ancilla_TerminateIfOffscreen(int j);
 bool Bomb_CheckUndersideSpriteStatus(int k, Point16U *out_pt, uint8 *out_r10);
