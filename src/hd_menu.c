@@ -463,8 +463,8 @@ static const char *Tr(const char *it) {
     { "Malapalude", "Misery Mire" },
     { "Bosco d'Ossa", "Skull Woods" },
     { "Forte Ghiaccio", "Ice Palace" },
-    { "Torre di Hera", "Tower of Hera" },
-    { "Villaggio dei Ladroni", "Thieves' Town" },
+    { "Torre sul Monte", "Tower of Hera" },
+    { "Tana dei Ladroni", "Thieves' Town" },
     { "Rocca Tartaruga", "Turtle Rock" },
     { "Torre di Ganon", "Ganon's Tower" },
     { "Premi il nuovo tasto o pulsante  (Esc o Back annulla)", "Press the new key or button  (Esc or Back cancels)" },
@@ -1167,7 +1167,7 @@ static void DrawDungeonMapStatus(Canvas *cv) {
   static const char *const kDungeonNames[14] = {
     "Fogne del castello", "Castello di Hyrule", "Palazzo dell'Est", "Castello di Sabbia",
     "Sala superiore del castello", "Dedalo d'Acqua", "Palazzo Cupo", "Malapalude",
-    "Bosco d'Ossa", "Forte Ghiaccio", "Torre di Hera", "Villaggio dei Ladroni",
+    "Bosco d'Ossa", "Forte Ghiaccio", "Torre sul Monte", "Tana dei Ladroni",
     "Rocca Tartaruga", "Torre di Ganon",
   };
   if (!(enhanced_features0 & kFeatures0_ImprovedWorldMap))
@@ -1314,8 +1314,8 @@ static const DungeonEntry kDungeonEntries[14] = {
   { 6, "Malapalude" },
   { 3, "Bosco d'Ossa" },
   { 5, "Forte Ghiaccio" },
-  { 0, "Torre di Hera" },
-  { 4, "Villaggio dei Ladroni" },
+  { 0, "Torre sul Monte" },
+  { 4, "Tana dei Ladroni" },
   { 7, "Rocca Tartaruga" },
   { 8, "Torre di Ganon" },
 };
