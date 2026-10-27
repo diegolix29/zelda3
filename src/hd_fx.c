@@ -69,14 +69,11 @@ static inline void MarkSharp(uint32 *p) {
     *p = (*p & 0x00ffffff) | 4u << 24;
 }
 
+// Si vede il gioco, dentro (7) o fuori (9): anche sotto inventario e dialoghi
+// e mentre il cerchio si apre o si chiude (HdFx_SceneModule), altrimenti gli
+// effetti comparivano dopo la schermata o sparivano prima dell'uscita
 static bool InGameplay(int *mod_out) {
-  int mod = main_module_index;
-  if (mod == 14) {
-    int sub = submodule_index;
-    if (sub != 1 && sub != 2 && sub != 11)
-      return false;
-    mod = saved_module_for_menu;
-  }
+  int mod = HdFx_SceneModule();
   *mod_out = mod;
   return mod == 7 || mod == 9;
 }
