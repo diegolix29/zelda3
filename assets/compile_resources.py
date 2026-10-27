@@ -66,11 +66,27 @@ def print_map32_to_map16():
   add_asset_uint8('kMap32ToMap16_2', res[2])
   add_asset_uint8('kMap32ToMap16_3', res[3])
 
+# Messaggi aggiunti da Zelda3 HD (per esempio la pozione d'oro), in
+# new_messages_<lingua>.txt accanto al file dei dialoghi: il dialogue.txt
+# inglese si estrae dalla ROM, quindi non li ha. Si aggiungono in fondo solo
+# se il file non arriva gia' a quel numero (i numeri contano da 1)
+def add_new_messages(lines, fname, lang):
+  extra = os.path.join(os.path.dirname(os.path.abspath(fname)), f'new_messages_{lang}.txt')
+  if not os.path.exists(extra):
+    return
+  for line in open(extra, encoding='utf8').read().splitlines():
+    if not line.strip() or line.startswith('#'):
+      continue
+    a, b = line.split(': ', 1)
+    if int(a) == len(lines) + 1:
+      lines.append(b)
+
 def compress_dialogue(fname, lang):
   lines = []
   for line in open(fname, encoding='utf8').read().splitlines():
     a, b = line.split(': ', 1)
     lines.append(b)
+  add_new_messages(lines, fname, lang)
   return text_compression.compress_strings(lines, lang)
 
 def compress_store(r):

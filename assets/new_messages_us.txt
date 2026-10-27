@@ -1,0 +1,3 @@
+# Messaggi aggiunti da Zelda3 HD, in fondo al file dei dialoghi se mancano
+# (compile_resources.py, add_new_messages). 398: pozione d'oro (GoldPotion)
+398: Hee hee, thank you! This is a[2]very effective medicine.[3]There's only one per day,[Waitkey][Scroll]but it recovers life and magic[Scroll]power, and helps you charge[Scroll]sword power faster.
