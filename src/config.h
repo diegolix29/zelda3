@@ -78,7 +78,7 @@ typedef struct Config {
   // fx_heat: braci da torce, bracieri, fuoco e lava, calore sopra la lava e
   // animazioni del fondale al chiuso a meta' velocita'
   bool fx_heat, fx_window_rays, fx_item_glow, fx_rain;
-  bool fx_menu_blur, fx_sprite_shadows, fx_soft_iris, fx_button_hints, fx_water, fx_whirlpool;
+  bool fx_menu_blur, fx_sprite_shadows, fx_soft_iris, fx_button_hints, fx_water, fx_whirlpool, fx_fog;
   // aspetto dei disegni ufficiali (hd_art.c): Agahnim rosso, re in rosso,
   // medaglione con la stella della versione giapponese; Link biondo a parte
   bool official_artwork, blond_link;

@@ -592,6 +592,7 @@ void ZeldaDrawPpuFrame(uint8 *pixel_buffer, size_t pitch, uint32 render_flags) {
   HdFx_ShadowsBeforeRender(g_zenv.ppu, 256 + 2 * g_zenv.ppu->extraLeftRight, height);
   HdFx_IceBeforeRender(g_zenv.ppu);
   HdFx_SuperBombBeforeRender(g_zenv.ppu);
+  HdFx_FogBeforeRender(g_zenv.ppu);
   HdWorld_BeforeRender(256 + 2 * g_zenv.ppu->extraLeftRight, height);
   // specchio: la PPU disegna senza onda e con i colori veri (vedi hd_world.c)
   HdWorld_WarpBeforeRender();
@@ -626,6 +627,7 @@ void ZeldaDrawPpuFrame(uint8 *pixel_buffer, size_t pitch, uint32 render_flags) {
   HdLight_AfterRender(g_zenv.ppu);
   HdFx_IrisAfterRender(g_zenv.ppu);
   HdFx_ShadowsAfterRender(g_zenv.ppu);
+  HdFx_FogAfterRender(g_zenv.ppu);
   HdWorld_Composite(pixel_buffer, (int)pitch, 256 + 2 * g_zenv.ppu->extraLeftRight, height);
   HdWorld_WarpMask(pixel_buffer, (int)pitch, 256 + 2 * g_zenv.ppu->extraLeftRight, height);
 
@@ -641,6 +643,7 @@ void ZeldaDrawPpuFrame(uint8 *pixel_buffer, size_t pitch, uint32 render_flags) {
     HdFx_MarkBackdrop(pixel_buffer, (int)pitch, frame_w, height);
     HdWater_Apply(pixel_buffer, (int)pitch, frame_w, height, g_render_bias_x, g_render_bias_y);
     HdFx_FrozenWater(pixel_buffer, (int)pitch, frame_w, height, g_render_bias_x, g_render_bias_y);
+    HdFx_Fog(pixel_buffer, (int)pitch, frame_w, height, g_render_bias_x, g_render_bias_y);
     HdLight_FairyGlow(pixel_buffer, (int)pitch, frame_w, height);
     HdFx_Lightning(pixel_buffer, (int)pitch, frame_w, height);
     HdFx_Mosaic(pixel_buffer, (int)pitch, frame_w, height);

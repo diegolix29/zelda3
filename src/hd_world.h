@@ -110,5 +110,8 @@ void HdWorld_WarpPost(uint8 *pixels, int pitch, int width, int height);
 // Per lo shader: quanto e' bianco lo schermo (0-1) e l'onda di ogni riga (240)
 float HdWorld_WarpWhite(void);
 const float *HdWorld_WarpRowDx(void);
+// Colore (BGR a 15 bit) dello strato BG1 sommato a tutto (nebbia, pioggia)
+// nel pixel sx, sy dello schermo; -1 dove e' trasparente
+int HdWorld_OverlayColorAt(int sx, int sy);
 
 #endif  // ZELDA3_HD_WORLD_H_

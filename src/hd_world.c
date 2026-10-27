@@ -1947,6 +1947,9 @@ static void OverlayBegin(OverlayCtx *o, int ext) {
   o->half = ppu->halfColor;
   o->x0 = ppu->bgLayer[0].hScroll + ppu->bgBiasX - ext;
   o->y0 = ppu->bgLayer[0].vScroll + ppu->bgBiasY + 1;
+  // nebbia del Bosco Perduto migliorata: la disegna hd_fx.c su tutto
+  if (HdFx_FogReplacesOverlay())
+    o->on = o->sky = false;
 }
 
 // Colore (BGR a 15 bit) dello strato BG1 nel pixel sx, sy dello schermo; -1
@@ -1966,6 +1969,12 @@ static int OverlayColor(const OverlayCtx *o, int sx, int sy) {
   uint16 p01 = t[row], p23 = t[row + 8];
   int v = (p01 >> bit & 1) | (p01 >> (8 + bit) & 1) << 1 | (p23 >> bit & 1) << 2 | (p23 >> (8 + bit) & 1) << 3;
   return v ? ppu->cgram[(e >> 10 & 7) * 16 + v] : -1;
+}
+
+int HdWorld_OverlayColorAt(int sx, int sy) {
+  OverlayCtx o;
+  OverlayBegin(&o, g_zenv.ppu->extraLeftRight);
+  return OverlayColor(&o, sx, sy);
 }
 
 static inline uint32 OverlayBlend(const OverlayCtx *o, uint32 c, int sx, int sy) {

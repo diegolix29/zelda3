@@ -247,8 +247,8 @@ static void OpenGLRenderer_EndDraw() {
   glClear(GL_COLOR_BUFFER_BIT);
 
   // Con il gioco sfocato dietro inventario e menu lo shader non si applica:
-  // torna appena la sfocatura finisce
-  if (g_glsl_shader == NULL || HdFx_MenuBlurActive()) {
+  // torna appena la sfocatura finisce. Neanche nella nebbia del bosco
+  if (g_glsl_shader == NULL || HdFx_MenuBlurActive() || HdFx_ForestFogScene()) {
     glViewport(viewport_x, viewport_y, viewport_width, viewport_height);
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, g_texture.gl_texture);

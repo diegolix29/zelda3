@@ -9,6 +9,8 @@ extern bool g_fx_heat, g_fx_window_rays, g_fx_item_glow, g_fx_rain;
 extern bool g_fx_menu_blur, g_fx_sprite_shadows, g_fx_soft_iris, g_fx_button_hints;
 // Bagliori magici bianchi sopra i vortici di teletrasporto ("Distingui vortici da Zora")
 extern bool g_fx_whirlpool;
+// Nebbia del Bosco Perduto migliorata (prima della Spada Suprema)
+extern bool g_fx_fog;
 // Frame di gioco dall'avvio (per le animazioni: frame_counter si azzera ogni 256)
 extern uint32 g_fx_frames;
 
@@ -56,6 +58,16 @@ void HdFx_ShadowsAfterRender(Ppu *ppu);
 void HdFx_IceBeforeRender(Ppu *ppu);
 // Super bomba che si gonfia e si sgonfia come su GBA (scala della sua voce OAM)
 void HdFx_SuperBombBeforeRender(Ppu *ppu);
+// Nebbia del Bosco Perduto migliorata: prima del disegno della PPU toglie
+// quella del gioco, dopo la rimette nei registri; HdFx_Fog la disegna
+void HdFx_FogBeforeRender(Ppu *ppu);
+void HdFx_FogAfterRender(Ppu *ppu);
+void HdFx_Fog(uint8 *pixels, int pitch, int width, int height, int bias_x, int bias_y);
+// In questo frame la nebbia del gioco e' sostituita (hd_world.c non la somma)
+bool HdFx_FogReplacesOverlay(void);
+// Nebbia del bosco sullo schermo (anche quella del gioco): lo shader Four
+// Swords non si applica, rovinerebbe l'atmosfera
+bool HdFx_ForestFogScene(void);
 // Piove nell'area esterna attuale
 bool HdFx_IsRainingOutdoors(void);
 // Sulla Montagna della Morte: la casella e (della mappa) puo' essere nuvola,

@@ -80,9 +80,9 @@ static const FeatureOption kFeatureOptions[] = {
   { "Mondo continuo all'esterno", "ContinuousWorld", kFeatures0_ContinuousWorld },
   { "HUD moderno", "ModernHud", kFeatures0_ModernHud },
   { "Oggetti X, L, R nell'HUD", "ShowXLRItemsInHud", kFeatures0_ShowXLRItemsInHud },
-  { "Nomi dei dungeon", "DungeonNames", kFeatures0_DungeonNames },
+  { "Nomi dei labirinti", "DungeonNames", kFeatures0_DungeonNames },
   { "Mappa migliorata", "ImprovedWorldMap", kFeatures0_ImprovedWorldMap },
-  { "Mappa dungeon migliorata", "ImprovedDungeonMap", kFeatures0_ImprovedDungeonMap },
+  { "Mappa dei labirinti migliorata", "ImprovedDungeonMap", kFeatures0_ImprovedDungeonMap },
   { "Mappa progressiva", "ProgressiveMap", kFeatures0_ProgressiveMap },
   { "Cambio oggetti con L e R", "ItemSwitchLR", kFeatures0_SwitchLR },
   { "L/R solo sui primi 4 oggetti", "ItemSwitchLRLimit", kFeatures0_SwitchLRLimit },
@@ -347,6 +347,7 @@ void HdMenu_ApplyConfig() {
   g_fx_menu_blur = g_config.fx_menu_blur, g_fx_sprite_shadows = g_config.fx_sprite_shadows;
   g_fx_soft_iris = g_config.fx_soft_iris, g_fx_button_hints = g_config.fx_button_hints;
   g_fx_whirlpool = g_config.fx_whirlpool;
+  g_fx_fog = g_config.fx_fog;
   g_fx_water = g_config.fx_water;
 }
 
@@ -362,14 +363,14 @@ static const char *Tr(const char *it) {
     { "Oggetti X, L, R nell'HUD", "X, L, R items in the HUD" },
     { "Richiede Cambio oggetti con L e R", "Requires Switch items with L and R" },
     { "Richiede la PPU ottimizzata (NewRenderer)", "Requires the optimized PPU (NewRenderer)" },
-    { "Nomi dei dungeon", "Dungeon names" },
+    { "Nomi dei labirinti", "Dungeon names" },
     { "Cambio oggetti con L e R", "Switch items with L and R" },
     { "Spada e oggetti interazione ambiente", "Sword and items interaction" },
     { "Oggetti riempiono le risorse", "Items refill resources" },
     { "Interazione bruciatura e congelamento", "Burn and freeze interaction" },
     { "Inventario esteso", "Extended inventory" },
     { "Mappa migliorata", "Improved map" },
-    { "Mappa dungeon migliorata", "Improved dungeon map" },
+    { "Mappa dei labirinti migliorata", "Improved dungeon map" },
     { "Mappa progressiva", "Progressive map" },
     { "Sterza durante lo scatto", "Turn while dashing" },
     { "Fino a 10 bombe insieme", "Up to 10 bombs at once" },
@@ -412,6 +413,7 @@ static const char *Tr(const char *it) {
     { "Raggi dalle finestre", "Light rays from windows" },
     { "Bagliore degli oggetti ricevuti", "Glow of received items" },
     { "Pioggia e lampi migliorati", "Improved rain and lightning" },
+    { "Nebbia migliorata", "Improved fog" },
     { "Acqua e cascate realistiche", "Realistic water and waterfalls" },
     { "Sfocatura dietro menu e dialoghi", "Blur behind menus and dialogues" },
     { "Ombre di personaggi e nemici", "Shadows of characters and enemies" },
@@ -506,6 +508,7 @@ static void SaveSettings() {
   AddIni(v, &n, "[Graphics]", "FxWindowRays", "%d", g_config.fx_window_rays);
   AddIni(v, &n, "[Graphics]", "FxItemGlow", "%d", g_config.fx_item_glow);
   AddIni(v, &n, "[Graphics]", "FxRain", "%d", g_config.fx_rain);
+  AddIni(v, &n, "[Graphics]", "FxForestFog", "%d", g_config.fx_fog);
   AddIni(v, &n, "[Graphics]", "FxWater", "%d", g_config.fx_water);
   AddIni(v, &n, "[Graphics]", "FxMenuBlur", "%d", g_config.fx_menu_blur);
   AddIni(v, &n, "[Graphics]", "FxSpriteShadows", "%d", g_config.fx_sprite_shadows);
@@ -616,6 +619,7 @@ static void BuildItems() {
     AddItem(8, "Raggi dalle finestre", YesNo(g_config.fx_window_rays));
     AddItem(9, "Bagliore degli oggetti ricevuti", YesNo(g_config.fx_item_glow));
     AddItem(11, "Pioggia e lampi migliorati", YesNo(g_config.fx_rain));
+    AddItem(10, "Nebbia migliorata", YesNo(g_config.fx_fog));
     AddItem(12, "Sfocatura dietro menu e dialoghi", YesNo(g_config.fx_menu_blur));
     AddItem(13, "Ombre di personaggi e nemici", YesNo(g_config.fx_sprite_shadows));
     AddItem(14, "Cerchio di transizione morbido", YesNo(g_config.fx_soft_iris));
@@ -675,7 +679,10 @@ static void Activate(int id, int dir) {
     else { g_page = id; g_scroll = 0; }
     break;
   case kPage_Graphics:
-    if (id == 0) {
+    if (!g_config.new_renderer && (id == 0 || id == 5 || id == 6 || (id >= 7 && id <= 17))) {
+      // come nel launcher: servono gli strati e lo spostamento della vista
+      ShowMessage("Richiede la PPU ottimizzata (NewRenderer)");
+    } else if (id == 0) {
       int v = (g_config.smooth_camera + (dir < 0 ? 3 : 1)) & 3;
       g_config.smooth_camera = v;
       g_smooth_camera = v;
@@ -707,9 +714,9 @@ static void Activate(int id, int dir) {
       HdArt_Apply();
     } else if (id == 15 && g_zenv.ppu->extraLeftRight == 0) {
       ShowMessage("Richiede lo schermo 16:9 o 16:10");
-    } else if (id >= 7 && id <= 17 && id != 10) {
+    } else if (id >= 7 && id <= 17) {
       bool *opt[11] = { &g_config.fx_heat, &g_config.fx_window_rays, &g_config.fx_item_glow,
-                       NULL, &g_config.fx_rain, &g_config.fx_menu_blur,
+                       &g_config.fx_fog, &g_config.fx_rain, &g_config.fx_menu_blur,
                        &g_config.fx_sprite_shadows, &g_config.fx_soft_iris, &g_config.fx_button_hints,
                        &g_config.fx_water, &g_config.fx_whirlpool };
       *opt[id - 7] = !*opt[id - 7];
@@ -733,6 +740,10 @@ static void Activate(int id, int dir) {
       g_config.hurricane_spin = !g_config.hurricane_spin;
     } else {
       uint32 bit = kFeatureOptions[id].bit;
+      if ((bit == kFeatures0_ContinuousWorld || bit == kFeatures0_FastTransitions) && !g_config.new_renderer) {
+        ShowMessage("Richiede la PPU ottimizzata (NewRenderer)");
+        break;
+      }
       // oggetti X, L, R nell'HUD solo con il cambio oggetti con L e R
       if ((bit == kFeatures0_ShowXLRItemsInHud || bit == kFeatures0_SwitchLRLimit) && !(g_config.features0 & kFeatures0_SwitchLR)) {
         ShowMessage("Richiede Cambio oggetti con L e R");

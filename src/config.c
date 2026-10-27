@@ -408,6 +408,8 @@ static bool HandleIniConfig(int section, const char *key, char *value) {
       return ParseBool(value, &g_config.fx_item_glow);
     } else if (StringEqualsNoCase(key, "FxRain")) {
       return ParseBool(value, &g_config.fx_rain);
+    } else if (StringEqualsNoCase(key, "FxForestFog")) {
+      return ParseBool(value, &g_config.fx_fog);
     } else if (StringEqualsNoCase(key, "FxWater")) {
       return ParseBool(value, &g_config.fx_water);
     } else if (StringEqualsNoCase(key, "FxMenuBlur")) {
@@ -629,6 +631,10 @@ static bool ParseOneConfigFile(const char *filename, int depth) {
 // - oggetti X, L, R nell'HUD solo con il cambio oggetti con L e R;
 // - mappa del mondo in HD e schermo largo solo con la PPU ottimizzata (il
 //   vecchio renderer disegna 256 pixel e lascia neri i lati);
+// - anche gli effetti HD, la telecamera fluida, la fluidita' oltre i 60 Hz, il
+//   mondo continuo e le transizioni rapide: lavorano sull'immagine sapendo da
+//   quale strato viene ogni pixel (HUD, sprite, acqua) e spostano la vista,
+//   cose che il vecchio renderer non fa;
 // - con l'MSU la frequenza e' quella dei suoi file: 48000 per gli opuz,
 //   44100 per i pcm.
 static void ApplyConfigRules(void) {
@@ -648,7 +654,13 @@ static void ApplyConfigRules(void) {
   if (!g_config.new_renderer) {
     g_config.enhanced_mode7 = false;
     g_config.extended_aspect_ratio = 0;
-    g_config.features0 &= ~(kFeatures0_ExtendScreen64 | kFeatures0_WidescreenVisualFixes);
+    g_config.features0 &= ~(kFeatures0_ExtendScreen64 | kFeatures0_WidescreenVisualFixes |
+                            kFeatures0_ContinuousWorld | kFeatures0_FastTransitions);
+    g_config.smooth_camera = 0;
+    g_config.high_refresh = g_config.dynamic_light = false;
+    g_config.fx_heat = g_config.fx_window_rays = g_config.fx_item_glow = g_config.fx_rain = false;
+    g_config.fx_menu_blur = g_config.fx_sprite_shadows = g_config.fx_soft_iris = false;
+    g_config.fx_button_hints = g_config.fx_water = g_config.fx_whirlpool = g_config.fx_fog = false;
   }
   if (g_config.enable_msu)
     g_config.audio_freq = (g_config.enable_msu & kMsuEnabled_Opuz) ? 48000 : 44100;
