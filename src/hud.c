@@ -1111,15 +1111,18 @@ void Hud_DrawAbilityBox() {  // 8de6b6
   // CORRI, NUOTA)
   static const uint8 kItSlot[6] = { 4, 1, 0, 3, 2, 5 };
   bool it = HudIt_Active();
+  // nel riquadro a 6 colonne le tre colonne si staccano di una casella e
+  // l'italiano usa le lettere larghe (PARLA LEGGI CORRI sono di 5 lettere)
+  bool wide = it && kNewStyleInventory;
   uint8 flags = link_ability_flags;
   for (int i = 0; i < 2; i++, flags <<= 1) {
     for (int j = 0; j < 3; j++, flags <<= 1) {
       if (flags & 0x80) {
         int a = i * 3 + j, slot = it ? kItSlot[a] : a;
-        int sx = 4 + slot % 3 * 5, sy = 22 + slot / 3 * 2;
+        int sx = wide ? 2 + slot % 3 * 6 : 4 + slot % 3 * 5, sy = 22 + slot / 3 * 2;
         Hud_DrawNxN(dst + HUDXY(sx, sy), kHudAbilityText + i * 40 + j * 10, 5, 2);
         if (it)
-          HudIt_DrawAbility(dst + HUDXY(sx, sy + 1), a, 1);
+          HudIt_DrawAbility(dst + HUDXY(sx, sy + 1), a, 1, wide);
       }
     }
   }
@@ -1139,10 +1142,11 @@ void Hud_DrawAbilityBox() {  // 8de6b6
   Hud_DrawItem(dst + HUDXY(12, 27), &kHudItemFlippers[link_item_flippers]);
   Hud_DrawItem(dst + HUDXY(16, 27), &kHudItemMoonPearl[link_item_moon_pearl]);
   if (link_item_gloves) {
-    int sx = 4 + kItSlot[0] % 3 * 5 * it, sy = 22 + kItSlot[0] / 3 * 2 * it;
+    int col = it ? kItSlot[0] % 3 : 0;
+    int sx = wide ? 2 + col * 6 : 4 + col * 5, sy = 22 + kItSlot[0] / 3 * 2 * it;
     Hud_DrawNxN(dst + HUDXY(sx, sy), kHudGlovesText + (link_item_gloves != 1) * 10, 5, 2);
     if (it)
-      HudIt_DrawAbility(dst + HUDXY(sx, sy + 1), 0, link_item_gloves != 1 ? 3 : 2);
+      HudIt_DrawAbility(dst + HUDXY(sx, sy + 1), 0, link_item_gloves != 1 ? 3 : 2, wide);
   }
 }
 

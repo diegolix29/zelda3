@@ -143,21 +143,34 @@ static void DrawText(int tile, int ntiles, const Glyph *font, int n, int height,
   }
 }
 
+// Apostrofo largo: il gioco non ce l'ha, si disegna nella prima casella del
+// nome (libera quando il nome usa le lettere larghe), tratto da 1 pixel
+// come le lettere del gioco
+static const Glyph kWideApostrophe = { '\'', { "...##", "....#" } };
+
+// Vero se s sta in n lettere larghe e ha solo lettere che ci sono
+static bool WideFits(const char *s, int len, int n) {
+  if (len > n)
+    return false;
+  for (int i = 0; i < len; i++)
+    if (s[i] != ' ' && s[i] != '\'' && (s[i] < 'A' || s[i] > 'Z'))
+      return false;
+  return true;
+}
+
 // Lettere larghe del gioco (8 pixel, come nei nomi inglesi): A-Z dalla
 // casella 0x150, lo spazio e' 0xf5. Scrive in dst le caselle di s allineato
 // a destra (right) o a sinistra in n caselle; falso se non ci sta o ha
 // lettere che il gioco non ha
 static bool DrawWide(uint16 *dst, int n, const char *s, uint16 attr, bool right) {
   int len = (int)strlen(s);
-  if (len > n)
+  if (!WideFits(s, len, n))
     return false;
-  for (int i = 0; i < len; i++)
-    if (s[i] != ' ' && (s[i] < 'A' || s[i] > 'Z'))
-      return false;
   int x = right ? n - len : 0;
   for (int i = 0; i < n; i++) {
     int c = i - x;
-    dst[i] = attr | (c >= 0 && c < len && s[c] != ' ' ? 0x150 + s[c] - 'A' : 0xf5);
+    char ch = c >= 0 && c < len ? s[c] : ' ';
+    dst[i] = attr | (ch == '\'' ? kTileItemName : ch != ' ' ? 0x150 + ch - 'A' : 0xf5);
   }
   return true;
 }
@@ -221,7 +234,6 @@ static const char *ItemName(int item, int btn_index) {
   switch (item) {
   case 0: return btn_index ? "NON\nASSEGNATO" : "";
   case 1: return link_item_bow == 2 ? "ARCO E FRECCE" : link_item_bow == 4 ? "ARCO E FRECCE\nD'ARGENTO" : "ARCO";
-  case 2: return link_item_boomerang == 2 ? "BOOMERANG\nMAGICO" : "BOOMERANG";
   case 5: return link_item_mushroom != 1 ? "POLVERE\nMAGICA" : "FUNGO";
   case kHudItem_Flute: return link_item_flute != 1 ? "OCARINA" : "PALA";
   case kHudItem_Shovel: return "PALA";
@@ -245,9 +257,59 @@ void HudIt_DrawItemName(uint16 *dst, int item, int btn_index) {
   // Due righe di 8 caselle: come nel gioco, un nome corto sta sulla seconda
   // riga a sinistra; con due righe la prima e' a sinistra e la seconda a destra.
   // Se ogni riga ci sta in 8 lettere si usano le lettere larghe del gioco
-  // (FIAMMA, POZIONE VITA), altrimenti il carattere stretto
+  // (FIAMMA, POZIONE VITA), altrimenti il carattere stretto. Un nome con l'a
+  // capo scritto lo tiene (BASTONE DI / BYRNA resta stretto come SOMARIA);
+  // uno senza prova ogni a capo fra due parole, scegliendo le righe piu'
+  // pari (ARCO E / FRECCE)
+  // BOOMERANG ha 9 lettere, ma il gioco lo ha gia' disegnato largo in 8
+  // caselle (0x170-0x177, come nel nome inglese)
+  if (!strcmp(name, "BOOMERANG")) {
+    for (int i = 0; i < 8; i++) {
+      dst[i] = kTileAttr | 0xf5;
+      dst[32 + i] = kTileAttr | (0x170 + i);
+    }
+    return;
+  }
+  char wide1[24], wide2[24];
+  bool wide =WideFits(first, (int)strlen(first), 8) && WideFits(second, (int)strlen(second), 8);
+  bool wide_two = nl != NULL;
+  if (wide) {
+    strcpy(wide1, first);
+    strcpy(wide2, second);
+  } else if (!nl) {
+    char flat[48];
+    int len = (int)strlen(name) < (int)sizeof(flat) - 1 ? (int)strlen(name) : (int)sizeof(flat) - 1;
+    memcpy(flat, name, len);
+    flat[len] = 0;
+    for (int i = 0; i < len; i++)
+      if (flat[i] == '\n')
+        flat[i] = ' ';
+    if (WideFits(flat, len, 8)) {
+      wide1[0] = 0;
+      strcpy(wide2, flat);
+      wide = true, wide_two = false;
+    } else {
+      int best = -1, best_max = 99;
+      for (int i = 1; i < len - 1; i++) {
+        int m = i > len - 1 - i ? i : len - 1 - i;
+        if (flat[i] == ' ' && i < (int)sizeof(wide1) && len - 1 - i < (int)sizeof(wide2) &&
+            WideFits(flat, i, 8) && WideFits(flat + i + 1, len - 1 - i, 8) && m < best_max)
+          best = i, best_max = m;
+      }
+      if (best >= 0) {
+        memcpy(wide1, flat, best);
+        wide1[best] = 0;
+        strcpy(wide2, flat + best + 1);
+        wide = true, wide_two = true;
+      }
+    }
+  }
   uint16 row1[8], row2[8];
-  if (DrawWide(row1, 8, first, kTileAttr, false) && DrawWide(row2, 8, second, kTileAttr, nl != NULL)) {
+  if (wide && DrawWide(row1, 8, wide1, kTileAttr, false) && DrawWide(row2, 8, wide2, kTileAttr, wide_two)) {
+    if (strchr(name, '\'')) {
+      ClearTiles(kTileItemName, 1);
+      DrawText(kTileItemName, 1, &kWideApostrophe, 1, 2, "'", 0, 1);
+    }
     memcpy(dst, row1, sizeof(row1));
     memcpy(dst + 32, row2, sizeof(row2));
     return;
@@ -263,11 +325,20 @@ void HudIt_DrawItemName(uint16 *dst, int item, int btn_index) {
   }
 }
 
-void HudIt_DrawAbility(uint16 *dst, int ability, int level) {
+void HudIt_DrawAbility(uint16 *dst, int ability, int level, bool wide) {
   static const char *const kAbilities[6] = { "ALZA", "LEGGI", "PARLA", "TIRA", "CORRI", "NUOTA" };
   char buf[8];
   const char *s = kAbilities[ability];
-  // qui restano strette: con le lettere larghe le parole di 5 lettere
+  // Lettere larghe solo se le colonne sono staccate (riquadro a 6 colonne):
+  // le parole di 5 lettere riempiono le 5 caselle. ALZA.N usa la casella ".N"
+  // di LIFT.N (0x127-0x129)
+  if (wide) {
+    DrawWide(dst, 5, s, 0x2c00, false);
+    if (ability == 0)
+      dst[4] = 0x2c00 | (0x127 + (level < 1 ? 1 : level > 3 ? 3 : level) - 1);
+    return;
+  }
+  // con le colonne attaccate restano strette: le parole di 5 lettere
   // riempiono le 5 caselle e si attaccano a quelle accanto
   if (ability == 0) {
     // ALZA.1, ALZA.2, ALZA.3 come LIFT.1-3: il livello dei guanti

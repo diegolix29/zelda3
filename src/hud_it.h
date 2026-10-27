@@ -22,8 +22,9 @@ void HudIt_DrawLabel(uint16 *dst, int label);
 int HudIt_LabelTiles(int label);
 
 // Abilita' del riquadro AZIONE (0 ALZA, 1 LEGGI, 2 PARLA, 3 TIRA, 4 CORRI,
-// 5 NUOTA) nella riga di 5 caselle dst; level e' il livello di ALZA (1-3)
-void HudIt_DrawAbility(uint16 *dst, int ability, int level);
+// 5 NUOTA) nella riga di 5 caselle dst; level e' il livello di ALZA (1-3);
+// wide: lettere larghe del gioco (le colonne devono essere staccate)
+void HudIt_DrawAbility(uint16 *dst, int ability, int level, bool wide);
 
 // Nome dell'oggetto selezionato nel riquadro 8x2 (dst = prima casella in alto
 // a sinistra, righe da 32 caselle)
