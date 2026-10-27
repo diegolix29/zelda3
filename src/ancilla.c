@@ -3551,6 +3551,9 @@ void Ancilla3B_SwordUpSparkle(int k) {  // 88c167
 void Ancilla3C_SpinAttackChargeSparkle(int k) {  // 88c1ea
   static const uint8 kSwordChargeSpark_Char[3] = {0xb7, 0x80, 0x83};
   static const uint8 kSwordChargeSpark_Flags[3] = {4, 4, 0x84};
+  // pozione d'oro (ancilla_step 1): BS Zelda usa la sua ancilla 0x44 (8cc41)
+  // con gli stessi disegni e la tavolozza sprite 1 (8cc3e: 02 02 82)
+  static const uint8 kGoldSpark_Flags[3] = {2, 2, 0x82};
 
   if (!submodule_index && !ancilla_timer[k]) {
     ancilla_timer[k] = 4;
@@ -3564,7 +3567,7 @@ void Ancilla3C_SpinAttackChargeSparkle(int k) {  // 88c1ea
   Ancilla_PrepOamCoord(k, &info);
   int j = ancilla_item_to_link[k];
   Ancilla_SetOam(GetOamCurPtr(), info.x, info.y,
-                 kSwordChargeSpark_Char[j], kSwordChargeSpark_Flags[j] | HIBYTE(oam_priority_value), 0);
+                 kSwordChargeSpark_Char[j], (ancilla_step[k] == 1 ? kGoldSpark_Flags : kSwordChargeSpark_Flags)[j] | HIBYTE(oam_priority_value), 0);
 }
 
 void Ancilla35_MasterSwordReceipt(int k) {  // 88c25f
@@ -6868,6 +6871,7 @@ void AncillaAdd_SilverArrowSparkle(int kin) {  // 8997de
     ancilla_type[k] = 0x3c;
     ancilla_item_to_link[k] = 0;
     ancilla_timer[k] = 4;
+    ancilla_step[k] = 0;
     ancilla_floor[k] = link_is_on_lower_level;
     int m = GetRandomNumber();
     int j = ancilla_dir[kin] & 3;
@@ -7366,6 +7370,7 @@ void AncillaSpawn_SwordChargeSparkle() {  // 8ff979
   ancilla_type[k] = 0x3c;
   ancilla_item_to_link[k] = 0;
   ancilla_timer[k] = 4;
+  ancilla_step[k] = 0;
   ancilla_floor[k] = link_is_on_lower_level;
   int j = link_direction_facing >> 1;
   int8 x = 0, y = 0;
@@ -7388,7 +7393,8 @@ void AncillaSpawn_SwordChargeSparkle() {  // 8ff979
 }
 
 // Scintilla della pozione d'oro attorno a Link (BS Zelda 89914b, ancilla 0x44:
-// qui si usa quella della carica della spada)
+// qui si usa quella della carica della spada con la tavolozza di BS, vedi
+// Ancilla3C_SpinAttackChargeSparkle)
 void AncillaAdd_GoldPotionSparkle() {
   static const int8 kGoldSparkle_FacingX[4] = {0, 0, 3, -3};
   static const int8 kGoldSparkle_X[8] = {4, 7, 4, 3, 2, 9, 5, 2};
@@ -7398,6 +7404,7 @@ void AncillaAdd_GoldPotionSparkle() {
   ancilla_type[k] = 0x3c;
   ancilla_item_to_link[k] = 0;
   ancilla_timer[k] = 3;
+  ancilla_step[k] = 1;
   ancilla_floor[k] = link_is_on_lower_level;
   Ancilla_SetXY(k,
     link_x_coord + kGoldSparkle_FacingX[link_direction_facing >> 1 & 3] + kGoldSparkle_X[(frame_counter & 0xe) >> 1],
