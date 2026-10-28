@@ -735,6 +735,8 @@ static void Activate(int id, int dir) {
         Hd3d_SetCurve(g_view3d_curve + (dir < 0 ? kHd3d_NumCurves - 1 : 1), "options menu");
     } else if (id == 22) {
         Hd3d_SetDrawDistance(g_view3d_dist + (dir < 0 ? kHd3d_NumDists - 1 : 1), "options menu");
+    } else if (id == 21) {
+        Hd3d_SetWalls(!g_view3d_walls, "options menu");
     } else if (id == 15 && g_zenv.ppu->extraLeftRight == 0) {
       ShowMessage("Richiede lo schermo 16:9 o 16:10");
     } else if (id >= 7 && id <= 17) {
