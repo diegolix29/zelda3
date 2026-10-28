@@ -575,6 +575,7 @@ int main(int argc, char** argv) {
         if (g_input1_state & 0xf0)
           g_gamepad_buttons = 0;
         hr_inputs |= g_gamepad_buttons;
+        hr_inputs = Hd3d_RotateInput(hr_inputs);
         SDL_LockMutex(g_audio_mutex);
         bool hr_replay = ZeldaRunFrame(hr_inputs);
         HdMenu_AfterFrame(hr_replay);
@@ -600,6 +601,7 @@ int main(int argc, char** argv) {
     if (g_input1_state & 0xf0)
       g_gamepad_buttons = 0;
     inputs |= g_gamepad_buttons;
+    inputs = Hd3d_RotateInput(inputs);   // third person 3D camera: walk relative to it
 
     SDL_LockMutex(g_audio_mutex);
     bool is_replay = ZeldaRunFrame(inputs);
@@ -792,6 +794,8 @@ static void HandleCommand_Locked(uint32 j, bool pressed) {
     case kKeys_View3DDump: Hd3d_RequestDump(); break;
     case kKeys_View3DWalls: Hd3d_ToggleWalls(); break;
     case kKeys_View3DRoomDump: Hd3d_RequestRoomDump(); break;
+    case kKeys_View3DCamera: Hd3d_ToggleCamera(); break;
+    case kKeys_View3DRecenter: Hd3d_Recenter(); break;
     default: assert(0);
     }
   }
@@ -1070,6 +1074,8 @@ static void HandleGamepadAxisInput(int gamepad_id, int axis, int value) {
       buttons = kSegmentToButtons[(uint8)(angle + 16 + 64) >> 5];
     }
     g_gamepad_buttons = buttons;
+  } else if (axis == SDL_CONTROLLER_AXIS_RIGHTX || axis == SDL_CONTROLLER_AXIS_RIGHTY) {
+    Hd3d_RightStick(axis == SDL_CONTROLLER_AXIS_RIGHTY, value);   // third person 3D camera
   } else if ((axis == SDL_CONTROLLER_AXIS_TRIGGERLEFT || axis == SDL_CONTROLLER_AXIS_TRIGGERRIGHT)) {
     if (value < 12000 || value >= 16000)  // hysteresis
       HandleGamepadInput(axis == SDL_CONTROLLER_AXIS_TRIGGERLEFT ? kGamepadBtn_L2 : kGamepadBtn_R2, value >= 12000);

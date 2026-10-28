@@ -41,6 +41,8 @@ enum {
   kKeys_View3DDump,
   kKeys_View3DWalls,
   kKeys_View3DRoomDump,
+  kKeys_View3DCamera,
+  kKeys_View3DRecenter,
   kKeys_Total,
 };
 
@@ -99,6 +101,7 @@ typedef struct Config {
   uint8 view3d_curve;       // curvatura del mondo nella vista 3D: 0 = piatto, 1-3
   uint8 view3d_dist;        // distanza di disegno degli sprite: 0 = schermo, 1 = 2x, 2 = 3x
   uint8 view3d_walls;       // muri in rilievo al chiuso nella vista 3D: 0 / 1
+  uint8 view3d_cam;         // telecamera 3D: 0 = classica, 1 = terza persona (stick destro)
 
   const char *link_graphics;
   char *memory_buffer;

@@ -48,8 +48,10 @@ int g_view3d;
 int g_view3d_curve;
 int g_view3d_dist;
 int g_view3d_walls;
+int g_view3d_cam;
 
 static const char *const kDistNames[kHd3d_NumDists] = { "Screen", "2x", "3x" };
+static const char *const kCamNames[kHd3d_NumCams] = { "Classic", "Third person" };
 
 static const float kLevelDegrees[kHd3d_NumLevels] = { 0.0f, 20.0f, 35.0f, 50.0f, 65.0f, 75.0f };
 static const char *const kLevelNames[kHd3d_NumLevels] = { "Off", "20", "35", "50", "65", "75" };
@@ -62,6 +64,21 @@ static const char *const kCurveNames[kHd3d_NumCurves] = { "Off", "Light", "Mediu
 static const float kCamDist = 320.0f;
 // Distance fog: starts at kFogStart, all sky at kFogEnd (camera distance)
 static const float kFogStart = 450.0f, kFogEnd = 1100.0f;
+
+// Third person camera: distance from its aim point, how far ahead of Link
+// and how high it aims (pixels), pitch range (degrees from straight down)
+// and how fast the right stick turns it
+static const float kThirdDist = 150.0f, kThirdAhead = 20.0f, kThirdAimZ = 14.0f;
+static const float kThirdPitchMin = 35.0f, kThirdPitchMax = 80.0f, kThirdPitchDefault = 62.0f;
+static const float kThirdYawSpeed = 2.6f;      // radians a second at full stick
+static const float kThirdPitchSpeed = 55.0f;   // degrees a second at full stick
+static const int kStickDeadzone = 8000;
+static float g_yaw;              // third person: look direction, 0 = north, + = clockwise
+static float g_yaw_target;
+static bool g_recenter;          // easing g_yaw toward g_yaw_target (behind Link)
+static float g_pitch3 = 62.0f;
+static int g_stick_x, g_stick_y; // right stick
+static uint32 g_cam_ticks;
 
 static FILE *g_log;
 static float g_angle;            // current tilt in degrees (eases toward the target)
@@ -121,12 +138,14 @@ void Hd3d_Init(void) {
   g_view3d_curve = g_config.view3d_curve % kHd3d_NumCurves;
   g_view3d_dist = g_config.view3d_dist % kHd3d_NumDists;
   g_view3d_walls = g_config.view3d_walls & 1;
+  g_view3d_cam = g_config.view3d_cam % kHd3d_NumCams;
   g_angle = kLevelDegrees[g_view3d];
   g_radius_inv = RadiusInv(g_view3d_curve);
-  Hd3d_Log("3D view init: View3D=%d (%s deg), View3DCurve=%d (%s), View3DDrawDistance=%d (%s), View3DWalls=%d, NewRenderer=%d, "
-           "OutputMethod=%d, ExtendedAspectRatio=%d, ContinuousWorld=%d, shader='%s'",
+  g_pitch3 = kThirdPitchDefault;
+  Hd3d_Log("3D view init: View3D=%d (%s deg), View3DCurve=%d (%s), View3DDrawDistance=%d (%s), View3DWalls=%d, "
+           "View3DCamera=%d (%s), NewRenderer=%d, OutputMethod=%d, ExtendedAspectRatio=%d, ContinuousWorld=%d, shader='%s'",
            g_view3d, kLevelNames[g_view3d], g_view3d_curve, kCurveNames[g_view3d_curve],
-           g_view3d_dist, kDistNames[g_view3d_dist], g_view3d_walls,
+           g_view3d_dist, kDistNames[g_view3d_dist], g_view3d_walls, g_view3d_cam, kCamNames[g_view3d_cam],
            g_config.new_renderer, g_config.output_method, g_config.extended_aspect_ratio,
            (g_config.features0 & kFeatures0_ContinuousWorld) != 0, g_config.shader ? g_config.shader : "");
   if (!g_config.new_renderer)
@@ -195,6 +214,121 @@ void Hd3d_ToggleWalls(void) {
   Hd3d_SetWalls(!g_view3d_walls, "hotkey");
 }
 
+const char *Hd3d_CameraName(int cam) {
+  return kCamNames[(unsigned)cam % kHd3d_NumCams];
+}
+
+// Link's facing (0 up, 2 down, 4 left, 6 right) -> yaw that looks the same way
+static float FacingYaw(void) {
+  static const float kYaw[4] = { 0.0f, 3.14159265f, -1.5707963f, 1.5707963f };
+  return kYaw[(link_direction_facing >> 1) & 3];
+}
+
+void Hd3d_SetCamera(int cam, const char *why) {
+  cam = (unsigned)cam % kHd3d_NumCams;
+  if (cam != g_view3d_cam)
+    Hd3d_Log("camera -> %s (%s)", kCamNames[cam], why);
+  if (cam == kHd3d_CamThird && g_view3d_cam != kHd3d_CamThird) {
+    // start behind Link, at the default pitch
+    g_yaw = g_yaw_target = FacingYaw();
+    g_recenter = false;
+    g_pitch3 = kThirdPitchDefault;
+    if (g_view3d == 0)
+      Hd3d_SetLevel(3, "third person camera needs the 3D view");
+  }
+  g_view3d_cam = cam;
+  g_config.view3d_cam = (uint8)cam;
+}
+
+void Hd3d_ToggleCamera(void) {
+  Hd3d_SetCamera(g_view3d_cam + 1, "hotkey");
+}
+
+bool Hd3d_ThirdPerson(void) {
+  return g_active_last && g_view3d_cam == kHd3d_CamThird;
+}
+
+void Hd3d_RightStick(int axis_y, int value) {
+  *(axis_y ? &g_stick_y : &g_stick_x) = value;
+}
+
+void Hd3d_Recenter(void) {
+  if (g_view3d_cam != kHd3d_CamThird)
+    return;
+  g_yaw_target = FacingYaw();
+  g_recenter = true;
+}
+
+static float WrapAngle(float a) {
+  while (a > 3.14159265f) a -= 6.2831853f;
+  while (a < -3.14159265f) a += 6.2831853f;
+  return a;
+}
+
+// one stick axis past the deadzone -> -1..1
+static float StickAmount(int v) {
+  if (v > -kStickDeadzone && v < kStickDeadzone)
+    return 0.0f;
+  float f = (v > 0 ? v - kStickDeadzone : v + kStickDeadzone) / (32767.0f - kStickDeadzone);
+  return f > 1.0f ? 1.0f : f < -1.0f ? -1.0f : f;
+}
+
+// right stick: X turns the camera around Link, Y raises and lowers it
+static void UpdateThirdCamera(void) {
+  uint32 now = SDL_GetTicks();
+  float dt = g_cam_ticks ? (now - g_cam_ticks) * 0.001f : 0.0f;
+  g_cam_ticks = now;
+  if (dt > 0.1f) dt = 0.1f;
+  float sx = StickAmount(g_stick_x), sy = StickAmount(g_stick_y);
+  if (sx != 0.0f) {
+    g_yaw = WrapAngle(g_yaw + sx * kThirdYawSpeed * dt);
+    g_recenter = false;
+  } else if (g_recenter) {
+    float d = WrapAngle(g_yaw_target - g_yaw);
+    g_yaw = WrapAngle(g_yaw + d * 0.2f);
+    if (fabsf(d) < 0.01f)
+      g_yaw = g_yaw_target, g_recenter = false;
+  }
+  // stick up = the camera goes down toward the horizon (looks further ahead)
+  g_pitch3 -= sy * kThirdPitchSpeed * dt;
+  if (g_pitch3 < kThirdPitchMin) g_pitch3 = kThirdPitchMin;
+  if (g_pitch3 > kThirdPitchMax) g_pitch3 = kThirdPitchMax;
+}
+
+int Hd3d_ViewFacing(int facing) {
+  if (!Hd3d_ThirdPerson() || (main_module_index != 7 && main_module_index != 9))
+    return facing;
+  static const float kYaw[4] = { 0.0f, 3.14159265f, -1.5707963f, 1.5707963f };
+  // world direction minus the camera's, in quarter turns: 0 away from the
+  // camera, 1 to its right, 2 toward it, 3 to its left
+  float rel = WrapAngle(kYaw[(facing >> 1) & 3] - g_yaw);
+  static const uint8 kQuarterToFacing[4] = { 0, 6, 2, 4 };
+  return kQuarterToFacing[(int)floorf(rel * (2.0f / 3.14159265f) + 0.5f) & 3];
+}
+
+int Hd3d_RotateInput(int inputs) {
+  // only while walking around: menus and the map keep the plain d-pad
+  if (!Hd3d_ThirdPerson() || (main_module_index != 7 && main_module_index != 9))
+    return inputs;
+  int dirs = inputs & 0xf0;
+  if (!dirs)
+    return inputs;
+  // up/down/left/right as seen on the screen -> the world direction under
+  // the camera's yaw, snapped to the 8 directions Link can walk
+  float side = ((dirs >> 7) & 1) - ((dirs >> 6) & 1);   // right - left
+  float fwd = ((dirs >> 4) & 1) - ((dirs >> 5) & 1);    // up - down
+  if (side == 0.0f && fwd == 0.0f)
+    return inputs;
+  float cs = cosf(g_yaw), sn = sinf(g_yaw);
+  float wx = cs * side + sn * fwd;     // east
+  float wn = -sn * side + cs * fwd;    // north
+  static const uint8 kSegmentToButtons[8] = {
+    1 << 4, 1 << 4 | 1 << 7, 1 << 7, 1 << 7 | 1 << 5, 1 << 5, 1 << 5 | 1 << 6, 1 << 6, 1 << 6 | 1 << 4,
+  };
+  int seg = (int)floorf(atan2f(wx, wn) * (4.0f / 3.14159265f) + 0.5f) & 7;
+  return (inputs & ~0xf0) | kSegmentToButtons[seg];
+}
+
 bool Hd3d_FarSprites(int *margin_x, int *margin_top, int *margin_bottom) {
   // the 3D view was drawn last frame; outdoors only with the continuous world
   // (it keeps every enemy of the area alive), indoors in any room
@@ -202,7 +336,8 @@ bool Hd3d_FarSprites(int *margin_x, int *margin_top, int *margin_bottom) {
     return false;
   *margin_x = 256 * g_view3d_dist;
   *margin_top = 256 * g_view3d_dist;   // far away = up the screen
-  *margin_bottom = 16;
+  // the third person camera turns: enemies behind Link are seen too
+  *margin_bottom = g_view3d_cam == kHd3d_CamThird ? 256 * g_view3d_dist : 16;
   return true;
 }
 
@@ -261,6 +396,10 @@ bool Hd3d_BeginFrame(Ppu *ppu, int width, int height) {
   g_radius_inv += (rtarget - g_radius_inv) * 0.15f;
   if (fabsf(rtarget - g_radius_inv) < 1e-6f)
     g_radius_inv = rtarget;
+  if (g_view3d_cam == kHd3d_CamThird)
+    UpdateThirdCamera();
+  else
+    g_cam_ticks = 0;
 
   int reason;
   if (g_angle < 0.05f)
@@ -434,29 +573,74 @@ static bool Ground_Sample(const Ground *g, int fx, int fy, uint32 *out) {
 // (cx, p). A ray's hit point is mapped back to (u, v) by arc length, so the
 // map is wrapped onto the sphere without stretching.
 
+//
+// The camera has a position O and three directions: forward f (where it
+// looks), right r (flat on the ground) and up (the screen's up). Classic: it
+// looks north (-v). Third person: it orbits Link, turned by the yaw (0 =
+// looking north, + = clockwise seen from above) and tilted by its own pitch;
+// the sphere then touches the ground under Link.
+
 typedef struct Cam {
-  float D, s, c, cx, cy, p;
+  float F, cx, cy;              // focal length, screen center
+  float tx, ty;                 // touch point of the sphere (center of the world curve)
   float R;                      // 0 = flat
   float ox, oy, oz;             // camera position
-  float sy_oy, sy_oz;           // O = C - sphere center (x = 0)
+  float fx, fy, fz;             // forward
+  float rx, ry;                 // right (z = 0)
+  float ux, uy, uz;             // screen up
 } Cam;
+
+// tilt from straight down (radians) and horizontal look direction (hx, hy)
+static void Cam_Orient(Cam *cm, float th, float hx, float hy) {
+  float s = sinf(th), c = cosf(th);
+  cm->fx = hx * s, cm->fy = hy * s, cm->fz = -c;
+  cm->rx = -hy, cm->ry = hx;
+  cm->ux = hx * c, cm->uy = hy * c, cm->uz = s;
+}
 
 static void Cam_Setup(Cam *cm, int w, int h) {
   float th = g_angle * (3.14159265f / 180.0f);
-  cm->D = kCamDist, cm->s = sinf(th), cm->c = cosf(th);
+  float s = sinf(th), c = cosf(th);
+  cm->F = kCamDist;
   cm->cx = w * 0.5f, cm->cy = h * 0.5f;
+  Cam_Orient(cm, th, 0.0f, -1.0f);
+  // p: the ground row the camera looks at, so the bottom edge of the ground
+  // sits on the bottom of the screen
   float dy = (h - 0.5f) - cm->cy;
-  float t = cm->D * cm->c / (cm->D * cm->c + dy * cm->s);
-  cm->p = h - (cm->D * cm->s + t * (dy * cm->c - cm->D * cm->s));
+  float t = cm->F * c / (cm->F * c + dy * s);
+  float p = h - (cm->F * s + t * (dy * c - cm->F * s));
   cm->R = g_radius_inv > 1e-6f ? 1.0f / g_radius_inv : 0.0f;
-  cm->ox = cm->cx, cm->oy = cm->p + cm->D * cm->s, cm->oz = cm->D * cm->c;
-  cm->sy_oy = cm->D * cm->s, cm->sy_oz = cm->D * cm->c + cm->R;
+  cm->tx = cm->cx, cm->ty = p;
+  cm->ox = cm->cx, cm->oy = p + cm->F * s, cm->oz = cm->F * c;
+}
+
+// Third person: behind Link at (lx, ly) on the ground (frame coordinates)
+static void Cam_SetupThird(Cam *cm, int w, int h, float lx, float ly) {
+  float th = g_pitch3 * (3.14159265f / 180.0f);
+  float hx = sinf(g_yaw), hy = -cosf(g_yaw);
+  cm->F = kCamDist;
+  cm->cx = w * 0.5f, cm->cy = h * 0.5f;
+  Cam_Orient(cm, th, hx, hy);
+  cm->R = g_radius_inv > 1e-6f ? 1.0f / g_radius_inv : 0.0f;
+  cm->tx = lx, cm->ty = ly;
+  // aim a little ahead of Link and at his chest, so he stands in the lower
+  // half of the screen with the way ahead open
+  float ax = lx + hx * kThirdAhead, ay = ly + hy * kThirdAhead, az = kThirdAimZ;
+  cm->ox = ax - cm->fx * kThirdDist, cm->oy = ay - cm->fy * kThirdDist, cm->oz = az - cm->fz * kThirdDist;
+}
+
+// direction of the ray through screen pixel (sx, sy)
+static inline void Cam_Dir(const Cam *cm, float sx, float sy, float *rx, float *ry, float *rz) {
+  float dx = sx - cm->cx, dy = sy - cm->cy;
+  *rx = cm->F * cm->fx + dx * cm->rx - dy * cm->ux;
+  *ry = cm->F * cm->fy + dx * cm->ry - dy * cm->uy;
+  *rz = cm->F * cm->fz - dy * cm->uz;
 }
 
 // screen pixel center -> ground (u, v) and camera depth; false = sky
 static bool Cam_Ray(const Cam *cm, float sx, float sy, float *u, float *v, float *depth) {
-  float dx = sx - cm->cx, dy = sy - cm->cy;
-  float rx = dx, ry = -cm->D * cm->s + dy * cm->c, rz = -cm->D * cm->c - dy * cm->s;
+  float rx, ry, rz;
+  Cam_Dir(cm, sx, sy, &rx, &ry, &rz);
   float lam;
   if (cm->R == 0.0f) {
     if (rz >= -1e-4f)
@@ -465,26 +649,28 @@ static bool Cam_Ray(const Cam *cm, float sx, float sy, float *u, float *v, float
     *u = cm->ox + lam * rx;
     *v = cm->oy + lam * ry;
   } else {
+    // O - sphere center (the center is R below the touch point)
+    float qx = cm->ox - cm->tx, qy = cm->oy - cm->ty, qz = cm->oz + cm->R;
     float a = rx * rx + ry * ry + rz * rz;
-    float b = cm->sy_oy * ry + cm->sy_oz * rz;
-    float cc = cm->sy_oy * cm->sy_oy + cm->sy_oz * cm->sy_oz - cm->R * cm->R;
+    float b = qx * rx + qy * ry + qz * rz;
+    float cc = qx * qx + qy * qy + qz * qz - cm->R * cm->R;
     float disc = b * b - a * cc;
     if (disc < 0)
       return false;
     lam = (-b - sqrtf(disc)) / a;
     if (lam <= 0)
       return false;
-    float hx = lam * rx, hy = cm->oy + lam * ry - cm->p;   // relative to the touch point
+    float hx = qx + lam * rx, hy = qy + lam * ry;   // relative to the touch point
     float r = sqrtf(hx * hx + hy * hy);
     float k = 1.0f;
     if (r > 1e-3f) {
       float q = r / cm->R;
       k = cm->R * asinf(q > 1.0f ? 1.0f : q) / r;
     }
-    *u = cm->cx + hx * k;
-    *v = cm->p + hy * k;
+    *u = cm->tx + hx * k;
+    *v = cm->ty + hy * k;
   }
-  *depth = lam * cm->D;
+  *depth = lam * cm->F;
   return true;
 }
 
@@ -494,25 +680,26 @@ static bool Cam_Ray(const Cam *cm, float sx, float sy, float *u, float *v, float
 static bool Cam_ToScreenH(const Cam *cm, float u, float v, float height, float *sx, float *sy, float *scale) {
   float x = u, y = v, z = height;
   if (cm->R != 0.0f) {
-    float hx = u - cm->cx, hy = v - cm->p;
+    float hx = u - cm->tx, hy = v - cm->ty;
     float r = sqrtf(hx * hx + hy * hy);
     if (r > 1e-3f) {
       float phi = r / cm->R;
       if (phi > 1.5f)
         return false;
       float k = (cm->R + height) * sinf(phi) / r;
-      x = cm->cx + hx * k, y = cm->p + hy * k;
+      x = cm->tx + hx * k, y = cm->ty + hy * k;
       z = (cm->R + height) * cosf(phi) - cm->R;
     }
   }
   float rx = x - cm->ox, ry = y - cm->oy, rz = z - cm->oz;
-  float zc = -cm->s * ry - cm->c * rz;          // along the view direction
+  float zc = cm->fx * rx + cm->fy * ry + cm->fz * rz;   // along the view direction
   if (zc < 1.0f)
     return false;
-  float up = -cm->c * ry + cm->s * rz;
-  *sx = cm->cx + cm->D * rx / zc;
-  *sy = cm->cy - cm->D * up / zc;
-  *scale = cm->D / zc;
+  float right = cm->rx * rx + cm->ry * ry;
+  float up = cm->ux * rx + cm->uy * ry + cm->uz * rz;
+  *sx = cm->cx + cm->F * right / zc;
+  *sy = cm->cy - cm->F * up / zc;
+  *scale = cm->F / zc;
   return true;
 }
 
@@ -588,8 +775,8 @@ static void Sky_Setup(Sky *sk, bool outdoors, int width) {
 static uint32 Sky_Color(const Sky *sk, const Cam *cm, float sx, float sy, int px, int py) {
   if (!sk->outdoors)
     return 5u << 24;
-  float dx = sx - cm->cx, dy = sy - cm->cy;
-  float rx = dx, ry = -cm->D * cm->s + dy * cm->c, rz = -cm->D * cm->c - dy * cm->s;
+  float rx, ry, rz;
+  Cam_Dir(cm, sx, sy, &rx, &ry, &rz);
   float len = sqrtf(rx * rx + ry * ry + rz * rz);
   float e = rz / len;                       // sin(elevation): 0 horizon, 1 straight up
   if (e <= 0)
@@ -1060,6 +1247,7 @@ static void DrawTerrain(uint32 *out, int pitch_px, const Cam *cm, const Ground *
 
 typedef struct Group {
   int key;
+  float depth;         // of the feet from the camera, -1 = not drawn
   int x0, y0, x1, y1;
   bool far;            // drawn from the OAM table (pieces outside the SNES screen)
   int n_ents;
@@ -1120,7 +1308,10 @@ static void OamGroups(const bool *vis, const int *fx, const int *fy, const int *
 
 static int CompareGroups(const void *a, const void *b) {
   const Group *ga = (const Group *)a, *gb = (const Group *)b;
-  return ga->y1 - gb->y1;   // smaller y1 = farther away, drawn first
+  // farther away drawn first (with the camera turned, that is not the top)
+  if (ga->depth != gb->depth)
+    return ga->depth > gb->depth ? -1 : 1;
+  return ga->y1 - gb->y1;
 }
 
 // OAM entry: visible, frame position and size, the way the PPU places it
@@ -1339,8 +1530,12 @@ static int DrawSprites(uint32 *out, int pitch_px, const Cam *cm, Ppu *ppu) {
   if (n == 0)
     return 0;
   // sort far to near, remembering each group's id in g_group_map
-  for (int i = 0; i < n; i++)
-    groups[i].key = groups[i].key << 8 | i;
+  for (int i = 0; i < n; i++) {
+    Group *g = &groups[i];
+    g->key = g->key << 8 | i;
+    float sx, sy, sc;
+    g->depth = Cam_ToScreen(cm, (g->x0 + g->x1 + 1) * 0.5f, (float)(g->y1 + 1), &sx, &sy, &sc) ? cm->F / sc : -1.0f;
+  }
   qsort(groups, n, sizeof(Group), CompareGroups);
 
   for (int gi = 0; gi < n; gi++) {
@@ -1355,7 +1550,7 @@ static int DrawSprites(uint32 *out, int pitch_px, const Cam *cm, Ppu *ppu) {
       continue;
     }
     // far away: same fog as the ground, gone at the fog end
-    float depth = cm->D / sc;
+    float depth = cm->F / sc;
     if (dump)
       Hd3d_Log("  group key=%d far=%d box=(%d,%d)-(%d,%d) pieces=%d -> screen feet=(%.0f,%.0f) scale=%.2f%s",
                g->key >> 8, g->far, g->x0, g->y0, g->x1, g->y1, g->n_ents, sx, sy, sc,
@@ -1426,10 +1621,17 @@ void Hd3d_EndFrame(uint8 *pixels, int pitch, int width, int height) {
   for (int y = 0; y < height; y++)
     memcpy(g_floor + y * width, pixels + y * pitch, width * 4);
 
-  Cam cm;
-  Cam_Setup(&cm, width, height);
   Ground gr;
   Ground_Setup(&gr, g_zenv.ppu, width);
+  Cam cm;
+  if (g_view3d_cam == kHd3d_CamThird) {
+    // Link's feet in frame coordinates (his position is the top left of his
+    // 16x16 body)
+    float lx = (int16)(link_x_coord - gr.org_x) + 8.0f, ly = (int16)(link_y_coord - gr.org_y) + 20.0f;
+    Cam_SetupThird(&cm, width, height, lx, ly);
+  } else {
+    Cam_Setup(&cm, width, height);
+  }
   bool outdoors = main_module_index == 9 || (main_module_index == 14 && saved_module_for_menu == 9);
   Sky sk;
   Sky_Setup(&sk, outdoors, width);
@@ -1465,11 +1667,12 @@ void Hd3d_EndFrame(uint8 *pixels, int pitch, int width, int height) {
     g_stat_max_groups = groups;
   if (++g_stat_frames == 300) {
     double ms = g_stat_ticks * 1000.0 / SDL_GetPerformanceFrequency() / g_stat_frames;
-    Hd3d_Log("stats: %d frames, 3D compose %.3f ms/frame, sprite groups avg %.1f max %d, tilt %.1f, curve R=%.0f, "
+    Hd3d_Log("stats: %d frames, 3D compose %.3f ms/frame, sprite groups avg %.1f max %d, tilt %.1f, camera %s (yaw %.0f pitch %.0f), curve R=%.0f, "
              "past-screen px/frame %d (missing %d), source %s, far sprites avg %.1f (draw distance %s, %s), "
              "walls %s (wall tiles avg %d), "
              "frame %dx%d, module=%d area=0x%02x",
-             g_stat_frames, ms, (double)g_stat_groups / g_stat_frames, g_stat_max_groups, g_angle, cm.R,
+             g_stat_frames, ms, (double)g_stat_groups / g_stat_frames, g_stat_max_groups, g_angle,
+             kCamNames[g_view3d_cam], g_yaw * (180.0f / 3.14159265f), g_pitch3, cm.R,
              g_stat_outside / g_stat_frames, g_stat_missing / g_stat_frames, kSourceNames[gr.source],
              (double)g_stat_far_groups / g_stat_frames, kDistNames[g_view3d_dist],
              g_view3d_dist && !(HdWorld_Active() || player_is_indoors) ? "needs continuous world outdoors" : "ok",

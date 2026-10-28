@@ -6,6 +6,7 @@
 #include "player.h"
 #include "misc.h"
 #include "hd_fx.h"
+#include "hd_3d.h"
 
 static const int8 kPlayerOam_StairsOffsY[] = {
   0, -2, -3, 0, -2, -3, 0, 0, 0, 0, 0, 0, 0, -2, -3, 0,
@@ -782,7 +783,12 @@ void LinkOam_Main() {
   for (int i = 0; i < 128; i++)
     WORD(oam_buf[i].charnum) = 0xffff;
   g_link_oam_hidden = false;
+  // vista 3D in terza persona: Link si disegna rivolto come lo vede la
+  // telecamera (di spalle quando va avanti); la direzione vera torna subito
+  uint8 facing = link_direction_facing;
+  link_direction_facing = (uint8)Hd3d_ViewFacing(facing);
   LinkOam_MainInner();
+  link_direction_facing = facing;
   int rel = (int16)(link_y_coord - BG2VOFS_copy2);
   // 0xF0 e' una posizione vera se cade fra 16 pixel sopra e 32 sotto Link
   // (ma non quando il gioco nasconde Link: col mondo continuo Link a cavallo

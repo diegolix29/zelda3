@@ -113,6 +113,7 @@ static const char *const kSmoothCameraNames[4] = { "Spenta", "Leggera", "Media",
 static const char *const kView3dNames[kHd3d_NumLevels] = { "Spenta", "20\xc2\xb0", "35\xc2\xb0", "50\xc2\xb0", "65\xc2\xb0", "75\xc2\xb0" };
 static const char *const kView3dCurveNames[kHd3d_NumCurves] = { "Spenta", "Leggera", "Media", "Forte" };
 static const char *const kView3dDistNames[kHd3d_NumDists] = { "Schermo", "2x", "3x" };
+static const char *const kView3dCamNames[kHd3d_NumCams] = { "Classica", "Terza persona" };
 static const char *const kTextSpeedNames[3] = { "Originale", "Veloce con A o B", "Istantanea" };
 
 // ---------------------------------------------------------------------------
@@ -411,6 +412,9 @@ static const char *Tr(const char *it) {
     { "Curvatura del mondo 3D", "3D world curve" },
     { "Distanza di disegno 3D", "3D draw distance" },
     { "Muri 3D al chiuso", "3D indoor walls" },
+    { "Telecamera 3D", "3D camera" },
+    { "Classica", "Classic" },
+    { "Terza persona", "Third person" },
     { "Schermo", "Screen" },
     { "Schermo intero", "Fullscreen" },
     { "Mappa del mondo in HD", "HD world map" },
@@ -513,6 +517,7 @@ static void SaveSettings() {
   AddIni(v, &n, "[Graphics]", "View3DCurve", "%d", g_config.view3d_curve);
   AddIni(v, &n, "[Graphics]", "View3DDrawDistance", "%d", g_config.view3d_dist);
   AddIni(v, &n, "[Graphics]", "View3DWalls", "%d", g_config.view3d_walls);
+  AddIni(v, &n, "[Graphics]", "View3DCamera", "%d", g_config.view3d_cam);
   AddIni(v, &n, "[Graphics]", "EnhancedMode7", "%d", g_config.enhanced_mode7);
   AddIni(v, &n, "[Graphics]", "HdText", "%d", g_config.hd_text);
   AddIni(v, &n, "[Graphics]", "HighRefreshInterpolation", "%d", g_config.high_refresh);
@@ -645,6 +650,7 @@ static void BuildItems() {
     AddItem(21, "Curvatura del mondo 3D", kView3dCurveNames[g_view3d_curve % kHd3d_NumCurves]);
     AddItem(22, "Distanza di disegno 3D", kView3dDistNames[g_view3d_dist % kHd3d_NumDists]);
     AddItem(23, "Muri 3D al chiuso", YesNo(g_view3d_walls != 0));
+    AddItem(24, "Telecamera 3D", kView3dCamNames[g_view3d_cam % kHd3d_NumCams]);
     break;
   case kPage_Game:
     AddItem(100, "Velocit\xc3\xa0 del testo", kTextSpeedNames[g_config.text_speed % 3]);
@@ -737,6 +743,8 @@ static void Activate(int id, int dir) {
         Hd3d_SetDrawDistance(g_view3d_dist + (dir < 0 ? kHd3d_NumDists - 1 : 1), "options menu");
     } else if (id == 23) {
         Hd3d_SetWalls(!g_view3d_walls, "options menu");
+    } else if (id == 24) {
+        Hd3d_SetCamera(g_view3d_cam + 1, "options menu");
     } else if (id == 15 && g_zenv.ppu->extraLeftRight == 0) {
       ShowMessage("Richiede lo schermo 16:9 o 16:10");
     } else if (id >= 7 && id <= 17) {

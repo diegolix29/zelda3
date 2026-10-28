@@ -9,9 +9,26 @@ enum {
   kHd3d_NumLevels = 6,   // tilt: 0 = off, then 20, 35, 50, 65, 75 degrees
   kHd3d_NumCurves = 4,   // world curve: off, light, medium, strong
   kHd3d_NumDists = 3,    // sprite draw distance: screen, 2x, 3x
+  kHd3d_NumCams = 2,     // camera: classic (fixed, looking north), third person
 };
+enum { kHd3d_CamClassic, kHd3d_CamThird };
 
-extern int g_view3d, g_view3d_curve, g_view3d_dist, g_view3d_walls;
+extern int g_view3d, g_view3d_curve, g_view3d_dist, g_view3d_walls, g_view3d_cam;
+
+// Camera mode. Third person: behind Link, the right stick turns it around him
+// (X) and raises/lowers it (Y); the d-pad and left stick then walk relative
+// to the camera (Hd3d_RotateInput), and Hd3d_Recenter puts it back behind him
+void Hd3d_SetCamera(int cam, const char *why);
+void Hd3d_ToggleCamera(void);
+const char *Hd3d_CameraName(int cam);
+bool Hd3d_ThirdPerson(void);   // third person and the 3D view was drawn last frame
+void Hd3d_RightStick(int axis_y, int value);
+void Hd3d_Recenter(void);
+// Joypad bits (up 0x10, down 0x20, left 0x40, right 0x80) turned by the camera
+int Hd3d_RotateInput(int inputs);
+// Link's facing (0 up, 2 down, 4 left, 6 right) as the camera sees it, for
+// drawing him: in third person walking away from the camera shows his back
+int Hd3d_ViewFacing(int facing);
 
 // Indoor walls raised in 3D (0 = flat, 1 = on)
 void Hd3d_SetWalls(int on, const char *why);
