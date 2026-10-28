@@ -1503,8 +1503,48 @@ static float FogNoise(float x, float y, uint32 salt) {
   return a + (b - a) * fx + (c - a + (a - b - c + d) * fx) * fy;
 }
 
+// Parametri della nebbia dell'ultimo fotogramma (per la vista 3D, che la
+// calcola anche oltre lo schermo e sugli sprite: HdFx_FogProjected)
+static bool g_fog_ready;
+static int g_fog_gw, g_fog_gh;
+static float g_fog_cam_x, g_fog_cam_y, g_fog_tt, g_fog_lx, g_fog_ly;
+static float g_fog_cmid[3], g_fog_cup[3], g_fog_cdown[3];
+
+// densita' della nebbia nel punto (sx, sy) dello schermo (anche fuori)
+static float FogDensity(float sx, float sy) {
+  float cam_x = g_fog_cam_x, cam_y = g_fog_cam_y, t = g_fog_tt;
+  // banchi grandi a terra, legati al mondo, scorrono lenti verso sud-est
+  float wx = cam_x + sx - t * 0.12f, wy = cam_y + sy - t * 0.05f;
+  // tre ottave: nuvole grandi con il bordo a sbuffi
+  float n1 = FogNoise(wx / 112.0f, wy / 112.0f, 0x51) * 0.55f + FogNoise(wx / 48.0f, wy / 48.0f, 0x52) * 0.30f +
+             FogNoise(wx / 20.0f, wy / 20.0f, 0x55) * 0.15f;
+  // sbuffi vicini alla telecamera: si spostano piu' del terreno
+  float px = cam_x * 1.35f + sx + t * 0.22f, py = cam_y * 1.35f + sy - t * 0.09f;
+  float n2 = FogNoise(px / 40.0f, py / 40.0f, 0x53) * 0.7f + FogNoise(px / 18.0f, py / 18.0f, 0x54) * 0.3f;
+  // nuvole piene (il chiaro dell'originale, al centro anche un po' di piu')
+  float d = 1.15f * Smooth01(0.54f, 0.68f, n1) + 0.50f * Smooth01(0.62f, 0.80f, n2);
+  // piu' rada attorno a Link
+  float dx = sx - g_fog_lx, dy = (sy - g_fog_ly) * 1.25f;
+  d *= 0.45f + 0.55f * Smooth01(18.0f, 84.0f, sqrtf(dx * dx + dy * dy));
+  if (d > 1.15f) d = 1.15f;
+  // chiazze scure a terra, fra una nuvola e l'altra (valori negativi)
+  float n3 = FogNoise(wx / 72.0f, wy / 72.0f, 0x56) * 0.7f + FogNoise(wx / 28.0f, wy / 28.0f, 0x57) * 0.3f;
+  float e = Smooth01(0.58f, 0.70f, n3) * (1.0f - (d < 1.0f ? d : 1.0f));
+  return d - e;
+}
+
+// come la PPU: (terreno + nebbia) / 2
+static inline uint32 FogBlend(uint32 v, float a) {
+  const float *dir = a < 0 ? g_fog_cdown : g_fog_cup;  // con a < 0: medio - (medio - scuro) * |a|
+  int r = ((int)(v >> 16 & 255) + (int)(g_fog_cmid[0] + dir[0] * a)) >> 1;
+  int g = ((int)(v >> 8 & 255) + (int)(g_fog_cmid[1] + dir[1] * a)) >> 1;
+  int b = ((int)(v & 255) + (int)(g_fog_cmid[2] + dir[2] * a)) >> 1;
+  return (v & 0xff000000) | ClampByte(r) << 16 | ClampByte(g) << 8 | ClampByte(b);
+}
+
 void HdFx_Fog(uint8 *pixels, int pitch, int width, int height, int bias_x, int bias_y) {
   Ppu *ppu = g_zenv.ppu;
+  g_fog_ready = false;
   int bri = ppu->forcedBlank ? 0 : ppu->brightness;
   if (!g_fog_on || bri == 0)
     return;
@@ -1522,29 +1562,10 @@ void HdFx_Fog(uint8 *pixels, int pitch, int width, int height, int bias_x, int b
   int gw = width / kFogCell + 2, gh = height / kFogCell + 2;
   if (gw > kFogMaxW) gw = kFogMaxW;
   if (gh > kFogMaxH) gh = kFogMaxH;
-  for (int gy = 0; gy < gh; gy++) {
-    for (int gx = 0; gx < gw; gx++) {
-      float sx = (float)(gx * kFogCell), sy = (float)(gy * kFogCell);
-      // banchi grandi a terra, legati al mondo, scorrono lenti verso sud-est
-      float wx = cam_x + sx - t * 0.12f, wy = cam_y + sy - t * 0.05f;
-      // tre ottave: nuvole grandi con il bordo a sbuffi
-      float n1 = FogNoise(wx / 112.0f, wy / 112.0f, 0x51) * 0.55f + FogNoise(wx / 48.0f, wy / 48.0f, 0x52) * 0.30f +
-                 FogNoise(wx / 20.0f, wy / 20.0f, 0x55) * 0.15f;
-      // sbuffi vicini alla telecamera: si spostano piu' del terreno
-      float px = cam_x * 1.35f + sx + t * 0.22f, py = cam_y * 1.35f + sy - t * 0.09f;
-      float n2 = FogNoise(px / 40.0f, py / 40.0f, 0x53) * 0.7f + FogNoise(px / 18.0f, py / 18.0f, 0x54) * 0.3f;
-      // nuvole piene (il chiaro dell'originale, al centro anche un po' di piu')
-      float d = 1.15f * Smooth01(0.54f, 0.68f, n1) + 0.50f * Smooth01(0.62f, 0.80f, n2);
-      // piu' rada attorno a Link
-      float dx = sx - lx, dy = (sy - ly) * 1.25f;
-      d *= 0.45f + 0.55f * Smooth01(18.0f, 84.0f, sqrtf(dx * dx + dy * dy));
-      if (d > 1.15f) d = 1.15f;
-      // chiazze scure a terra, fra una nuvola e l'altra (valori negativi)
-      float n3 = FogNoise(wx / 72.0f, wy / 72.0f, 0x56) * 0.7f + FogNoise(wx / 28.0f, wy / 28.0f, 0x57) * 0.3f;
-      float e = Smooth01(0.58f, 0.70f, n3) * (1.0f - (d < 1.0f ? d : 1.0f));
-      g_fog_alpha[gy][gx] = d - e;
-    }
-  }
+  g_fog_cam_x = cam_x, g_fog_cam_y = cam_y, g_fog_tt = t, g_fog_lx = lx, g_fog_ly = ly;
+  for (int gy = 0; gy < gh; gy++)
+    for (int gx = 0; gx < gw; gx++)
+      g_fog_alpha[gy][gx] = FogDensity((float)(gx * kFogCell), (float)(gy * kFogCell));
   // colori della nebbia a 8 bit, con la luminosita' del gioco: densita' 0 =
   // medio, verso 1 il chiaro, verso -1 lo scuro
   float mid[3], up[3], down[3];
@@ -1552,7 +1573,9 @@ void HdFx_Fog(uint8 *pixels, int pitch, int width, int height, int bias_x, int b
     mid[c] = g_fog_mid[c] * 8.25f * bri / 15;
     up[c] = g_fog_light[c] * 8.25f * bri / 15 - mid[c];
     down[c] = mid[c] - g_fog_shade[c] * 8.25f * bri / 15;
+    g_fog_cmid[c] = mid[c], g_fog_cup[c] = up[c], g_fog_cdown[c] = down[c];
   }
+  g_fog_ready = true, g_fog_gw = gw, g_fog_gh = gh;
   for (int y = 0; y < height; y++) {
     int gy = y / kFogCell;
     if (gy + 1 >= gh)
@@ -1568,14 +1591,34 @@ void HdFx_Fog(uint8 *pixels, int pitch, int width, int height, int bias_x, int b
         continue;
       float fx = (float)(x - gx * kFogCell) * (1.0f / kFogCell);
       float top = a0[gx] + (a0[gx + 1] - a0[gx]) * fx, bot = a1[gx] + (a1[gx + 1] - a1[gx]) * fx;
-      float a = top + (bot - top) * fy;
-      // come la PPU: (terreno + nebbia) / 2
-      uint32 v = row[x];
-      const float *dir = a < 0 ? down : up;  // con a < 0: medio - (medio - scuro) * |a|
-      int r = ((int)(v >> 16 & 255) + (int)(mid[0] + dir[0] * a)) >> 1;
-      int g = ((int)(v >> 8 & 255) + (int)(mid[1] + dir[1] * a)) >> 1;
-      int b = ((int)(v & 255) + (int)(mid[2] + dir[2] * a)) >> 1;
-      row[x] = (v & 0xff000000) | ClampByte(r) << 16 | ClampByte(g) << 8 | ClampByte(b);
+      row[x] = FogBlend(row[x], top + (bot - top) * fy);
+    }
+  }
+}
+
+void HdFx_FogProjected(uint8 *pixels, int pitch, int width, int height, const uint32 *uv, const uint8 *kind) {
+  if (!g_fog_ready)
+    return;
+  int gw = g_fog_gw, gh = g_fog_gh;
+  for (int y = 0; y < height; y++) {
+    uint32 *row = (uint32 *)(pixels + y * pitch);
+    for (int x = 0; x < width; x++) {
+      int i = y * width + x;
+      if (kind[i] < 2 || IsHud(row[x]))
+        continue;   // cielo, o terreno dello schermo che ce l'ha gia'
+      int u = (int16)(uv[i] & 0xffff), v = (int16)(uv[i] >> 16);
+      int gx = u / kFogCell, gy = v / kFogCell;
+      float a;
+      if (u >= 0 && v >= 0 && gx + 1 < gw && gy + 1 < gh) {
+        // nello schermo: la stessa griglia del terreno
+        float fx = (float)(u - gx * kFogCell) * (1.0f / kFogCell), fy = (float)(v - gy * kFogCell) * (1.0f / kFogCell);
+        const float *a0 = g_fog_alpha[gy], *a1 = g_fog_alpha[gy + 1];
+        float top = a0[gx] + (a0[gx + 1] - a0[gx]) * fx, bot = a1[gx] + (a1[gx + 1] - a1[gx]) * fx;
+        a = top + (bot - top) * fy;
+      } else {
+        a = FogDensity((float)u, (float)v);
+      }
+      row[x] = FogBlend(row[x], a);
     }
   }
 }

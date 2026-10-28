@@ -670,8 +670,19 @@ static void CollectRevivalFairy(int width, int bias_x, int bias_y) {
   g_fairy_m[g_num_fairies++] = 0.82f + 0.12f * sinf(tf * 1.6f) + 0.06f * sinf(tf * 4.1f);
 }
 
+// Luce dell'ultimo ApplyLights, per la vista 3D (HdLight_Projected): il
+// terreno oltre lo schermo e gli sprite la prendono dopo la proiezione
+static struct {
+  bool ready;
+  int width, height, sub;
+  float extra, light_scale;
+  int box_x0, box_y0, box_x1, box_y1;
+  int n_items, item_x[4], item_y[4], item_w[4], item_h[4];
+} g_lp;
+
 static void ApplyLights(uint8 *pixels, int pitch, int width, int height, int bias_x, int bias_y) {
   int mod;
+  g_lp.ready = false;
   if (g_dynamic_light)
     CollectRevivalFairy(width, bias_x, bias_y);
   g_hd_num_fire = 0;
@@ -856,6 +867,12 @@ static void ApplyLights(uint8 *pixels, int pitch, int width, int height, int bia
       n_items++;
     }
   }
+  g_lp.ready = true, g_lp.width = width, g_lp.height = height, g_lp.sub = sub;
+  g_lp.extra = extra, g_lp.light_scale = light_scale;
+  g_lp.box_x0 = box_x0, g_lp.box_y0 = box_y0, g_lp.box_x1 = box_x1, g_lp.box_y1 = box_y1;
+  g_lp.n_items = n_items;
+  for (int i = 0; i < n_items; i++)
+    g_lp.item_x[i] = item_x[i], g_lp.item_y[i] = item_y[i], g_lp.item_w[i] = item_w[i], g_lp.item_h[i] = item_h[i];
   // Applicazione: l'HUD e i testi (layer 2 nel byte alto) restano intatti
   for (int y = 0; y < height; y++) {
     uint32 *row = (uint32 *)(pixels + y * pitch);
@@ -881,6 +898,62 @@ static void ApplyLights(uint8 *pixels, int pitch, int width, int height, int bia
       if (r > 255) r = 255;
       if (g > 255) g = 255;
       if (b > 255) b = 255;
+      row[x] = (c & 0xff000000) | r << 16 | g << 8 | b;
+    }
+  }
+}
+
+void HdLight_Projected(uint8 *pixels, int pitch, int width, int height, const uint32 *uv, const uint8 *kind) {
+  if (!g_lp.ready || width != g_lp.width || height != g_lp.height)
+    return;
+  float extra = g_lp.extra;
+  int sub = g_lp.sub;
+  // nelle stanze buie la luce resta nella stanza: oltre il riquadro di
+  // ApplyLights (che arriva al bordo dello schermo) solo la luce ambiente
+  bool boxed = g_lp.box_x0 > 0 || g_lp.box_y0 > 0 || g_lp.box_x1 < width - 1 || g_lp.box_y1 < height - 1;
+  for (int y = 0; y < height; y++) {
+    uint32 *row = (uint32 *)(pixels + y * pitch);
+    for (int x = 0; x < width; x++) {
+      int i = y * width + x;
+      uint32 c = row[x];
+      if (kind[i] < 2 || (c >> 24) == 2)
+        continue;   // cielo, o terreno dello schermo che ce l'ha gia'
+      int u = (int16)(uv[i] & 0xffff), v = (int16)(uv[i] >> 16);
+      if (kind[i] == 3 && g_lp.n_items) {
+        bool held = false;
+        for (int k = 0; k < g_lp.n_items; k++)
+          held |= u >= g_lp.item_x[k] && u < g_lp.item_x[k] + g_lp.item_w[k] && v >= g_lp.item_y[k] &&
+                  v < g_lp.item_y[k] + g_lp.item_h[k];
+        if (held)
+          continue;
+      }
+      float f[3];
+      if (u >= 0 && u < width && v >= 0 && v < height) {
+        const float *g = g_factor + (v * width + u) * 3;
+        f[0] = g[0], f[1] = g[1], f[2] = g[2];
+      } else {
+        f[0] = f[1] = f[2] = g_ambient + extra;
+        bool in_box = !boxed || (u >= g_lp.box_x0 && u <= g_lp.box_x1 && v >= g_lp.box_y0 && v <= g_lp.box_y1);
+        for (int li = 0; in_box && li < g_num_lights; li++) {
+          const Light *l = &g_lights[li];
+          float dx = u - l->x, dy = v - l->y;
+          if (fabsf(dx) >= l->radius || fabsf(dy) >= l->radius)
+            continue;
+          float d2 = (dx * dx + dy * dy) / (l->radius * l->radius);
+          if (d2 >= 1.0f)
+            continue;
+          float a = (1.0f - d2);
+          a = a * a * g_lp.light_scale;
+          f[0] += l->r * a, f[1] += l->g * a, f[2] += l->b * a;
+        }
+      }
+      float fr = f[0] < 1.35f + extra ? f[0] : 1.35f + extra;
+      float fg = f[1] < 1.30f + extra ? f[1] : 1.30f + extra;
+      float fb = f[2] < 1.25f + extra ? f[2] : 1.25f + extra;
+      int r = (int)(((c >> 16) & 0xff) * fr) - sub, g = (int)(((c >> 8) & 0xff) * fg) - sub, b = (int)((c & 0xff) * fb) - sub;
+      r = r < 0 ? 0 : r > 255 ? 255 : r;
+      g = g < 0 ? 0 : g > 255 ? 255 : g;
+      b = b < 0 ? 0 : b > 255 ? 255 : b;
       row[x] = (c & 0xff000000) | r << 16 | g << 8 | b;
     }
   }

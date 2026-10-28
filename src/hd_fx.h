@@ -66,6 +66,9 @@ void HdFx_SuperBombBeforeRender(Ppu *ppu);
 void HdFx_FogBeforeRender(Ppu *ppu);
 void HdFx_FogAfterRender(Ppu *ppu);
 void HdFx_Fog(uint8 *pixels, int pitch, int width, int height, int bias_x, int bias_y);
+// Vista 3D: la nebbia dell'ultimo HdFx_Fog sui pixel che non l'hanno avuta
+// (kind 2 = terreno oltre lo schermo, 3 = sprite), nel punto uv dello schermo 2D
+void HdFx_FogProjected(uint8 *pixels, int pitch, int width, int height, const uint32 *uv, const uint8 *kind);
 // In questo frame la nebbia del gioco e' sostituita (hd_world.c non la somma)
 bool HdFx_FogReplacesOverlay(void);
 // Nebbia del bosco sullo schermo (anche quella del gioco): lo shader Four

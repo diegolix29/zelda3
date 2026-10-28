@@ -30,6 +30,7 @@
 #include "hd_3d.h"
 #include "hd_world.h"
 #include "hd_fx.h"
+#include "hd_light.h"
 #include "zelda_rtl.h"
 #include "snes/ppu.h"
 #include "variables.h"
@@ -80,6 +81,10 @@ static uint8 *g_group_map;       // sprite group + 1 per pixel, 0 = none
 static float *g_depth;           // camera depth per screen pixel (indoor walls)
 static uint32 *g_uv;             // 2D frame pixel shown at each screen pixel (weather layer), kUvNone = sky
 #define kUvNone 0x80008000u
+// what each screen pixel shows, for the HD effects that ran on the 2D frame
+// (light, forest fog): those only reached the ground inside the SNES screen
+enum { kKind_Sky, kKind_Frame, kKind_Outside, kKind_Sprite };
+static uint8 *g_kind;
 #define PackUv(u, v) ((uint32)(uint16)(int16)(u) | (uint32)(uint16)(int16)(v) << 16)
 
 // stats for the log
@@ -229,14 +234,15 @@ static bool IsGameplayModule(void) {
 static bool EnsureBuffers(int w, int h) {
   if (w == g_w && h == g_h && g_side)
     return true;
-  free(g_side), free(g_owner), free(g_floor), free(g_group_map), free(g_depth), free(g_uv);
+  free(g_side), free(g_owner), free(g_floor), free(g_group_map), free(g_depth), free(g_uv), free(g_kind);
   g_side = (uint32 *)malloc(sizeof(uint32) * w * h);
   g_owner = (uint8 *)malloc(w * h);
   g_floor = (uint32 *)malloc(sizeof(uint32) * w * h);
   g_group_map = (uint8 *)malloc(w * h);
   g_depth = (float *)malloc(sizeof(float) * w * h);
   g_uv = (uint32 *)malloc(sizeof(uint32) * w * h);
-  if (!g_side || !g_owner || !g_floor || !g_group_map || !g_depth || !g_uv) {
+  g_kind = (uint8 *)malloc(w * h);
+  if (!g_side || !g_owner || !g_floor || !g_group_map || !g_depth || !g_uv || !g_kind) {
     Hd3d_Log("ERROR: out of memory for %dx%d buffers", w, h);
     g_w = g_h = 0;
     return false;
@@ -615,11 +621,12 @@ static void DrawGround(uint32 *out, int pitch_px, const Cam *cm, const Ground *g
   for (int y = 0; y < h; y++) {
     uint32 *dst = out + y * pitch_px;
     uint32 *uv = g_uv + y * w;
+    uint8 *kind = g_kind + y * w;
     for (int x = 0; x < w; x++) {
       float u, v, depth;
       if (!Cam_Ray(cm, x + 0.5f, y + 0.5f, &u, &v, &depth) || depth >= kFogEnd) {
         dst[x] = Sky_Color(sk, cm, x + 0.5f, y + 0.5f, x, y);
-        uv[x] = kUvNone;
+        uv[x] = kUvNone, kind[x] = kKind_Sky;
         continue;
       }
       int ui = (int)floorf(u), vi = (int)floorf(v);
@@ -627,13 +634,16 @@ static void DrawGround(uint32 *out, int pitch_px, const Cam *cm, const Ground *g
       uint32 px;
       if (ui >= 0 && ui < w && vi >= 0 && vi < h) {
         px = g_floor[vi * w + ui];
+        kind[x] = kKind_Frame;
       } else {
         g_stat_outside++;
         if (!Ground_Sample(gr, ui, vi, &px)) {
           g_stat_missing++;
           dst[x] = fog;
+          kind[x] = kKind_Sky;
           continue;
         }
+        kind[x] = kKind_Outside;
       }
       if (depth > kFogStart) {
         int f = (int)((depth - kFogStart) * (256.0f / (kFogEnd - kFogStart)));
@@ -1001,6 +1011,7 @@ static void DrawTerrain(uint32 *out, int pitch_px, const Cam *cm, const Ground *
         for (int r = 0; r < ybuf; r++) {
           out[r * pitch_px + x] = Sky_Color(sk, cm, x + 0.5f, r + 0.5f, x, r);
           g_depth[r * w + x] = 1e9f;
+          g_uv[r * w + x] = kUvNone, g_kind[r * w + x] = kKind_Sky;
         }
         ybuf = 0;
         break;
@@ -1029,13 +1040,17 @@ static void DrawTerrain(uint32 *out, int pitch_px, const Cam *cm, const Ground *
           z = z < 0 ? 0 : z > hgt ? (float)hgt : z;
         }
         uint32 px;
+        int su = (int)floorf(u), sv = (int)floorf(v - z);
+        uint8 k = su >= 0 && su < w && sv >= 0 && sv < h ? kKind_Frame : kKind_Outside;
         if (!SampleSurface(gr, u, v - z, &px)) {
           g_stat_missing++;
           px = fog;
+          k = kKind_Sky;
         } else if (f) {
           px = (px & 0xff000000) | Lerp(px, fog, f);
         }
         out[r * pitch_px + x] = px;
+        g_uv[r * w + x] = PackUv(su, sv), g_kind[r * w + x] = k;
         g_depth[r * w + x] = depth;
       }
       ybuf = top;
@@ -1358,7 +1373,7 @@ static int DrawSprites(uint32 *out, int pitch_px, const Cam *cm, Ppu *ppu) {
           int vx = (int)floorf(ax + (x + 0.5f - sx) * inv);
           if (vx >= g->x0 && vx <= g->x1 && gm[vx] == id &&
               !(g_depth_valid && g_depth[y * w + x] < zlimit))
-            dst[x] = src[vx], g_uv[y * w + x] = PackUv(vx, vy);
+            dst[x] = src[vx], g_uv[y * w + x] = PackUv(vx, vy), g_kind[y * w + x] = kKind_Sprite;
         }
       } else {
         for (int x = dx0; x < dx1; x++) {
@@ -1371,7 +1386,7 @@ static int DrawSprites(uint32 *out, int pitch_px, const Cam *cm, Ppu *ppu) {
             if ((unsigned)lx < (unsigned)esz[i] && (unsigned)ly < (unsigned)esz[i] &&
                 OamPixel(ppu, ecf[i], lx, ly, esz[i], &c)) {
               if (!(g_depth_valid && g_depth[y * w + x] < zlimit))
-                dst[x] = c, g_uv[y * w + x] = PackUv(vx, vy);
+                dst[x] = c, g_uv[y * w + x] = PackUv(vx, vy), g_kind[y * w + x] = kKind_Sprite;
               break;
             }
           }
@@ -1411,8 +1426,6 @@ void Hd3d_EndFrame(uint8 *pixels, int pitch, int width, int height) {
   uint32 *out = (uint32 *)pixels;
   bool walls = g_view3d_walls && player_is_indoors;
   if (walls) {
-    for (int i = 0; i < width * height; i++)
-      g_uv[i] = kUvNone;   // the weather layer is outdoors only
     BuildHeightMap();
     DrawTerrain(out, pitch_px, &cm, &gr, &sk);
   } else {
@@ -1420,6 +1433,11 @@ void Hd3d_EndFrame(uint8 *pixels, int pitch, int width, int height) {
   }
   g_depth_valid = walls;
   int groups = DrawSprites(out, pitch_px, &cm, g_zenv.ppu);
+  // the HD light and forest fog ran on the 2D frame: the ground past it and
+  // the sprites (drawn from the side buffer) get them now, at the 2D point
+  // they show
+  HdLight_Projected(pixels, pitch, width, height, g_uv, g_kind);
+  HdFx_FogProjected(pixels, pitch, width, height, g_uv, g_kind);
   if (g_weather) {
     // the game's weather layer, laid on the tilted ground and on the sprites
     // (at the 2D frame pixel each one shows, so it follows the perspective).

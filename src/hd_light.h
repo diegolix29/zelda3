@@ -13,6 +13,9 @@ void HdLight_BeforeRender(Ppu *ppu);
 void HdLight_AfterRender(Ppu *ppu);
 // Applica luci e buio all'immagine appena disegnata (pixel 0xLLRRGGBB, LL = layer)
 void HdLight_Apply(uint8 *pixels, int pitch, int width, int height, int bias_x, int bias_y);
+// Vista 3D: la luce dell'ultimo HdLight_Apply sui pixel che non l'hanno avuta
+// (kind 2 = terreno oltre lo schermo, 3 = sprite), nel punto uv dello schermo 2D
+void HdLight_Projected(uint8 *pixels, int pitch, int width, int height, const uint32 *uv, const uint8 *kind);
 // Alone delle fate, dopo l'acqua HD
 void HdLight_FairyGlow(uint8 *pixels, int pitch, int width, int height);
 
