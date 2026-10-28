@@ -641,10 +641,10 @@ static void BuildItems() {
     AddItem(17, "Distingui vortici da Zora", YesNo(g_config.fx_whirlpool));
     AddItem(18, "Aspetto dei disegni ufficiali", YesNo(g_config.official_artwork));
     AddItem(19, "Link biondo", g_config.link_graphics ? "Link personalizzato" : YesNo(g_config.blond_link));
-    AddItem(18, "Vista 3D (inclinazione)", kView3dNames[g_view3d % kHd3d_NumLevels]);
-    AddItem(19, "Curvatura del mondo 3D", kView3dCurveNames[g_view3d_curve % kHd3d_NumCurves]);
-    AddItem(20, "Distanza di disegno 3D", kView3dDistNames[g_view3d_dist % kHd3d_NumDists]);
-    AddItem(21, "Muri 3D al chiuso", YesNo(g_view3d_walls != 0));
+    AddItem(20, "Vista 3D (inclinazione)", kView3dNames[g_view3d % kHd3d_NumLevels]);
+    AddItem(21, "Curvatura del mondo 3D", kView3dCurveNames[g_view3d_curve % kHd3d_NumCurves]);
+    AddItem(22, "Distanza di disegno 3D", kView3dDistNames[g_view3d_dist % kHd3d_NumDists]);
+    AddItem(23, "Muri 3D al chiuso", YesNo(g_view3d_walls != 0));
     break;
   case kPage_Game:
     AddItem(100, "Velocit\xc3\xa0 del testo", kTextSpeedNames[g_config.text_speed % 3]);
@@ -735,7 +735,7 @@ static void Activate(int id, int dir) {
         Hd3d_SetCurve(g_view3d_curve + (dir < 0 ? kHd3d_NumCurves - 1 : 1), "options menu");
     } else if (id == 22) {
         Hd3d_SetDrawDistance(g_view3d_dist + (dir < 0 ? kHd3d_NumDists - 1 : 1), "options menu");
-    } else if (id == 21) {
+    } else if (id == 23) {
         Hd3d_SetWalls(!g_view3d_walls, "options menu");
     } else if (id == 15 && g_zenv.ppu->extraLeftRight == 0) {
       ShowMessage("Richiede lo schermo 16:9 o 16:10");
