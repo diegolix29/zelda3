@@ -39,9 +39,9 @@ Everything is optional and can be turned on or off from the new in-game options 
 - Blurred game behind the inventory, dialogues and menus, soft shadows under characters and enemies, a soft circle transition, on-screen button hints in the inventory (once the menu has finished sliding) and on the maps, and an autosave icon.
 - **Four Swords Adventures look** (`shaders/foursword`): crisp pixels, a diagonal brush texture anchored to the world (not on water), soft drop shadows, glow on bright areas and cartoon cloud shadows of three different shapes drifting over sunny outdoor areas. HUD and characters stay untouched.
 
-<img width="500" height="281" alt="1" src="https://github.com/user-attachments/assets/57f92bd8-ecea-4552-8463-49ebad60474d" />
-<img width="500" height="281" alt="2" src="https://github.com/user-attachments/assets/648afd26-692d-482a-9c59-6dac186eea85" />
-<img width="500" height="281" alt="3" src="https://github.com/user-attachments/assets/0c60e144-1db2-4f56-be3f-a57565a06f60" />
+<img width="500" height="281" alt="3" src="https://github.com/user-attachments/assets/5ca23c38-fb94-439a-98fe-52fc64f99db5" />
+<img width="500" height="281" alt="4" src="https://github.com/user-attachments/assets/42f82c58-6f48-4f21-b400-a87536fc1a17" />
+<img width="500" height="281" alt="5" src="https://github.com/user-attachments/assets/fee65366-8e6a-4192-9418-14593d34f422" />
 
 **Language**
 - Italian: the dialogue font gains accented letters; the translation itself lives in a separate repository, [zelda3-italiano](https://github.com/ghost19880/zelda3-italiano), and is downloaded by the launcher.
