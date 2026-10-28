@@ -2,6 +2,7 @@
 #include "sprite.h"
 #include "hd_world.h"
 #include "hd_burn.h"
+#include "hd_3d.h"
 #include "tagalong.h"
 #include "ancilla.h"
 #include "overworld.h"
@@ -4816,7 +4817,17 @@ void Sprite_SpawnProbeAlways(int k, uint8 r15) {  // 85c612
   sprite_defl_bits[j] = 2;
 }
 
-void Guard_HandleAllAnimation(int k) {  // 85c680
+// Vista 3D in terza persona: il fotogramma di camminata (kSoldier_Gfx2,
+// 4 passi per direzione) nella direzione vista dalla telecamera. Gli altri
+// fotogrammi restano come sono
+static int Guard_ViewGfx(int g, int view_dir) {
+  for (int i = 0; i < 16; i++)
+    if (kSoldier_Gfx2[i] == g)
+      return kSoldier_Gfx2[view_dir * 4 + (i & 3)];
+  return g;
+}
+
+static void Guard_HandleAllAnimationInner(int k) {
   PrepOamCoordsRet poc;
   if (Sprite_PrepOamCoordOrDoubleRet(k, &poc))
     return;
@@ -4825,6 +4836,18 @@ void Guard_HandleAllAnimation(int k) {  // 85c680
   Guard_AnimateWeapon(k, &poc);
   if (sprite_flags3[k] & 0x10)
     SpriteDraw_Shadow_custom(k, &poc, kSoldier_DrawShadow[sprite_D[k]]);
+}
+
+void Guard_HandleAllAnimation(int k) {  // 85c680
+  // vista 3D in terza persona: testa, corpo e arma si disegnano rivolti come
+  // li vede la telecamera; le direzioni vere tornano subito (le usa la logica)
+  uint8 d = sprite_D[k], hd = sprite_head_dir[k], gfx = sprite_graphics[k];
+  int vd = Hd3d_ViewDir(d & 3);
+  sprite_D[k] = (uint8)vd;
+  sprite_head_dir[k] = (uint8)Hd3d_ViewDir(hd & 3);
+  sprite_graphics[k] = (uint8)Guard_ViewGfx(gfx, vd);
+  Guard_HandleAllAnimationInner(k);
+  sprite_D[k] = d, sprite_head_dir[k] = hd, sprite_graphics[k] = gfx;
 }
 
 void Guard_AnimateHead(int k, int oam_offs, const PrepOamCoordsRet *poc) {  // 85c6de

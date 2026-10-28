@@ -1,2 +1,2 @@
 [   0.000] 3D view init: View3D=5 (75 deg), View3DCurve=1 (Light), View3DDrawDistance=1 (2x), View3DWalls=0, View3DCamera=1 (Third person), NewRenderer=1, OutputMethod=2, ExtendedAspectRatio=0, ContinuousWorld=1, shader='shaders/foursword/foursword.glslp'
-[   0.473] not gameplay (module=0 sub=1 saved=0 mode=1 tilt=75.0)
+[   5.651] not gameplay (module=0 sub=1 saved=0 mode=1 tilt=75.0)

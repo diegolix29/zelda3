@@ -317,6 +317,14 @@ int Hd3d_ViewFacing(int facing) {
   return kQuarterToFacing[(int)floorf(rel * (2.0f / 3.14159265f) + 0.5f) & 3];
 }
 
+int Hd3d_ViewDir(int dir) {
+  // sprite directions -> Link's facing and back
+  static const uint8 kDirToFacing[4] = { 6, 4, 2, 0 };
+  int f = Hd3d_ViewFacing(kDirToFacing[dir & 3]);
+  static const uint8 kFacingToDir[4] = { 3, 2, 1, 0 };   // up, down, left, right
+  return kFacingToDir[(f >> 1) & 3];
+}
+
 int Hd3d_RotateInput(int inputs) {
   // only while walking around: menus and the map keep the plain d-pad
   if (!Hd3d_ThirdPerson() || !IsWalkingModule(main_module_index))
@@ -1303,6 +1311,7 @@ static void DrawTerrain(uint32 *out, int pitch_px, const Cam *cm, const Ground *
 typedef struct Group {
   int key;
   float depth;         // of the feet from the camera, -1 = not drawn
+  float ax, ay;        // feet: where the cutout stands on the ground (GroupAnchor)
   int x0, y0, x1, y1;
   bool far;            // drawn from the OAM table (pieces outside the SNES screen)
   int n_ents;
@@ -1359,6 +1368,33 @@ static void OamGroups(const bool *vis, const int *fx, const int *fy, const int *
     else
       g_key_of[i] = 32 + UfFind(parent, i);          // touching unowned pieces
   }
+}
+
+// Where a group stands. The bottom of its pixel box moved whenever a weapon
+// or an attack pose stuck out below the body (a guard turning to Link and
+// thrusting its sword down jumped toward the camera and back), so Link and
+// each enemy slot stand on their game position instead: 16 pixels below
+// the top of the body for enemies, 24 for Link (z left out: a jump lifts
+// the picture off its feet). Kept within the box: never below its bottom
+// (no rows cut off), and the box is used when the position is far from it.
+static void GroupAnchor(Group *g, Ppu *ppu) {
+  g->ax = (g->x0 + g->x1 + 1) * 0.5f, g->ay = (float)(g->y1 + 1);
+  int key = g->key, wx, wy;
+  if (key == 0) {
+    wx = link_x_coord + 8, wy = link_y_coord + 24;
+  } else {
+    int slot = key >= 1 && key <= 16 ? key - 1 : key >= 160 && key < 176 ? key - 160 : -1;
+    if (slot < 0 || !sprite_state[slot])
+      return;
+    wx = (sprite_x_hi[slot] << 8 | sprite_x_lo[slot]) + 8;
+    wy = (sprite_y_hi[slot] << 8 | sprite_y_lo[slot]) + 16;
+  }
+  float fx = (int16)(wx - BG2HOFS_copy2) - ppu->objBiasX + ppu->extraLeftRight;
+  float fy = (int16)(wy - BG2VOFS_copy2) - ppu->objBiasY;
+  if (fy > g->y1 + 1) fy = (float)(g->y1 + 1);
+  if (fy < g->y1 + 1 - 32 || fx < g->x0 - 16 || fx > g->x1 + 17)
+    return;
+  g->ax = fx, g->ay = fy;
 }
 
 static int CompareGroups(const void *a, const void *b) {
@@ -1587,16 +1623,17 @@ static int DrawSprites(uint32 *out, int pitch_px, const Cam *cm, Ppu *ppu) {
   // sort far to near, remembering each group's id in g_group_map
   for (int i = 0; i < n; i++) {
     Group *g = &groups[i];
+    GroupAnchor(g, ppu);
     g->key = g->key << 8 | i;
     float sx, sy, sc;
-    g->depth = Cam_ToScreen(cm, (g->x0 + g->x1 + 1) * 0.5f, (float)(g->y1 + 1), &sx, &sy, &sc) ? cm->F / sc : -1.0f;
+    g->depth = Cam_ToScreen(cm, g->ax, g->ay, &sx, &sy, &sc) ? cm->F / sc : -1.0f;
   }
   qsort(groups, n, sizeof(Group), CompareGroups);
 
   for (int gi = 0; gi < n; gi++) {
     Group *g = &groups[gi];
     int id = (g->key & 0xff) + 1;
-    float ax = (g->x0 + g->x1 + 1) * 0.5f, ay = (float)(g->y1 + 1);   // feet
+    float ax = g->ax, ay = g->ay;   // feet
     float sx, sy, sc;
     if (!Cam_ToScreen(cm, ax, ay, &sx, &sy, &sc)) {
       if (dump)
@@ -1616,7 +1653,8 @@ static int DrawSprites(uint32 *out, int pitch_px, const Cam *cm, Ppu *ppu) {
     float zlimit = depth - 4.0f;
     float inv = 1.0f / sc;
     int dx0 = (int)floorf(sx + (g->x0 - ax) * sc), dx1 = (int)ceilf(sx + (g->x1 + 1 - ax) * sc);
-    int dy0 = (int)floorf(sy + (g->y0 - ay) * sc), dy1 = (int)ceilf(sy);
+    // rows below the feet (a weapon held down, the shadow) lie in front
+    int dy0 = (int)floorf(sy + (g->y0 - ay) * sc), dy1 = (int)ceilf(sy + (g->y1 + 1 - ay) * sc);
     if (dx0 < 0) dx0 = 0;
     if (dy0 < 0) dy0 = 0;
     if (dx1 > w) dx1 = w;

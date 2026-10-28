@@ -29,6 +29,9 @@ int Hd3d_RotateInput(int inputs);
 // Link's facing (0 up, 2 down, 4 left, 6 right) as the camera sees it, for
 // drawing him: in third person walking away from the camera shows his back
 int Hd3d_ViewFacing(int facing);
+// The same for enemies' directions (0 right, 1 left, 2 down, 3 up), for the
+// sprites whose drawing uses it (guards: Guard_HandleAllAnimation)
+int Hd3d_ViewDir(int dir);
 
 // Indoor walls raised in 3D (0 = flat, 1 = on)
 void Hd3d_SetWalls(int on, const char *why);
