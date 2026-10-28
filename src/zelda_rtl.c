@@ -333,6 +333,9 @@ static void ConfigurePpuSideSpace() {
   // caduta in un labirinto (Module11): dalla fase 3 la stanza nuova e' gia' caricata
   if (mod == 17 && subsubmodule_index >= 3)
     mod = 7;
+  // morte di Link: come la scena di prima finche' si vede il mondo
+  if (HdFx_DeathShowsWorld())
+    mod = saved_module_for_menu;
   // mappa del mondo e mappa dell'Ocarina: nuvole anche oltre il bordo della mappa
   g_zenv.ppu->m7CloudFill = main_module_index == 14 && (submodule_index == 7 || submodule_index == 10);
   g_zenv.ppu->bg1ConeQuadrant = (mod == 7 && hdr_dungeon_dark_with_lantern && TS_copy != 0) ? g_lamp_cone_idx : -1;
@@ -361,7 +364,8 @@ static void ConfigurePpuSideSpace() {
     // scorrimento verso un'altra stanza o l'altra meta' (RoomScrollBands)
     RoomSeamRemember();
     room_scroll = RoomScrollActive();
-  } else if (mod == 20 || mod == 0 || mod == 1) {
+  } else if (mod == 20 || mod == 0 || mod == 1 || mod == 18) {
+    // (18: schermo rosso e nero della morte, senza il mondo)
     extra_left = kPpuExtraLeftRight, extra_right = kPpuExtraLeftRight;
     extra_bottom = 16;
   }
@@ -370,7 +374,8 @@ static void ConfigurePpuSideSpace() {
     PpuSetExtraSideSpace(g_zenv.ppu, kPpuExtraLeftRight, kPpuExtraLeftRight, 16);
     return;
   }
-  if (g_render_bias_x | g_render_bias_y) {
+  // (schermo rosso e nero della morte: tutto lo schermo, senza spostamento)
+  if ((g_render_bias_x | g_render_bias_y) && mod != 18) {
     // Un valore negativo (durante le transizioni) vuol dire "nessun limite"
     if (extra_left >= 0) extra_left = IntMax(extra_left + g_render_bias_x, 0);
     if (extra_right >= 0) extra_right = IntMax(extra_right - g_render_bias_x, 0);
@@ -401,6 +406,9 @@ static bool SmoothCamera_IsGameplay() {
     return submodule_index == 0;
   // Dialogo aperto durante il gioco: il fondale resta dov'e'
   if (mod == 14 && submodule_index == 2)
+    return saved_module_for_menu == 7 || saved_module_for_menu == 9;
+  // Morte di Link: Link e' fermo, la vista non riparte da capo (salto)
+  if (mod == 18)
     return saved_module_for_menu == 7 || saved_module_for_menu == 9;
   return false;
 }
@@ -651,6 +659,8 @@ void ZeldaDrawPpuFrame(uint8 *pixel_buffer, size_t pitch, uint32 render_flags) {
   HdWorld_BeforeRender(256 + 2 * g_zenv.ppu->extraLeftRight, height);
   // specchio: la PPU disegna senza onda e con i colori veri (vedi hd_world.c)
   HdWorld_WarpBeforeRender();
+  // dissolvenze delle palette: lo stesso per il fondale (vedi hd_fx.c)
+  HdFx_FadeBeforeRender(g_zenv.ppu);
 
   // Mostra il massimo in giallo: le cifre al massimo dell'HUD classico hanno il
   // giallo della versione GBA (#FFDE52) solo nel colore di riempimento, senza
@@ -677,6 +687,7 @@ void ZeldaDrawPpuFrame(uint8 *pixel_buffer, size_t pitch, uint32 render_flags) {
     HdWorld_WarpLine(i + 1);
   }
   HdWorld_WarpAfterRender();
+  HdFx_FadeAfterRender(g_zenv.ppu);
   if (g_zenv.ppu->bg3MaxDigits)
     g_zenv.ppu->cgram[0x10] = cg10;
   HdLight_AfterRender(g_zenv.ppu);
@@ -685,6 +696,7 @@ void ZeldaDrawPpuFrame(uint8 *pixel_buffer, size_t pitch, uint32 render_flags) {
   HdFx_FogAfterRender(g_zenv.ppu);
   HdWorld_Composite(pixel_buffer, (int)pitch, 256 + 2 * g_zenv.ppu->extraLeftRight, height);
   HdWorld_WarpMask(pixel_buffer, (int)pitch, 256 + 2 * g_zenv.ppu->extraLeftRight, height);
+  HdFx_FadeMask(pixel_buffer, (int)pitch, 256 + 2 * g_zenv.ppu->extraLeftRight, height);
 
   // Illuminazione dinamica (non sulla mappa del mondo in Mode 7)
   if (g_zenv.ppu->mode != 7) {
@@ -702,6 +714,8 @@ void ZeldaDrawPpuFrame(uint8 *pixel_buffer, size_t pitch, uint32 render_flags) {
     HdLight_FairyGlow(pixel_buffer, (int)pitch, frame_w, height);
     HdFx_Lightning(pixel_buffer, (int)pitch, frame_w, height);
     HdFx_Mosaic(pixel_buffer, (int)pitch, frame_w, height);
+    // dissolvenza delle palette del gioco su tutto, aggiunte HD comprese
+    HdFx_FadePost(pixel_buffer, (int)pitch, frame_w, height);
     // specchio: onda e bianco del gioco su tutto, aggiunte HD comprese
     HdWorld_WarpPost(pixel_buffer, (int)pitch, frame_w, height);
     HdFx_SoftIris(pixel_buffer, (int)pitch, frame_w, height);

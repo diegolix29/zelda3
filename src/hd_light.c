@@ -457,7 +457,7 @@ static bool IsLavaCell(const uint16 *tm, int row, int col, int ox, int oy) {
     int v = (bits >> (7 - px)) & 1 | (bits >> (14 - px)) & 2 | (bits >> (21 - px)) & 4 | (bits >> (28 - px)) & 8;
     if (!v)
       continue;
-    uint16 c = ppu->cgram[pal + v];
+    uint16 c = HdFx_RealBg(ppu->cgram, pal + v);
     int r = (c & 31) << 3, g = (c >> 5 & 31) << 3, b = (c >> 10 & 31) << 3;
     seen++;
     red += r > 120 && r > g + 30 && b < r / 2;  // rosso-arancio: lava (non acqua o altro)

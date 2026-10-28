@@ -757,9 +757,20 @@ int HdFx_SceneModule(void) {
   // gia' caricata e si vede mentre Link cade (acqua e shader subito)
   if (m == 17 && subsubmodule_index >= 3)
     return 7;
+  // morte di Link (18): finche' si vede il mondo e' la scena di prima
+  if (HdFx_DeathShowsWorld())
+    return saved_module_for_menu;
   // (transizione dello specchio, 9/35 e 9/44: le aggiunte HD restano e
   // seguono onda e bianco del gioco, HdWorld_WarpPost in hd_world.c)
   return m;
+}
+
+// Morte di Link (modulo 18): il mondo resta sullo schermo mentre Link cade e
+// il cerchio si chiude, poi il gioco spegne BG1 e BG2 (TM, schermo rosso e
+// nero) e li riaccende quando la fata lo rianima. Shader, effetti, schermo
+// largo e mondo continuo seguono il mondo: niente salti
+bool HdFx_DeathShowsWorld(void) {
+  return main_module_index == 18 && (TM_copy & 3) != 0;
 }
 
 // Allagamento della diga: l'acqua del piano di sopra si vede solo dentro la
@@ -1769,6 +1780,152 @@ void HdFx_IrisAfterRender(Ppu *ppu) {
     return;
   memcpy(hdma_table_dynamic, g_iris_saved_table, sizeof(g_iris_saved_table));
   ppu->windowFullSides = false;
+}
+
+// ---------------------------------------------------------------------------
+// Dissolvenze delle palette (scale, cambi di piano, porte che scuriscono,
+// ritorno con la fata): il gioco avvicina a passi i colori del fondale
+// (main_palette_buffer) al nero partendo da quelli veri (aux_palette_buffer,
+// ApplyPaletteFilter_bounce). Acqua, luci e ombre riconoscono le cose dai
+// colori: con i colori scuriti i muri diventavano acqua e la schiuma bianca
+// restava sullo schermo quasi nero. Stessa regola dello specchio: la PPU
+// disegna il fondale con i colori veri, le aggiunte HD lavorano su un
+// fotogramma normale e alla fine HdFx_FadePost scurisce tutto insieme come
+// avrebbe fatto il gioco. Alla morte di Link i colori veri sono in
+// mapbak_palette (Death_Func1): il cerchio li scurisce, la fata li riaccende.
+// Il passo dipende solo dal valore (0-31) di ogni
+// componente, uguale per rosso, verde e blu: la tabella si ricava dalle
+// coppie (vero, scurito) della palette. Sprite e HUD restano quelli della PPU.
+
+static bool g_fade_on;
+static uint8 g_fade_map[256];  // componente a 8 bit vera -> scurita
+static uint16 g_fade_cgram[0x80];
+static uint16 g_fade_real[0x80];  // i colori veri del fondale
+static uint8 *g_fade_mask;     // 1: fondale da scurire (dal frame della PPU)
+static int g_fade_cap;
+
+static bool FadeEntry(int i) {
+  return i == 0 || (i >= 0x20 && i < 0x80);
+}
+
+static const uint16 *FadeRealPalette(void) {
+  return main_module_index == 18 ? mapbak_palette : aux_palette_buffer;
+}
+
+static bool PrepareFadeMap(const Ppu *ppu) {
+  const uint16 *real = FadeRealPalette();
+  int m5[32];
+  for (int v = 0; v < 32; v++)
+    m5[v] = -1;
+  bool differ = false;
+  for (int i = 0; i < 0x80; i++) {
+    if (!FadeEntry(i))
+      continue;
+    uint16 c = ppu->cgram[i], a = real[i];
+    for (int k = 0; k < 15; k += 5) {
+      int av = a >> k & 31, cv = c >> k & 31;
+      if (cv > av || (m5[av] >= 0 && m5[av] != cv))
+        return false;  // non e' una dissolvenza verso il nero
+      m5[av] = cv;
+      differ |= cv != av;
+    }
+  }
+  if (!differ)
+    return false;
+  // i valori che la palette non usa: in mezzo fra i vicini
+  if (m5[0] < 0)
+    m5[0] = 0;
+  int prev = 0;
+  for (int v = 1; v < 32; v++) {
+    if (m5[v] < 0)
+      continue;
+    for (int j = prev + 1; j < v; j++)
+      m5[j] = m5[prev] + (m5[v] - m5[prev]) * (j - prev) / (v - prev);
+    prev = v;
+  }
+  for (int j = prev + 1; j < 32; j++)
+    m5[j] = m5[prev] * j / (prev ? prev : 1);
+  for (int x = 0; x < 256; x++) {
+    float fv = x * 31.0f / 255.0f;
+    int lo = (int)fv, hi = lo < 31 ? lo + 1 : 31;
+    float a = (float)(m5[lo] << 3 | m5[lo] >> 2), b = (float)(m5[hi] << 3 | m5[hi] >> 2);
+    int out = (int)(a + (b - a) * (fv - lo) + 0.5f);
+    g_fade_map[x] = (uint8)(out > x ? x : out);
+  }
+  return true;
+}
+
+void HdFx_FadeBeforeRender(Ppu *ppu) {
+  g_fade_on = false;
+  int mod;
+  // (lo specchio ha la sua regola, HdWorld_WarpBeforeRender)
+  if (main_module_index == 9 && (submodule_index == 0x23 || submodule_index == 0x2c))
+    return;
+  if ((!HdFx_InGameplay(&mod) && !HdFx_DeathShowsWorld()) || ppu->forcedBlank || ppu->brightness != 15)
+    return;
+  if (!PrepareFadeMap(ppu))
+    return;
+  g_fade_on = true;
+  memcpy(g_fade_cgram, ppu->cgram, sizeof(g_fade_cgram));
+  memcpy(g_fade_real, FadeRealPalette(), sizeof(g_fade_real));
+  for (int i = 0; i < 0x80; i++)
+    if (FadeEntry(i))
+      ppu->cgram[i] = g_fade_real[i];
+}
+
+void HdFx_FadeAfterRender(Ppu *ppu) {
+  if (g_fade_on)
+    memcpy(ppu->cgram, g_fade_cgram, sizeof(g_fade_cgram));
+}
+
+bool HdFx_FadeActive(void) {
+  return g_fade_on;
+}
+
+// Colore i della palette pal (main_palette_buffer o la CGRAM) come lo vede
+// la PPU nel disegno: durante la dissolvenza quello vero per il fondale
+uint16 HdFx_RealBg(const uint16 *pal, int i) {
+  return g_fade_on && i < 0x80 && FadeEntry(i) ? g_fade_real[i] : pal[i];
+}
+
+// Prima delle aggiunte HD: quali pixel sono fondale (alcuni effetti poi
+// segnano i loro pixel come sprite, per lo shader)
+void HdFx_FadeMask(uint8 *pixels, int pitch, int width, int height) {
+  if (!g_fade_on)
+    return;
+  int n = width * height;
+  if (n > g_fade_cap) {
+    free(g_fade_mask);
+    g_fade_mask = malloc(n);
+    g_fade_cap = g_fade_mask ? n : 0;
+  }
+  if (!g_fade_mask) {
+    g_fade_on = false;
+    return;
+  }
+  for (int y = 0; y < height; y++) {
+    const uint32 *row = (const uint32 *)(pixels + y * pitch);
+    uint8 *m = g_fade_mask + y * width;
+    for (int x = 0; x < width; x++) {
+      uint32 l = row[x] >> 24;
+      m[x] = !(l == 2 || l == 4 || l == 6);
+    }
+  }
+}
+
+void HdFx_FadePost(uint8 *pixels, int pitch, int width, int height) {
+  if (!g_fade_on || width * height > g_fade_cap)
+    return;
+  for (int y = 0; y < height; y++) {
+    uint32 *row = (uint32 *)(pixels + y * pitch);
+    const uint8 *m = g_fade_mask + y * width;
+    for (int x = 0; x < width; x++) {
+      if (!m[x])
+        continue;
+      uint32 c = row[x];
+      row[x] = (c & 0xff000000) | g_fade_map[c >> 16 & 255] << 16 | g_fade_map[c >> 8 & 255] << 8 | g_fade_map[c & 255];
+    }
+  }
 }
 
 void HdFx_Mosaic(uint8 *pixels, int pitch, int width, int height) {

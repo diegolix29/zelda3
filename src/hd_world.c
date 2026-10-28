@@ -72,6 +72,12 @@ static bool InSoftIris(void) {
          !player_is_indoors;
 }
 
+// Morte di Link all'aperto: il mondo continuo resta finche' il gioco mostra
+// il mondo (prima dello schermo rosso e dopo la fata), con la vista ferma
+static bool InDeathOverWorld(void) {
+  return saved_module_for_menu == 9 && HdFx_DeathShowsWorld();
+}
+
 // Ritorno dalla mappa del mondo: il gioco ricarica le sovrapposizioni e
 // schiarisce lo schermo (sottomoduli 32-34) prima di ridare il controllo
 static bool InMapReturn(void) {
@@ -81,7 +87,8 @@ static bool InMapReturn(void) {
 bool HdWorld_Active(void) {
   if (!FeatureOn() || overworld_screen_index >= 0x80)
     return false;
-  if (main_module_index != 9 && !InMenuOverWorld() && !InFluteArrival() && !InSoftIris())
+  if (main_module_index != 9 && !InMenuOverWorld() && !InFluteArrival() && !InSoftIris() &&
+      !InDeathOverWorld())
     return false;
   return g_zenv.ppu->mode != 7;
 }
@@ -1376,6 +1383,13 @@ void HdWorld_UpdateCamera(int *cam_x, int *cam_y) {
     *cam_y = gy + g_world_dy;
     return;
   }
+  // morte di Link: la vista resta dov'era, anche sullo schermo rosso, e
+  // tornato il gioco riprende a seguire Link da li'
+  if (main_module_index == 18 && saved_module_for_menu == 9 && g_vis_valid) {
+    *cam_x = gx + g_world_dx;
+    *cam_y = gy + g_world_dy;
+    return;
+  }
   if (HdWorld_Active() && InMenuOverWorld() && g_vis_valid) {
     // menu o dialogo aperto: la vista non si muove (e alla chiusura riprende
     // a seguire Link da dove era)
@@ -1647,7 +1661,7 @@ static void DrawLoadedArea(AreaImage *img) {
   // sulla montagna le nuvole non hanno pennellate, come l'acqua (hd_fx.c,
   // HdFx_IsCloudColor)
   bool mountain = sc == 0x03 || sc == 0x05 || sc == 0x07;
-  uint32 backdrop = Bgr15ToPixel(main_palette_buffer[0], backdrop_scene ? 3 : 5);
+  uint32 backdrop = Bgr15ToPixel(HdFx_RealBg(main_palette_buffer, 0), backdrop_scene ? 3 : 5);
   for (int r = 0; r < n16; r++) {
     for (int c = 0; c < n16; c++) {
       uint16 m16 = dung_bg2[r * 64 + c];
@@ -1672,7 +1686,7 @@ static void DrawLoadedArea(AreaImage *img) {
             ac->x = ox, ac->y = oy, ac->entry = e;
             ac->color[0] = water && !backdrop_scene ? (backdrop & 0xffffff) | 7u << 24 : backdrop;
             for (int v = 1; v < 16; v++)
-              ac->color[v] = Bgr15ToPixel(main_palette_buffer[pal * 16 + v],
+              ac->color[v] = Bgr15ToPixel(HdFx_RealBg(main_palette_buffer, pal * 16 + v),
                                           water || (cloud_tile && HdFx_IsCloudColor(e, v)) ? 7 : 1);
           }
         }
@@ -1685,7 +1699,7 @@ static void DrawLoadedArea(AreaImage *img) {
             int v = HdFx_Pixel4bpp(p01, p23, bit);
             // sulla montagna lo sfondo e' il cielo anche nelle caselle che per
             // il gioco sono acqua profonda (il vuoto oltre i dirupi)
-            dst[col] = v ? Bgr15ToPixel(main_palette_buffer[pal * 16 + v],
+            dst[col] = v ? Bgr15ToPixel(HdFx_RealBg(main_palette_buffer, pal * 16 + v),
                                         water || (cloud_tile && HdFx_IsCloudColor(e, v)) ? 7 : 1) :
                        water && !backdrop_scene ? (backdrop & 0xffffff) | 7u << 24 : backdrop;
           }
@@ -1955,7 +1969,7 @@ static int OverlayColor(const OverlayCtx *o, int sx, int sy) {
   const uint16 *t = &ppu->vram[(bg->tileAdr + (e & 0x3ff) * 16) & 0x7fff];
   uint16 p01 = t[row], p23 = t[row + 8];
   int v = HdFx_Pixel4bpp(p01, p23, bit);
-  return v ? ppu->cgram[(e >> 10 & 7) * 16 + v] : -1;
+  return v ? HdFx_RealBg(ppu->cgram, (e >> 10 & 7) * 16 + v) : -1;
 }
 
 int HdWorld_OverlayColorAt(int sx, int sy) {
@@ -2076,32 +2090,6 @@ static void DrawAnimatedCells(uint8 *pixels, int pitch, int width, int height, i
           dst[sx] = OverlayBlend(ov, Dim(ac->color[v]), sx, sy);
         }
       }
-    }
-  }
-}
-
-// Il gioco scurisce lo schermo abbassando i colori delle palette (rispetto
-// alla copia intatta) e poi spegnendolo: le immagini delle aree hanno i
-// colori pieni, quindi si scuriscono qui nella stessa misura
-static void FadeLikeGame(uint8 *pixels, int pitch, int width, int height) {
-  int cur[3] = { 0 }, full[3] = { 0 };
-  for (int i = 0x20; i < 0x80; i++) {
-    uint16 c = main_palette_buffer[i], a = aux_palette_buffer[i];
-    for (int k = 0; k < 3; k++)
-      cur[k] += c >> (5 * k) & 31, full[k] += a >> (5 * k) & 31;
-  }
-  int f[3];  // in 256esimi: rosso, verde, blu
-  for (int k = 0; k < 3; k++)
-    f[k] = g_zenv.ppu->forcedBlank ? 0 : full[k] ? (cur[k] * 256 / full[k] > 256 ? 256 : cur[k] * 256 / full[k]) : 256;
-  if (f[0] == 256 && f[1] == 256 && f[2] == 256)
-    return;
-  for (int y = 0; y < height; y++) {
-    uint32 *row = (uint32 *)(pixels + y * pitch);
-    for (int x = 0; x < width; x++) {
-      uint32 c = row[x], l = c >> 24;
-      if (l == 2 || l == 4 || l == 6)
-        continue;  // HUD e sprite li disegna gia' la PPU
-      row[x] = l << 24 | ((c >> 16 & 255) * f[0] >> 8) << 16 | ((c >> 8 & 255) * f[1] >> 8) << 8 | ((c & 255) * f[2] >> 8);
     }
   }
 }
@@ -3184,7 +3172,7 @@ void HdWorld_Composite(uint8 *pixels, int pitch, int width, int height) {
   if (in_x0 < ax) in_x0 = ax;
   if (in_x1 > ax + as) in_x1 = ax + as;
   // area vicina non ancora disegnata (al massimo un frame): colore di fondo
-  uint32 outside = Bgr15ToPixel(main_palette_buffer[0], 5);
+  uint32 outside = Bgr15ToPixel(HdFx_RealBg(main_palette_buffer, 0), 5);
   int last_head = -2;
   AreaImage *img = NULL;
   // Mosaico del gioco anche sulle immagini (blocchi allineati come nella PPU)
@@ -3226,7 +3214,5 @@ void HdWorld_Composite(uint8 *pixels, int pitch, int width, int height) {
     DrawAnimatedCells(pixels, pitch, width, height, cam_x, cam_y, all, &ov);
     DrawPersistent(pixels, pitch, width, height, cam_x, cam_y, &ov);
   }
-  if (mosaic)
-    FadeLikeGame(pixels, pitch, width, height);
   PrefetchNeighbors();
 }

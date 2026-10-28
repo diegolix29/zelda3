@@ -28,6 +28,8 @@ void HdFx_AfterLight(uint8 *pixels, int pitch, int width, int height, int bias_x
 // Modulo della scena che si vede sullo schermo (per lo shader e per gli
 // effetti sul fondale): 7 = dentro, 9 = fuori, 14 = un menu che copre il gioco
 int HdFx_SceneModule(void);
+// Morte di Link con il mondo ancora (o di nuovo) sullo schermo
+bool HdFx_DeathShowsWorld(void);
 // Si vede il gioco (HdFx_SceneModule 7, 9 o 11): unico controllo per acqua,
 // luci, particelle e ombre. *mod_out: il modulo della scena
 bool HdFx_InGameplay(int *mod_out);
@@ -52,6 +54,15 @@ typedef struct Ppu Ppu;
 void HdFx_IrisBeforeRender(Ppu *ppu);
 void HdFx_IrisAfterRender(Ppu *ppu);
 void HdFx_SoftIris(uint8 *pixels, int pitch, int width, int height);
+// Dissolvenze delle palette: la PPU disegna il fondale con i colori veri, le
+// aggiunte HD lavorano su quelli e alla fine si scurisce tutto come il gioco
+void HdFx_FadeBeforeRender(Ppu *ppu);
+void HdFx_FadeAfterRender(Ppu *ppu);
+bool HdFx_FadeActive(void);
+// colore della palette per gli effetti: durante la dissolvenza quello vero
+uint16 HdFx_RealBg(const uint16 *pal, int i);
+void HdFx_FadeMask(uint8 *pixels, int pitch, int width, int height);
+void HdFx_FadePost(uint8 *pixels, int pitch, int width, int height);
 // Mosaico del gioco anche sulle aggiunte HD (stessi quadrati della PPU)
 void HdFx_Mosaic(uint8 *pixels, int pitch, int width, int height);
 // Cielo e nuvole dietro la Piramide e sul Monte della Morte: lo shader non li dipinge
