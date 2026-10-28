@@ -78,6 +78,9 @@ static uint8 *g_owner;           // OAM index per pixel of g_side, 0xff = no spr
 static uint32 *g_floor;          // copy of the ground before re-projection
 static uint8 *g_group_map;       // sprite group + 1 per pixel, 0 = none
 static float *g_depth;           // camera depth per screen pixel (indoor walls)
+static uint32 *g_uv;             // 2D frame pixel shown at each screen pixel (weather layer), kUvNone = sky
+#define kUvNone 0x80008000u
+#define PackUv(u, v) ((uint32)(uint16)(int16)(u) | (uint32)(uint16)(int16)(v) << 16)
 
 // stats for the log
 static uint64 g_stat_ticks;
@@ -226,13 +229,14 @@ static bool IsGameplayModule(void) {
 static bool EnsureBuffers(int w, int h) {
   if (w == g_w && h == g_h && g_side)
     return true;
-  free(g_side), free(g_owner), free(g_floor), free(g_group_map), free(g_depth);
+  free(g_side), free(g_owner), free(g_floor), free(g_group_map), free(g_depth), free(g_uv);
   g_side = (uint32 *)malloc(sizeof(uint32) * w * h);
   g_owner = (uint8 *)malloc(w * h);
   g_floor = (uint32 *)malloc(sizeof(uint32) * w * h);
   g_group_map = (uint8 *)malloc(w * h);
   g_depth = (float *)malloc(sizeof(float) * w * h);
-  if (!g_side || !g_owner || !g_floor || !g_group_map || !g_depth) {
+  g_uv = (uint32 *)malloc(sizeof(uint32) * w * h);
+  if (!g_side || !g_owner || !g_floor || !g_group_map || !g_depth || !g_uv) {
     Hd3d_Log("ERROR: out of memory for %dx%d buffers", w, h);
     g_w = g_h = 0;
     return false;
@@ -610,13 +614,16 @@ static void DrawGround(uint32 *out, int pitch_px, const Cam *cm, const Ground *g
   uint32 fog = sk->outdoors ? 3u << 24 | sk->horizon : 5u << 24;
   for (int y = 0; y < h; y++) {
     uint32 *dst = out + y * pitch_px;
+    uint32 *uv = g_uv + y * w;
     for (int x = 0; x < w; x++) {
       float u, v, depth;
       if (!Cam_Ray(cm, x + 0.5f, y + 0.5f, &u, &v, &depth) || depth >= kFogEnd) {
         dst[x] = Sky_Color(sk, cm, x + 0.5f, y + 0.5f, x, y);
+        uv[x] = kUvNone;
         continue;
       }
       int ui = (int)floorf(u), vi = (int)floorf(v);
+      uv[x] = PackUv(ui, vi);
       uint32 px;
       if (ui >= 0 && ui < w && vi >= 0 && vi < h) {
         px = g_floor[vi * w + ui];
@@ -1351,7 +1358,7 @@ static int DrawSprites(uint32 *out, int pitch_px, const Cam *cm, Ppu *ppu) {
           int vx = (int)floorf(ax + (x + 0.5f - sx) * inv);
           if (vx >= g->x0 && vx <= g->x1 && gm[vx] == id &&
               !(g_depth_valid && g_depth[y * w + x] < zlimit))
-            dst[x] = src[vx];
+            dst[x] = src[vx], g_uv[y * w + x] = PackUv(vx, vy);
         }
       } else {
         for (int x = dx0; x < dx1; x++) {
@@ -1364,7 +1371,7 @@ static int DrawSprites(uint32 *out, int pitch_px, const Cam *cm, Ppu *ppu) {
             if ((unsigned)lx < (unsigned)esz[i] && (unsigned)ly < (unsigned)esz[i] &&
                 OamPixel(ppu, ecf[i], lx, ly, esz[i], &c)) {
               if (!(g_depth_valid && g_depth[y * w + x] < zlimit))
-                dst[x] = c;
+                dst[x] = c, g_uv[y * w + x] = PackUv(vx, vy);
               break;
             }
           }
@@ -1404,6 +1411,8 @@ void Hd3d_EndFrame(uint8 *pixels, int pitch, int width, int height) {
   uint32 *out = (uint32 *)pixels;
   bool walls = g_view3d_walls && player_is_indoors;
   if (walls) {
+    for (int i = 0; i < width * height; i++)
+      g_uv[i] = kUvNone;   // the weather layer is outdoors only
     BuildHeightMap();
     DrawTerrain(out, pitch_px, &cm, &gr, &sk);
   } else {
@@ -1412,10 +1421,11 @@ void Hd3d_EndFrame(uint8 *pixels, int pitch, int width, int height) {
   g_depth_valid = walls;
   int groups = DrawSprites(out, pitch_px, &cm, g_zenv.ppu);
   if (g_weather) {
-    // the game's weather layer, flat over ground and sky (not sprites). With
-    // the HD rain on it only darkens (its drops would be a second rain)
+    // the game's weather layer, laid on the tilted ground and on the sprites
+    // (at the 2D frame pixel each one shows, so it follows the perspective).
+    // With the HD rain on it only darkens (its drops would be a second rain)
     HdWorld_SuppressOverlay(false);
-    HdWorld_OverlayFlat(pixels, pitch, width, height, g_fx_rain && HdFx_IsRainingOutdoors());
+    HdWorld_OverlayFlat(pixels, pitch, width, height, g_fx_rain && HdFx_IsRainingOutdoors(), g_uv);
   }
   HdFx_FlatWeather(pixels, pitch, width, height);   // HD rain drops and lightning, flat
   DrawOverlay(out, pitch_px);

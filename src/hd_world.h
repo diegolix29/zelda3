@@ -120,6 +120,8 @@ bool HdWorld_SampleGround(int wx, int wy, uint32 *out);
 // Vista 3D: strato del tempo atmosferico (pioggia, nebbia) tenuto piatto
 bool HdWorld_OverlayPresent(void);
 void HdWorld_SuppressOverlay(bool on);
-void HdWorld_OverlayFlat(uint8 *pixels, int pitch, int width, int height, bool uniform);
+// uv: per pixel the 2D frame pixel it shows (u | v << 16, int16 each;
+// 0x80008000 = none, e.g. sky), NULL = in screen position
+void HdWorld_OverlayFlat(uint8 *pixels, int pitch, int width, int height, bool uniform, const uint32 *uv);
 
 #endif  // ZELDA3_HD_WORLD_H_

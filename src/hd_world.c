@@ -3304,12 +3304,14 @@ void HdWorld_SuppressOverlay(bool on) {
   g_overlay_suppressed = on;
 }
 
-// Somma lo strato piatto, nella posizione dello schermo, su tutta la vista 3D
-// (terreno e cielo; HUD e sprite restano davanti, come gli sprite del gioco
-// con le palette 0-3). uniform: invece del disegno (gocce del gioco) si somma
+// Somma lo strato su tutta la vista 3D. Con uv ogni pixel prende lo strato
+// nel punto del fotogramma 2D che mostra (terreno inclinato e sprite in
+// prospettiva); il cielo, che non ha un punto, lo prende solo per il panorama
+// della montagna. Gli sprite con le palette 4-7 lo ricevono se il gioco li
+// somma (come in 2D), HUD e sprite con le palette 0-3 restano davanti. uniform: invece del disegno (gocce del gioco) si somma
 // solo il colore medio dello strato, cioe' il buio del temporale, quando le
 // gocce le disegna gia' la pioggia HD
-void HdWorld_OverlayFlat(uint8 *pixels, int pitch, int width, int height, bool uniform) {
+void HdWorld_OverlayFlat(uint8 *pixels, int pitch, int width, int height, bool uniform, const uint32 *uv) {
   bool org = g_overlay_suppressed;
   g_overlay_suppressed = false;
   OverlayCtx ov;
@@ -3340,7 +3342,7 @@ void HdWorld_OverlayFlat(uint8 *pixels, int pitch, int width, int height, bool u
       for (int x = 0; x < width; x++) {
         uint32 c = row[x], l = c >> 24 & 0xf;
         int bit = l == 7 ? 1 : l == 3 ? 5 : l;
-        if (l == 2 || l == 4 || l == 6 || !(ppu->mathEnabled & (1 << bit)))
+        if (l == 2 || l == 6 || !(ppu->mathEnabled & (1 << bit)))
           continue;
         int cr = c >> 16 & 255, cg = c >> 8 & 255, cb = c & 255;
         cr += (((cr + ar) >> 1) - cr) * k >> 8;
@@ -3355,14 +3357,24 @@ void HdWorld_OverlayFlat(uint8 *pixels, int pitch, int width, int height, bool u
     uint32 *row = (uint32 *)(pixels + y * pitch);
     for (int x = 0; x < width; x++) {
       uint32 l = row[x] >> 24 & 0xf;
-      if (l == 2 || l == 4 || l == 6)
+      if (l == 2 || l == 6 || (l == 4 && !ov.on))
         continue;
       // stessi strati a cui il gioco somma lo strato (7 = acqua, e' BG2;
-      // 3 = fondale e cielo della vista 3D, come il colore di fondo)
+      // 3 = fondale e cielo della vista 3D, come il colore di fondo; 4 = sprite)
       int bit = l == 7 ? 1 : l == 3 ? 5 : l;
       if (ov.on && !(ppu->mathEnabled & (1 << bit)))
         continue;
-      row[x] = OverlayBlend(&ov, row[x], x, y);
+      int sx = x, sy = y;
+      if (uv) {
+        uint32 p = uv[y * width + x];
+        if (p == 0x80008000u) {
+          if (!ov.sky)
+            continue;   // cielo: la nebbia sta sul terreno
+        } else {
+          sx = (int16)(p & 0xffff), sy = (int16)(p >> 16);
+        }
+      }
+      row[x] = OverlayBlend(&ov, row[x], sx, sy);
     }
   }
 }

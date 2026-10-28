@@ -1,2 +1,2 @@
-[   0.000] 3D view init: View3D=0 (Off deg), NewRenderer=1, OutputMethod=2, ExtendedAspectRatio extra=0, shader='shaders/foursword/foursword.glslp'
-[   0.418] tilt off (module=0 sub=1 saved=0 mode=1 tilt=0.0)
+[   0.000] 3D view init: View3D=3 (50 deg), View3DCurve=0 (Off), View3DDrawDistance=2 (3x), View3DWalls=1, NewRenderer=1, OutputMethod=2, ExtendedAspectRatio=0, ContinuousWorld=1, shader='shaders/foursword/foursword.glslp'
+[   0.380] not gameplay (module=0 sub=1 saved=0 mode=1 tilt=50.0)
