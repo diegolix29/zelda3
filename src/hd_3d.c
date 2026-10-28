@@ -1232,6 +1232,16 @@ static int DrawSprites(uint32 *out, int pitch_px, const Cam *cm, Ppu *ppu) {
       continue;
     if (dump)
       captured[o]++;
+    // a pixel credited to an entry far from where that entry is: leave it
+    // out, or its group's box (and feet) stretched across the frame and part
+    // of the sprite was stood up in the wrong place
+    {
+      int x = i % w, y = i / w, sz = esz[o];
+      int scale = ppu->objScale[o];
+      int m = 2 + (scale ? IntMax(((sz * scale >> 8) - sz + 1) >> 1, 0) : 0);
+      if (!evis[o] || x < efx[o] - m || x >= efx[o] + sz + m || y < efy[o] - m || y >= efy[o] + sz + m)
+        continue;
+    }
     int key = GroupKey(o);
     if (far_key[key])
       continue;
@@ -1438,6 +1448,7 @@ void Hd3d_EndFrame(uint8 *pixels, int pitch, int width, int height) {
   // they show
   HdLight_Projected(pixels, pitch, width, height, g_uv, g_kind);
   HdFx_FogProjected(pixels, pitch, width, height, g_uv, g_kind);
+  HdFx_SoftIrisProjected(pixels, pitch, width, height, g_uv, g_kind);
   if (g_weather) {
     // the game's weather layer, laid on the tilted ground and on the sprites
     // (at the 2D frame pixel each one shows, so it follows the perspective).

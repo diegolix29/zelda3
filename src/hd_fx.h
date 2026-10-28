@@ -46,6 +46,9 @@ typedef struct Ppu Ppu;
 void HdFx_IrisBeforeRender(Ppu *ppu);
 void HdFx_IrisAfterRender(Ppu *ppu);
 void HdFx_SoftIris(uint8 *pixels, int pitch, int width, int height);
+// Vista 3D: l'iride anche sul terreno oltre lo schermo, sugli sprite e sul
+// cielo (kind come HdFx_FogProjected, 0 = cielo)
+void HdFx_SoftIrisProjected(uint8 *pixels, int pitch, int width, int height, const uint32 *uv, const uint8 *kind);
 // Mosaico del gioco anche sulle aggiunte HD (stessi quadrati della PPU)
 void HdFx_Mosaic(uint8 *pixels, int pitch, int width, int height);
 // Cielo e nuvole dietro la Piramide e sul Monte della Morte: lo shader non li dipinge

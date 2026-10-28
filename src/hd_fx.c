@@ -1864,37 +1864,80 @@ void HdFx_Mosaic(uint8 *pixels, int pitch, int width, int height) {
   }
 }
 
-void HdFx_SoftIris(uint8 *pixels, int pitch, int width, int height) {
-  if (!g_iris_override)
-    return;
+// Cerchio dell'iride sullo schermo: centro e raggio
+static void IrisCircle(int width, int height, float *cx, float *cy, float *r, float *far) {
   const float kSoft = 8.0f;
   int ext = (width - 256) / 2;
   // con la vista spostata (mondo continuo) Link, e con lui il centro del
   // cerchio, si disegna spostato come gli sprite
   Ppu *ppu = g_zenv.ppu;
-  float cx = g_hd_iris_x - ppu->objBiasX + ext + 0.5f, cy = g_hd_iris_y - ppu->objBiasY + 0.5f;
+  *cx = g_hd_iris_x - ppu->objBiasX + ext + 0.5f, *cy = g_hd_iris_y - ppu->objBiasY + 0.5f;
   float far2 = 0;
   for (int k = 0; k < 4; k++) {
-    float dx = (k & 1 ? width : 0) - cx, dy = (k & 2 ? height : 0) - cy;
+    float dx = (k & 1 ? width : 0) - *cx, dy = (k & 2 ? height : 0) - *cy;
     if (dx * dx + dy * dy > far2)
       far2 = dx * dx + dy * dy;
   }
-  float r = g_hd_iris_r * (1.0f / 126) * (sqrtf(far2) + kSoft);
+  *far = sqrtf(far2);
+  *r = g_hd_iris_r * (1.0f / 126) * (*far + kSoft);
+}
+
+// quanto resta del colore a distanza d dal centro (1 dentro, 0 fuori)
+static inline float IrisFactor(float r, float d2) {
+  const float kSoft = 8.0f;
+  if (r > kSoft && d2 < (r - kSoft) * (r - kSoft))
+    return 1.0f;
+  float k = (r - sqrtf(d2)) / kSoft;
+  if (k >= 1)
+    return 1.0f;
+  if (k < 0) k = 0;
+  return k * k * (3 - 2 * k);
+}
+
+static inline uint32 IrisDim(uint32 c, float k) {
+  return (c & 0xff000000) | (int)(((c >> 16) & 0xff) * k) << 16 |
+         (int)(((c >> 8) & 0xff) * k) << 8 | (int)((c & 0xff) * k);
+}
+
+void HdFx_SoftIris(uint8 *pixels, int pitch, int width, int height) {
+  if (!g_iris_override)
+    return;
+  float cx, cy, r, far;
+  IrisCircle(width, height, &cx, &cy, &r, &far);
   for (int y = 0; y < height; y++) {
     uint32 *row = (uint32 *)(pixels + y * pitch);
     float dy = y - cy;
     for (int x = 0; x < width; x++) {
-      float dx = x - cx, d2 = dx * dx + dy * dy;
-      if (r > kSoft && d2 < (r - kSoft) * (r - kSoft))
-        continue;
-      float k = (r - sqrtf(d2)) / kSoft;
-      if (k >= 1)
-        continue;
-      if (k < 0) k = 0;
-      k = k * k * (3 - 2 * k);
-      uint32 c = row[x];
-      row[x] = (c & 0xff000000) | (int)(((c >> 16) & 0xff) * k) << 16 |
-               (int)(((c >> 8) & 0xff) * k) << 8 | (int)((c & 0xff) * k);
+      float dx = x - cx, k = IrisFactor(r, dx * dx + dy * dy);
+      if (k < 1)
+        row[x] = IrisDim(row[x], k);
+    }
+  }
+}
+
+void HdFx_SoftIrisProjected(uint8 *pixels, int pitch, int width, int height, const uint32 *uv, const uint8 *kind) {
+  if (!g_iris_override)
+    return;
+  float cx, cy, r, far;
+  IrisCircle(width, height, &cx, &cy, &r, &far);
+  // il cielo non ha un punto sullo schermo 2D: va al buio con l'angolo piu'
+  // lontano, cioe' appena l'iride comincia a chiudersi
+  float k_sky = IrisFactor(r, far * far);
+  for (int y = 0; y < height; y++) {
+    uint32 *row = (uint32 *)(pixels + y * pitch);
+    for (int x = 0; x < width; x++) {
+      int i = y * width + x;
+      float k;
+      if (kind[i] == 1) {
+        continue;   // terreno dello schermo: ce l'ha gia'
+      } else if (kind[i] == 0) {
+        k = k_sky;
+      } else {
+        float dx = (int16)(uv[i] & 0xffff) + 0.5f - cx, dy = (int16)(uv[i] >> 16) + 0.5f - cy;
+        k = IrisFactor(r, dx * dx + dy * dy);
+      }
+      if (k < 1)
+        row[x] = IrisDim(row[x], k);
     }
   }
 }

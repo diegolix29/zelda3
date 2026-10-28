@@ -1,15 +1,6 @@
 [   0.000] 3D view init: View3D=3 (50 deg), View3DCurve=0 (Off), View3DDrawDistance=1 (2x), View3DWalls=1, NewRenderer=1, OutputMethod=2, ExtendedAspectRatio=0, ContinuousWorld=1, shader='shaders/foursword/foursword.glslp'
-[   0.364] not gameplay (module=0 sub=1 saved=0 mode=1 tilt=50.0)
-[   5.561] 3D on (module=7 sub=0 saved=7 mode=1 tilt=50.0)
-[   5.562] buffers 256x224
-[   5.565] ground past the screen: video memory (module=7 area=0x00 indoors=1)
-[   7.638] stats: 300 frames, 3D compose 1.801 ms/frame, sprite groups avg 4.0 max 4, tilt 50.0, curve R=0, past-screen px/frame 18218 (missing 0), source video memory, far sprites avg 0.0 (draw distance 2x, ok), walls on (wall tiles avg 2630), frame 256x224, module=7 area=0x00
-[   8.163] tilt -> 65 deg (hotkey)
-[   8.558] tilt -> 75 deg (hotkey)
-[   9.721] stats: 300 frames, 3D compose 1.901 ms/frame, sprite groups avg 4.0 max 4, tilt 75.0, curve R=0, past-screen px/frame 21241 (missing 0), source video memory, far sprites avg 0.0 (draw distance 2x, ok), walls on (wall tiles avg 2630), frame 256x224, module=7 area=0x00
-[  11.805] stats: 300 frames, 3D compose 1.867 ms/frame, sprite groups avg 4.0 max 4, tilt 75.0, curve R=0, past-screen px/frame 21660 (missing 0), source video memory, far sprites avg 0.0 (draw distance 2x, ok), walls on (wall tiles avg 2630), frame 256x224, module=7 area=0x00
-[  13.888] stats: 300 frames, 3D compose 1.880 ms/frame, sprite groups avg 4.0 max 4, tilt 75.0, curve R=0, past-screen px/frame 21807 (missing 0), source video memory, far sprites avg 0.4 (draw distance 2x, ok), walls on (wall tiles avg 2630), frame 256x224, module=7 area=0x00
-[  15.971] stats: 300 frames, 3D compose 1.873 ms/frame, sprite groups avg 4.0 max 4, tilt 75.0, curve R=0, past-screen px/frame 21568 (missing 0), source video memory, far sprites avg 0.9 (draw distance 2x, ok), walls on (wall tiles avg 2630), frame 256x224, module=7 area=0x00
-[  18.054] stats: 300 frames, 3D compose 1.879 ms/frame, sprite groups avg 4.0 max 4, tilt 75.0, curve R=0, past-screen px/frame 21508 (missing 0), source video memory, far sprites avg 1.0 (draw distance 2x, ok), walls on (wall tiles avg 2630), frame 256x224, module=7 area=0x00
-[  20.138] stats: 300 frames, 3D compose 1.873 ms/frame, sprite groups avg 4.0 max 4, tilt 75.0, curve R=0, past-screen px/frame 21515 (missing 0), source video memory, far sprites avg 0.1 (draw distance 2x, ok), walls on (wall tiles avg 2630), frame 256x224, module=7 area=0x00
-[  22.221] stats: 300 frames, 3D compose 1.872 ms/frame, sprite groups avg 4.0 max 4, tilt 75.0, curve R=0, past-screen px/frame 21515 (missing 0), source video memory, far sprites avg 0.0 (draw distance 2x, ok), walls on (wall tiles avg 2630), frame 256x224, module=7 area=0x00
+[   0.393] not gameplay (module=0 sub=1 saved=0 mode=1 tilt=50.0)
+[   4.507] 3D on (module=7 sub=0 saved=7 mode=1 tilt=50.0)
+[   4.508] buffers 256x224
+[   4.511] ground past the screen: video memory (module=7 area=0x00 indoors=1)
+[   6.583] stats: 300 frames, 3D compose 2.218 ms/frame, sprite groups avg 4.0 max 4, tilt 50.0, curve R=0, past-screen px/frame 18218 (missing 0), source video memory, far sprites avg 0.0 (draw distance 2x, ok), walls on (wall tiles avg 2630), frame 256x224, module=7 area=0x00
