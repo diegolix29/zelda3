@@ -19,7 +19,6 @@ enum {
 };
 // Scrive l'intestazione a partire da dst (n caselle)
 void HudIt_DrawLabel(uint16 *dst, int label);
-int HudIt_LabelTiles(int label);
 
 // Abilita' del riquadro AZIONE (0 ALZA, 1 LEGGI, 2 PARLA, 3 TIRA, 4 CORRI,
 // 5 NUOTA) nella riga di 5 caselle dst; level e' il livello di ALZA (1-3);

@@ -324,7 +324,7 @@ static bool ParseBoolBit(const char *value, uint32 *data, uint32 mask) {
 static bool g_fx_heat_key_seen;  // l'ini ha gia' FxHeatAndFlames
 // chiavi divise da opzioni piu' vecchie: se mancano prendono il valore di quella
 static bool g_blond_link_seen, g_gba_damage_seen, g_flipper_dive_seen, g_stuck_arrows_seen, g_hurricane_spin_seen;
-static bool g_item_on_x_seen, g_item_on_lr_seen;
+static bool g_item_on_x_seen;
 
 static bool HandleIniConfig(int section, const char *key, char *value) {
   if (section == 0) {
@@ -536,7 +536,6 @@ static bool HandleIniConfig(int section, const char *key, char *value) {
       g_item_on_x_seen = true;
       return ParseBool(value, &g_config.item_on_x);
     } else if (StringEqualsNoCase(key, "ItemOnLR")) {
-      g_item_on_lr_seen = true;
       return ParseBool(value, &g_config.item_on_lr);
     } else if (StringEqualsNoCase(key, "HurricaneSpin")) {
       g_hurricane_spin_seen = true;

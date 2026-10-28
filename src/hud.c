@@ -1544,8 +1544,8 @@ static void Hud_UpdateItemBox() {  // 8dfafd
   // Update r
   if (hud_cur_item)
     Hud_DrawItem(&hud_tile_indices_buffer[HUDXY(5, 1)], Hud_GetIconForItem(hud_cur_item));
-  if (Hud_ItemOnX() || Hud_ItemOnLR())
-    Hud_DrawXLRItems();
+  // sempre: un tasto spento dal menu va svuotato (lo fa Hud_DrawXLRItems)
+  Hud_DrawXLRItems();
 }
 
 static void Hud_UpdateHearts_Inner(uint16 *dst, const uint16 *src, int n) {  // 8dfdab

@@ -91,6 +91,7 @@ enum {
   // Link, B tenuto scorre veloce, mirino al centro (messaging.c)
   kFeatures0_ImprovedWorldMap = 1 << 25,
   // Mappa del dungeon migliorata: cambio di piano piu' rapido (messaging.c)
+  // e nome del labirinto in alto (hd_menu.c, DrawDungeonMapStatus)
   kFeatures0_ImprovedDungeonMap = 1 << 26,
   // Mappa progressiva: le aree mai visitate restano coperte dalle nuvole
   // (messaging.c, saves/nebbia_fileN.dat)

@@ -561,8 +561,8 @@ int main(int argc, char** argv) {
           g_gamepad_buttons = 0;
         hr_inputs |= g_gamepad_buttons;
         SDL_LockMutex(g_audio_mutex);
-        bool hr_replay = ZeldaRunFrame(hr_inputs);
-        HdMenu_AfterFrame(hr_replay);
+        ZeldaRunFrame(hr_inputs);
+        HdMenu_AfterFrame();
         SDL_UnlockMutex(g_audio_mutex);
         frameCtr++;
         acc -= kFramePeriod;
@@ -588,7 +588,7 @@ int main(int argc, char** argv) {
 
     SDL_LockMutex(g_audio_mutex);
     bool is_replay = ZeldaRunFrame(inputs);
-    HdMenu_AfterFrame(is_replay);
+    HdMenu_AfterFrame();
     SDL_UnlockMutex(g_audio_mutex);
 
     frameCtr++;

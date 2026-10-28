@@ -82,6 +82,20 @@ static bool InGameMenu(void) {
          IsPlayModule(saved_module_for_menu);
 }
 
+// Menu START (inventario, 14/1) aperto durante il gioco
+static bool InItemMenu(void) {
+  return main_module_index == 14 && submodule_index == 1 && IsPlayModule(saved_module_for_menu);
+}
+
+// Pixel di cui il menu START e' sceso (0-232, Hud_BringMenuDown e
+// Hud_CloseMenu). Nel gioco l'HUD sta nello stesso strato del menu (BG3) e
+// scende con lui fino a uscire dallo schermo: l'HUD moderno fa lo stesso, con
+// tasti X e L/R o senza (sta tutto sotto la riga 8, a 232 pixel e' fuori)
+static int ItemMenuPush(void) {
+  int d = -(int16)BG3VOFS_copy2;
+  return d > 0 ? d : 0;
+}
+
 void HdHud_BeforeRender(Ppu *ppu) {
   bool dlg;
   bool active = ModernHudOn() && (HudContext(&dlg) || InGameMenu());
@@ -451,8 +465,8 @@ static void DrawNumberTiles(Canvas *cv, int x, int y, int value, int digits, boo
 }
 
 void HdHud_Draw(uint8 *pixels, int pitch, int width, int height, int scale) {
-  bool in_dialog;
-  if (!ModernHudOn() || !HudContext(&in_dialog))
+  bool in_dialog = false, in_menu = InItemMenu();
+  if (!ModernHudOn() || (!in_menu && !HudContext(&in_dialog)))
     return;
   Ppu *ppu = g_zenv.ppu;
   if (!(ppu->screenEnabled[0] & 4) || ppu->mode == 7)
@@ -460,24 +474,13 @@ void HdHud_Draw(uint8 *pixels, int pitch, int width, int height, int scale) {
   g_hud_bri = ppu->forcedBlank ? 0 : ppu->brightness;
   if (g_hud_bri == 0)
     return;
-  // Nei dialoghi l'HUD scivola fuori dallo schermo (in alto i cuori e i
-  // tasti, in basso rupie e chiavi) e rientra quando il dialogo finisce
-  static float slide;
-  static uint8 last_frame;
-  if (last_frame != frame_counter) {
-    last_frame = frame_counter;
-    float target = in_dialog ? 1.0f : 0.0f;
-    slide += (target > slide ? 1.0f : -1.0f) / 10.0f;
-    if (slide < 0) slide = 0;
-    if (slide > 1) slide = 1;
-  }
-  float ease = slide * slide * (3 - 2 * slide);
-  if (ease >= 1.0f)
-    return;
-  Canvas cv = { pixels, pitch, width / scale, height / scale, scale, -(int)(ease * 48 + 0.5f) };
-  Canvas cvb = cv;
-  cvb.oy = (int)(ease * 32 + 0.5f);
+  // Come l'HUD originale resta anche nei dialoghi (prima scivolava fuori) e
+  // il menu START lo spinge giu' mentre scende
+  int push = in_menu ? ItemMenuPush() : 0;
+  Canvas cv = { pixels, pitch, width / scale, height / scale, scale, push };
   int W = cv.width, H = cv.height;
+  if (push >= H)
+    return;
 
   // --- Cuori (caselle originali 8x8, 10 per riga) ------------------------
   const int x0 = 8, y0 = 8;
@@ -588,12 +591,12 @@ void HdHud_Draw(uint8 *pixels, int pitch, int width, int height, int scale) {
   // --- Rupie in basso a sinistra, chiavi del labirinto sopra ---------------
   {
     int ry = H - margin - 8;
-    DrawTile(&cvb, x0, ry, 0x3ca8);
+    DrawTile(&cv, x0, ry, 0x3ca8);
     int max_rupees = (enhanced_features0 & kFeatures0_CarryMoreRupees) ? 9999 : 999;  // come MaxRupees (hud.c)
-    DrawNumberTiles(&cvb, x0 + 10, ry, link_rupees_actual, 3, ShowMaxInYellow(link_rupees_goal, max_rupees));
+    DrawNumberTiles(&cv, x0 + 10, ry, link_rupees_actual, 3, ShowMaxInYellow(link_rupees_goal, max_rupees));
     if (link_num_keys != 0xff) {
-      DrawTile(&cvb, x0, ry - 10, 0x2871);
-      DrawNumberTiles(&cvb, x0 + 10, ry - 10, link_num_keys, 1, false);
+      DrawTile(&cv, x0, ry - 10, 0x2871);
+      DrawNumberTiles(&cv, x0 + 10, ry - 10, link_num_keys, 1, false);
     }
   }
 }

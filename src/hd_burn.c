@@ -31,6 +31,7 @@
 #include "sprite.h"
 #include "misc.h"
 #include "hd_world.h"
+#include "hd_water.h"
 #include "ancilla.h"
 #include "hd_fx.h"
 #include "snes/ppu.h"
@@ -39,7 +40,7 @@ extern int g_render_bias_x, g_render_bias_y;
 
 enum {
   kMaxPending = 128,
-  kMaxScorched = 2048,   // tile annerite ricordate (8 byte l'una)
+  kMaxScorched = 2048,   // tile annerite ricordate (10 byte l'una)
   kMaxFrozen = 1024,     // tile congelate ricordate
   kMaxWet = 64,          // tile appena sciolte ricordate
   kWetTime = 120,        // frame in cui la tile appena sciolta non prende fuoco
@@ -145,18 +146,9 @@ static bool IsBurnable(uint16 x, uint16 y) {
   return t >= 0 && Burnable(t, &repl, &what);
 }
 
-// Sul Monte della Morte e attorno alla Piramide il vuoto oltre i dirupi e'
-// "acqua profonda" per il gioco (come IsSkyPoint di hd_water.c)
-static bool IsSkyTile(uint16 x, uint16 y) {
-  int col = x >> 9, row = y >> 9;
-  if ((row == 0 && col >= 3) || (row == 1 && col >= 3 && col <= 6))
-    return true;
-  return (AreaOf(x, y) & 0x40) && row >= 3 && row <= 4 && col >= 3 && col <= 4;
-}
-
 uint8 HdBurn_WaterCells(uint16 x, uint16 y) {
   int t = TileAt(x, y);
-  if (t < 0 || IsSkyTile(x, y))
+  if (t < 0 || HdWater_IsSky(x, y))  // cielo del Monte della Morte
     return 0;
   const uint16 *m8 = GetMap16toMap8Table() + t * 4;
   const uint8 *attr = GetMap8toTileAttr();

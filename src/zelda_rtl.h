@@ -70,7 +70,6 @@ enum {
 };
 
 void SaveLoadSlot(int cmd, int which);
-bool SaveLoadNamed(int cmd, const char *name);
 void ZeldaWriteSram();
 void ZeldaReadSram();
 

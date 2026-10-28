@@ -6,13 +6,19 @@
 #include "types.h"
 
 extern bool g_fx_heat, g_fx_window_rays, g_fx_item_glow, g_fx_rain;
-extern bool g_fx_menu_blur, g_fx_sprite_shadows, g_fx_soft_iris, g_fx_button_hints;
+extern bool g_fx_menu_blur, g_fx_sprite_shadows, g_fx_soft_iris;
 // Bagliori magici bianchi sopra i vortici di teletrasporto ("Distingui vortici da Zora")
 extern bool g_fx_whirlpool;
 // Nebbia del Bosco Perduto migliorata (prima della Spada Suprema)
 extern bool g_fx_fog;
 // Frame di gioco dall'avvio (per le animazioni: frame_counter si azzera ogni 256)
 extern uint32 g_fx_frames;
+
+// Colore (0-15) di un pixel di una tile 4bpp: p01 e p23 sono le due parole
+// della riga (piani 0-1 e 2-3, come nella VRAM), bit = 7 - colonna
+static inline int HdFx_Pixel4bpp(uint16 p01, uint16 p23, int bit) {
+  return (p01 >> bit & 1) | (p01 >> (8 + bit) & 1) << 1 | (p23 >> bit & 1) << 2 | (p23 >> (8 + bit) & 1) << 3;
+}
 
 // Prima dell'illuminazione: riconosce la lava e fa tremolare l'aria sopra
 void HdFx_BeforeLight(uint8 *pixels, int pitch, int width, int height, int bias_x, int bias_y);
@@ -22,6 +28,9 @@ void HdFx_AfterLight(uint8 *pixels, int pitch, int width, int height, int bias_x
 // Modulo della scena che si vede sullo schermo (per lo shader e per gli
 // effetti sul fondale): 7 = dentro, 9 = fuori, 14 = un menu che copre il gioco
 int HdFx_SceneModule(void);
+// Si vede il gioco (HdFx_SceneModule 7, 9 o 11): unico controllo per acqua,
+// luci, particelle e ombre. *mod_out: il modulo della scena
+bool HdFx_InGameplay(int *mod_out);
 // Marca i pixel d'acqua (layer 7) per lo shader
 void HdFx_MarkWater(uint8 *pixels, int pitch, int width, int height, int bias_x, int bias_y);
 bool HdFx_FloodWindowShows(int sx, int sy);

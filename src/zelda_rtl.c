@@ -158,7 +158,6 @@ int g_render_bias_x, g_render_bias_y;
 // Frazione di frame trascorsa (0-1) per l'interpolazione; 1 = nessuna
 float g_interp_alpha = 1.0f;
 
-extern int g_render_bias_x, g_render_bias_y;
 extern int g_lamp_cone_idx;
 
 #include "hd_world.h"
@@ -192,6 +191,41 @@ static int SeamTileAddr(BgLayer *bg, int row, int col) {
 static bool RoomSeamActive(void) {
   return main_module_index == 7 && submodule_index == 2 && g_seam_prev_room >= 0 &&
          g_seam_prev_room != dungeon_room_index;
+}
+
+// Scorrimento della vista: verso un'altra stanza (7/2) o verso l'altra meta'
+// della stessa stanza (7/1)
+static bool RoomScrollActive(void) {
+  return RoomSeamActive() || (main_module_index == 7 && submodule_index == 1 &&
+                              g_seam_prev_room == dungeon_room_index);
+}
+
+// Fasce durante lo scorrimento, in pixel della vista disegnata (con lo
+// spostamento delle transizioni veloci e della telecamera fluida). room_bounds
+// e' gia' quello della parte nuova, g_seam_prev_* quello della parte di prima.
+// Dal lato da cui si arriva la parte vecchia si chiude negli ultimi pixel
+// prima che la vista arrivi (a fine scorrimento la fascia e' gia' nera); dal
+// lato verso cui si va la parte nuova si apre a mano a mano che la vista lascia
+// il bordo di quella vecchia. Prima la vecchia restava piena fino all'ultimo
+// fotogramma e spariva di colpo, e la nuova compariva tutta al primo.
+static void RoomScrollBands(int *left, int *right, int *bottom) {
+  int qm = quadrant_fullsize_x >> 1, qy = quadrant_fullsize_y >> 1;
+  int vx = BG2HOFS_copy2 + g_render_bias_x, vy = BG2VOFS_copy2 + g_render_bias_y;
+  int lo = room_bounds_x.v[qm], hi = room_bounds_x.v[qm + 2];
+  int ly = room_bounds_y.v[qy], hy = room_bounds_y.v[qy + 2];
+  int old_lo = g_seam_prev_x0, old_hi = g_seam_prev_x1 - 256, old_hy = g_seam_prev_y1;
+  if (vx < lo) {  // verso destra: la parte vecchia e' a sinistra
+    *left = IntMax(*left, IntMin(vx - old_lo, lo - vx));
+    *right = IntMin(*right, vx - old_hi);
+  } else if (vx > hi) {  // verso sinistra: la parte vecchia e' a destra
+    *right = IntMax(*right, IntMin(old_hi - vx, vx - hi));
+    *left = IntMin(*left, old_lo - vx);
+  }
+  if (vy > hy)  // verso l'alto: la parte vecchia e' sotto
+    *bottom = IntMax(*bottom, IntMin(old_hy - vy, vy - hy));
+  else if (vy < ly)  // verso il basso: la parte nuova sotto si apre
+    *bottom = IntMin(*bottom, vy - old_hy);
+  *left = IntMax(*left, 0), *right = IntMax(*right, 0), *bottom = IntMax(*bottom, 0);
 }
 
 // Stanza ferma: si ricorda quale parte se ne vede (per le fasce durante il
@@ -251,6 +285,33 @@ static void RoomSeamPatch(Ppu *ppu, int width, int height) {
   }
 }
 
+// Gli effetti HD (raggi delle finestre, pulviscolo, bagliori, luci, acqua...)
+// si disegnano dopo la PPU su tutta l'immagine, anche nelle fasce che la PPU
+// ha lasciato nere perche' fuori dalla stanza (o dall'area): li' restavano
+// pezzi della stanza vecchia o dell'altra meta' della stanza (i raggi delle
+// finestre non si vedevano piu' ma restavano sul nero). Si rimette il nero
+// della PPU, cosi' qualunque effetto rispetta le fasce.
+static void ClearHiddenBands(Ppu *ppu, uint8 *pixels, size_t pitch, int width, int height) {
+  if (ppu->mode == 7 || HdWorld_Active())
+    return;
+  int ext = (width - 256) / 2;
+  int x0 = ext - ppu->extraLeftCur, x1 = ext + 256 + ppu->extraRightCur;
+  int y1 = IntMin(224 + ppu->extraBottomCur, height);
+  if (x0 < 0) x0 = 0;
+  if (x1 > width) x1 = width;
+  for (int y = 0; y < height; y++) {
+    uint32 *row = (uint32 *)(pixels + y * pitch);
+    if (y >= y1) {
+      memset(row, 0, sizeof(uint32) * width);
+      continue;
+    }
+    if (x0 > 0)
+      memset(row, 0, sizeof(uint32) * x0);
+    if (x1 < width)
+      memset(row + x1, 0, sizeof(uint32) * (width - x1));
+  }
+}
+
 static void RoomSeamRestore(Ppu *ppu) {
   while (g_seam_n > 0) {
     g_seam_n--;
@@ -261,6 +322,7 @@ static void RoomSeamRestore(Ppu *ppu) {
 static void ConfigurePpuSideSpace() {
   // Let PPU impl know about the maximum allowed extra space on the sides and bottom
   int extra_right = 0, extra_left = 0, extra_bottom = 0;
+  bool room_scroll = false;
 //  printf("main %d, sub %d  (%d, %d, %d)\n", main_module_index, submodule_index, BG2HOFS_copy2, room_bounds_x.v[2 | (quadrant_fullsize_x >> 1)], quadrant_fullsize_x >> 1);
   int mod = main_module_index;
   if (mod == 14)
@@ -296,13 +358,9 @@ static void ConfigurePpuSideSpace() {
 
     int qy = quadrant_fullsize_y >> 1;
     extra_bottom = IntMax(room_bounds_y.v[qy + 2] - BG2VOFS_copy2, 0);
-    // passaggio fra due stanze: le fasce coprono la stanza nuova e la vecchia
+    // scorrimento verso un'altra stanza o l'altra meta' (RoomScrollBands)
     RoomSeamRemember();
-    if (RoomSeamActive()) {
-      extra_left = IntMax(extra_left, BG2HOFS_copy2 - g_seam_prev_x0);
-      extra_right = IntMax(extra_right, g_seam_prev_x1 - 256 - BG2HOFS_copy2);
-      extra_bottom = IntMax(extra_bottom, g_seam_prev_y1 - BG2VOFS_copy2);
-    }
+    room_scroll = RoomScrollActive();
   } else if (mod == 20 || mod == 0 || mod == 1) {
     extra_left = kPpuExtraLeftRight, extra_right = kPpuExtraLeftRight;
     extra_bottom = 16;
@@ -318,6 +376,8 @@ static void ConfigurePpuSideSpace() {
     if (extra_right >= 0) extra_right = IntMax(extra_right - g_render_bias_x, 0);
     if (extra_bottom >= 0) extra_bottom = IntMax(extra_bottom - g_render_bias_y, 0);
   }
+  if (room_scroll)
+    RoomScrollBands(&extra_left, &extra_right, &extra_bottom);
   PpuSetExtraSideSpace(g_zenv.ppu, extra_left, extra_right, extra_bottom);
 }
 
@@ -453,11 +513,6 @@ static void ApplyRenderBias() {
   ppu->objBiasX = obj_x, ppu->objBiasY = obj_y;
 }
 
-// Con la vista spostata (telecamera fluida o libera) la posizione verticale
-// degli sprite, 8 bit relativi alla telecamera del gioco, e' ambigua: 229 puo'
-// essere "poco sotto lo schermo" o "27 pixel sopra". Per ogni sprite si
-// sceglie l'interpretazione piu' vicina a un oggetto vero del gioco (Link,
-// nemici, oggetti in volo), visto che ogni sprite si disegna vicino al suo.
 extern uint8 g_link_oam_mask[128], g_link_oam_real_f0[128], g_sprite_oam_owner[128], g_oam_real_f0[128];
 
 // Fra v + k*period sceglie il valore la cui posizione sullo schermo (v - bias)
@@ -652,6 +707,7 @@ void ZeldaDrawPpuFrame(uint8 *pixel_buffer, size_t pitch, uint32 render_flags) {
     HdFx_SoftIris(pixel_buffer, (int)pitch, frame_w, height);
     HdFx_MenuBlur(pixel_buffer, (int)pitch, frame_w, height);
   }
+  ClearHiddenBands(g_zenv.ppu, pixel_buffer, pitch, 256 + 2 * g_zenv.ppu->extraLeftRight, height);
   RoomSeamRestore(g_zenv.ppu);
 }
 
@@ -1263,19 +1319,6 @@ void SaveLoadSlot(int cmd, int which) {
 
     fclose(f);
   }
-}
-
-// Salva o carica uno stato su un file con nome arbitrario (salvataggi automatici).
-bool SaveLoadNamed(int cmd, const char *name) {
-  FILE *f = fopen(name, cmd != kSaveLoad_Save ? "rb" : "wb");
-  if (!f)
-    return false;
-  if (cmd != kSaveLoad_Save)
-    StateRecorder_Load(&state_recorder, f, cmd == kSaveLoad_Replay);
-  else
-    StateRecorder_Save(&state_recorder, f);
-  fclose(f);
-  return true;
 }
 
 typedef struct StateRecoderMultiPatch {

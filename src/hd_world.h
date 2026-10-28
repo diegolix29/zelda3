@@ -10,8 +10,10 @@ bool HdWorld_Active(void);
 // Una volta per frame di gioco: posizione della telecamera "libera", cioe'
 // quella che il gioco avrebbe se non si fermasse ai bordi dell'area
 void HdWorld_UpdateCamera(int *cam_x, int *cam_y);
-// Ai quattro bordi della mappa del mondo la vista si ferma come nel gioco:
+// Ai quattro bordi della mappa del mondo la vista si ferma come nel gioco, e
+// anche fra montagna e pianura (MountainAbove, PlainBelow, OtherLevelAt):
 // riporta dentro la posizione (x, y) della telecamera se mostrerebbe il vuoto
+// o l'altro livello
 void HdWorld_ClampView(int *cam_x, int *cam_y);
 // Dopo il disegno della PPU: il fondale fuori dall'area corrente (e durante
 // il passaggio fra aree, tutto il fondale) viene preso dalle immagini delle aree
@@ -64,8 +66,10 @@ extern bool g_view_valid;
 // Nemici che seguono Link: al passaggio in un'altra area, prima che il gioco
 // legga i nemici della nuova, chi lo insegue resta con lui
 void HdWorld_BeforeNewSprites(void);
-// Mondo vivo, nemici fuori dalla vista (Sprite_PrepOamCoordOrDoubleRet): un
-// nemico dell'area resta fermo invece di sparire; chi seguiva Link torna a casa
+// Mondo vivo, nemici fuori dalla vista (Sprite_PrepOamCoordOrDoubleRet): vero
+// se il nemico dell'area (o l'oggetto caduto) continua a muoversi senza
+// disegnarsi invece di sparire (chi sparisce e seguiva Link torna a casa con
+// HdWorld_CarriedLost)
 bool HdWorld_KeepOffscreen(int k);
 void HdWorld_SpriteBegin(int k);
 void HdWorld_SpriteEnd(int k, bool offscreen);
