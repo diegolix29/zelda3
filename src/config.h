@@ -88,6 +88,9 @@ typedef struct Config {
   bool gba_damage, flipper_dive, stuck_arrows;
   // Giravolta Tornado come su GBA, sbloccata dal Retino per Farfalle
   bool hurricane_spin;
+  // Oggetti assegnabili al tasto X e ai tasti L e R nel menu degli oggetti
+  // (divise da ItemSwitchLR, che ora e' solo il cambio rapido con L e R)
+  bool item_on_x, item_on_lr;
   uint8 text_speed;         // 0 = originale, 1 = veloce, 2 = istantaneo
 
   const char *link_graphics;

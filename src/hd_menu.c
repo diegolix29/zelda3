@@ -11,6 +11,7 @@
 #include "variables.h"
 #include "config.h"
 #include "features.h"
+#include "load_gfx.h"
 #include "util.h"
 #include "snes/ppu.h"
 #include "hd_light.h"
@@ -79,7 +80,6 @@ static const FeatureOption kFeatureOptions[] = {
   { "Transizioni veloci", "FastTransitions", kFeatures0_FastTransitions },
   { "Mondo continuo all'esterno", "ContinuousWorld", kFeatures0_ContinuousWorld },
   { "HUD moderno", "ModernHud", kFeatures0_ModernHud },
-  { "Oggetti X, L, R nell'HUD", "ShowXLRItemsInHud", kFeatures0_ShowXLRItemsInHud },
   { "Nomi dei labirinti", "DungeonNames", kFeatures0_DungeonNames },
   { "Mappa migliorata", "ImprovedWorldMap", kFeatures0_ImprovedWorldMap },
   { "Mappa dei labirinti migliorata", "ImprovedDungeonMap", kFeatures0_ImprovedDungeonMap },
@@ -360,11 +360,12 @@ static const char *Tr(const char *it) {
     { "Transizioni veloci", "Fast transitions" },
     { "Mondo continuo all'esterno", "Continuous overworld" },
     { "HUD moderno", "Modern HUD" },
-    { "Oggetti X, L, R nell'HUD", "X, L, R items in the HUD" },
     { "Richiede Cambio oggetti con L e R", "Requires Switch items with L and R" },
     { "Richiede la PPU ottimizzata (NewRenderer)", "Requires the optimized PPU (NewRenderer)" },
     { "Nomi dei labirinti", "Dungeon names" },
+    { "Tasto X per gli oggetti", "X button for items" },
     { "Cambio oggetti con L e R", "Switch items with L and R" },
+    { "Tasti L e R per gli oggetti", "L and R buttons for items" },
     { "Spada e oggetti interazione ambiente", "Sword and items interaction" },
     { "Oggetti riempiono le risorse", "Items refill resources" },
     { "Interazione bruciatura e congelamento", "Burn and freeze interaction" },
@@ -413,6 +414,8 @@ static const char *Tr(const char *it) {
     { "Raggi dalle finestre", "Light rays from windows" },
     { "Bagliore degli oggetti ricevuti", "Glow of received items" },
     { "Pioggia e lampi migliorati", "Improved rain and lightning" },
+    { "Meno flash VC", "Fewer flashes (VC)" },
+    { "Meno flash GBA", "Fewer flashes (GBA)" },
     { "Nebbia migliorata", "Improved fog" },
     { "Acqua e cascate realistiche", "Realistic water and waterfalls" },
     { "Sfocatura dietro menu e dialoghi", "Blur behind menus and dialogues" },
@@ -446,7 +449,6 @@ static const char *Tr(const char *it) {
     { "Tasti predefiniti ripristinati", "Default keys restored" },
     { "Scegli", "Select" },
     { "Chiudi", "Close" },
-    { "Riordina", "Sort" },
     { "Segnalino", "Marker" },
     { "Centra su Link", "Center on Link" },
     { "Veloce", "Fast" },
@@ -497,7 +499,7 @@ static void AddIni(IniValue *v, int *n, const char *section, const char *key, co
 }
 
 static void SaveSettings() {
-  IniValue v[64];
+  IniValue v[96];
   int n = 0;
   AddIni(v, &n, "[Graphics]", "SmoothCamera", "%d", g_config.smooth_camera);
   AddIni(v, &n, "[Graphics]", "EnhancedMode7", "%d", g_config.enhanced_mode7);
@@ -517,9 +519,13 @@ static void SaveSettings() {
   AddIni(v, &n, "[Graphics]", "FxWhirlpoolGlow", "%d", g_config.fx_whirlpool);
   AddIni(v, &n, "[Graphics]", "OfficialArtwork", "%d", g_config.official_artwork);
   AddIni(v, &n, "[Graphics]", "BlondLink", "%d", g_config.blond_link);
+  AddIni(v, &n, "[Graphics]", "DimFlashes", "%d", (g_config.features0 & kFeatures0_DimFlashes) != 0);
+  AddIni(v, &n, "[Graphics]", "DimFlashesGba", "%d", (g_config.features0 & kFeatures0_DimFlashesGba) != 0);
   AddIni(v, &n, "[Features]", "FlipperDive", "%d", g_config.flipper_dive);
   AddIni(v, &n, "[Features]", "StuckArrows", "%d", g_config.stuck_arrows);
   AddIni(v, &n, "[Features]", "HurricaneSpin", "%d", g_config.hurricane_spin);
+  AddIni(v, &n, "[Features]", "ItemOnX", "%d", g_config.item_on_x);
+  AddIni(v, &n, "[Features]", "ItemOnLR", "%d", g_config.item_on_lr);
   // La lingua si scrive solo se cambiata dal menu (altrimenti resta quella
   // dell'ini, anche de, fr...)
   if (g_lang_dirty) {
@@ -628,12 +634,21 @@ static void BuildItems() {
     AddItem(17, "Distingui vortici da Zora", YesNo(g_config.fx_whirlpool));
     AddItem(18, "Aspetto dei disegni ufficiali", YesNo(g_config.official_artwork));
     AddItem(19, "Link biondo", g_config.link_graphics ? "Link personalizzato" : YesNo(g_config.blond_link));
+    AddItem(20, "Meno flash VC", YesNo((g_config.features0 & kFeatures0_DimFlashes) != 0));
+    AddItem(21, "Meno flash GBA", YesNo((g_config.features0 & kFeatures0_DimFlashesGba) != 0));
     break;
   case kPage_Game:
     AddItem(100, "Velocit\xc3\xa0 del testo", kTextSpeedNames[g_config.text_speed % 3]);
     AddItem(101, "Lingua dei dialoghi", IsItalian() ? "Italiano" : "English");
-    for (int i = 0; i < countof(kFeatureOptions); i++)
+    for (int i = 0; i < countof(kFeatureOptions); i++) {
+      // tasto X, cambio con L e R, tasti L e R: le tre opzioni degli oggetti
+      // sui tasti stanno insieme
+      if (kFeatureOptions[i].bit == kFeatures0_SwitchLR)
+        AddItem(105, "Tasto X per gli oggetti", YesNo(g_config.item_on_x));
       AddItem(i, kFeatureOptions[i].label, YesNo((g_config.features0 & kFeatureOptions[i].bit) != 0));
+      if (kFeatureOptions[i].bit == kFeatures0_SwitchLR)
+        AddItem(106, "Tasti L e R per gli oggetti", YesNo(g_config.item_on_lr));
+    }
     AddItem(102, "Immersione con le pinne", YesNo(g_config.flipper_dive));
     AddItem(103, "Frecce piantate nei muri", YesNo(g_config.stuck_arrows));
     AddItem(104, "Giravolta Tornado", YesNo(g_config.hurricane_spin));
@@ -712,6 +727,13 @@ static void Activate(int id, int dir) {
       // Link e la sua palette subito
       g_config.blond_link = !g_config.blond_link;
       HdArt_Apply();
+    } else if (id == 20 || id == 21) {
+      // meno flash VC o GBA: accenderne uno spegne l'altro
+      uint32 bit = id == 20 ? kFeatures0_DimFlashes : kFeatures0_DimFlashesGba;
+      bool on = !(g_config.features0 & bit);
+      SetFeature(kFeatures0_DimFlashes | kFeatures0_DimFlashesGba, false);
+      SetFeature(bit, on);
+      Palette_ApplyDimFlashFloor((g_config.features0 & kFeatures0_DimFlashes) != 0);
     } else if (id == 15 && g_zenv.ppu->extraLeftRight == 0) {
       ShowMessage("Richiede lo schermo 16:9 o 16:10");
     } else if (id >= 7 && id <= 17) {
@@ -738,20 +760,28 @@ static void Activate(int id, int dir) {
       g_config.stuck_arrows = !g_config.stuck_arrows;
     } else if (id == 104) {
       g_config.hurricane_spin = !g_config.hurricane_spin;
+    } else if (id == 105 || id == 106) {
+      bool *opt = id == 105 ? &g_config.item_on_x : &g_config.item_on_lr;
+      *opt = !*opt;
+      // tasti L e R per gli oggetti oppure cambio oggetti con L e R
+      if (id == 106 && g_config.item_on_lr)
+        SetFeature(kFeatures0_SwitchLR | kFeatures0_SwitchLRLimit, false);
     } else {
       uint32 bit = kFeatureOptions[id].bit;
       if ((bit == kFeatures0_ContinuousWorld || bit == kFeatures0_FastTransitions) && !g_config.new_renderer) {
         ShowMessage("Richiede la PPU ottimizzata (NewRenderer)");
         break;
       }
-      // oggetti X, L, R nell'HUD solo con il cambio oggetti con L e R
-      if ((bit == kFeatures0_ShowXLRItemsInHud || bit == kFeatures0_SwitchLRLimit) && !(g_config.features0 & kFeatures0_SwitchLR)) {
+      // L/R solo sui primi 4 oggetti solo con il cambio con L e R
+      if (bit == kFeatures0_SwitchLRLimit && !(g_config.features0 & kFeatures0_SwitchLR)) {
         ShowMessage("Richiede Cambio oggetti con L e R");
         break;
       }
       SetFeature(bit, !(g_config.features0 & bit));
       if (bit == kFeatures0_SwitchLR && !(g_config.features0 & bit))
-        SetFeature(kFeatures0_ShowXLRItemsInHud, false), SetFeature(kFeatures0_SwitchLRLimit, false);
+        SetFeature(kFeatures0_SwitchLRLimit, false);
+      if (bit == kFeatures0_SwitchLR && (g_config.features0 & bit))
+        g_config.item_on_lr = false;
     }
     break;
   case kPage_Audio:
@@ -1141,8 +1171,6 @@ static void DrawButtonHints(Canvas *cv) {
     int nr = 0;
     if (sram_progress_indicator)
       right[nr++] = (Hint){ kBtn_Select, "Salva" };
-    if (enhanced_features0 & kFeatures0_SwitchLR)
-      right[nr++] = (Hint){ kBtn_Y, "Riordina" };
     // Le colonne stanno nelle fasce laterali: in 16:9 (71 px) con il margine
     // interno pieno, in 16:10 (51 px) con un margine piu' stretto. In 4:3 non
     // c'e' spazio: niente suggerimenti (sotto coprirebbero i riquadri)

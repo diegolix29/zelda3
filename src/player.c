@@ -2853,6 +2853,8 @@ void LinkItem_Ether() {  // 87a494
 
   if (!LinkCheckMagicCost(1))
     return;
+  if (enhanced_features0 & kFeatures0_DimFlashesGba)
+    g_gba_dim_timer = 0xf0;  // GBA 0x80a3ea0: lo schermo si scurisce
   link_player_handler_state = kPlayerState_Ether;
   link_cant_change_direction |= 1;
   link_delay_timer_spin_attack = kEtherAnimDelays[0];
@@ -2864,6 +2866,10 @@ void LinkItem_Ether() {  // 87a494
 
 void LinkState_UsingEther() {  // 87a50f
   flag_unk1++;
+  if (enhanced_features0 & kFeatures0_DimFlashesGba) {  // GBA 0x809cd8c
+    GbaFlash_DimStep(0, 0xe0);
+    GbaFlash_DimHold(0xa0);
+  }
   if (!sign8(--link_delay_timer_spin_attack))
     return;
 

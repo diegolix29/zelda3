@@ -368,6 +368,28 @@ static void DrawImage(Canvas *cv, int x, int y, const uint32 *img, int w, int h)
     }
 }
 
+// Nome del tasto (A, B, X, Y) al centro del tasto, 4x5 come la L e la R dei
+// dorsali, in un tono piu' scuro del tasto; gli oggetti lo coprono.
+// (bx, by) = angolo del tasto dentro l'immagine disegnata in (x, y)
+static void DrawButtonLetter(Canvas *cv, int x, int y, const uint32 *img, int w, int bx, int by, char ch) {
+  static const uint8 kGlyph[4][5] = {
+    { 0x6, 0x9, 0xf, 0x9, 0x9 },  // A
+    { 0xe, 0x9, 0xe, 0x9, 0xe },  // B
+    { 0x9, 0x9, 0x6, 0x9, 0x9 },  // X
+    { 0x9, 0x9, 0x6, 0x6, 0x6 },  // Y
+  };
+  const uint8 *g = kGlyph[ch == 'A' ? 0 : ch == 'B' ? 1 : ch == 'X' ? 2 : 3];
+  int lx = bx + (HD_BUTTON_SIZE - 4) / 2, ly = by + (HD_BUTTON_SIZE - 5) / 2;
+  for (int r = 0; r < 5; r++)
+    for (int c = 0; c < 4; c++) {
+      uint32 v = img[(ly + r) * w + lx + c];
+      if (!(g[r] & 8 >> c) || !(v >> 24))
+        continue;
+      uint32 dark = ((v >> 16 & 0xff) * 7 / 10) << 16 | ((v >> 8 & 0xff) * 7 / 10) << 8 | (v & 0xff) * 7 / 10;
+      Px(cv, x + lx + c, y + ly + r, dark);
+    }
+}
+
 // Primo pixel visibile (riga e colonna) di una casella: serve ad allineare i
 // tasti esattamente al cuore piu' in alto a sinistra
 static void TileFirstPixel(uint16 entry, int *row, int *col) {
@@ -512,26 +534,39 @@ void HdHud_Draw(uint8 *pixels, int pitch, int width, int height, int scale) {
 
   // --- Tasti: il punto piu' alto a filo con i cuori, il piu' a destra con
   // lo stesso margine dei cuori a sinistra
-  // Solo i tre tasti Y, A e B; con "Oggetti X, L, R nell'HUD"
-  // (ShowXLRItemsInHud) i tasti sono quattro, a rombo con X blu, e a sinistra
-  // ci sono i dorsali L e R
+  // I tre tasti Y, A e B, piu' quelli a cui si possono assegnare oggetti: con
+  // "Tasto X per gli oggetti" i tasti sono quattro, a rombo con X blu; con
+  // "Tasti L e R per gli oggetti" sopra ci sono i dorsali L (sopra Y) e R
+  // (sopra A) come su un controller SNES
   const int S = HD_BUTTON_SIZE;
   int yx, yy, ax, ay, bx, by;
-  // (come l'HUD classico: senza il cambio oggetti con L e R non ci sono oggetti su X, L e R)
-  if ((enhanced_features0 & kFeatures0_ShowXLRItemsInHud) && (enhanced_features0 & kFeatures0_SwitchLR)) {
-    int gx = W - margin - HD_BUTTONS4_W, gy = top;
+  bool show_x = Hud_ItemOnX(), show_lr = Hud_ItemOnLR();
+  int gy = top;
+  if (show_lr) {
+    int lx = W - margin - HD_BUTTONS4_W, rx = W - margin - HD_SHOULDER_W;
+    DrawImage(&cv, lx, top, kHdShoulderL, HD_SHOULDER_W, HD_SHOULDER_H);
+    DrawImage(&cv, rx, top, kHdShoulderR, HD_SHOULDER_W, HD_SHOULDER_H);
+    DrawButtonItem(&cv, lx + HD_SHOULDER_L_ITEM_X, top + HD_SHOULDER_ITEM_Y, hud_cur_item_l);
+    DrawButtonItem(&cv, rx + HD_SHOULDER_R_ITEM_X, top + HD_SHOULDER_ITEM_Y, hud_cur_item_r);
+    gy = top + HD_SHOULDER_H + 2;
+  }
+  if (show_x) {
+    int gx = W - margin - HD_BUTTONS4_W;
     DrawImage(&cv, gx, gy, kHdButtons4, HD_BUTTONS4_W, HD_BUTTONS4_H);
+    DrawButtonLetter(&cv, gx, gy, kHdButtons4, HD_BUTTONS4_W, HD_BUTTON4_X_X, HD_BUTTON4_X_Y, 'X');
+    DrawButtonLetter(&cv, gx, gy, kHdButtons4, HD_BUTTONS4_W, HD_BUTTON4_Y_X, HD_BUTTON4_Y_Y, 'Y');
+    DrawButtonLetter(&cv, gx, gy, kHdButtons4, HD_BUTTONS4_W, HD_BUTTON4_A_X, HD_BUTTON4_A_Y, 'A');
+    DrawButtonLetter(&cv, gx, gy, kHdButtons4, HD_BUTTONS4_W, HD_BUTTON4_B_X, HD_BUTTON4_B_Y, 'B');
     yx = gx + HD_BUTTON4_Y_X, yy = gy + HD_BUTTON4_Y_Y;
     ax = gx + HD_BUTTON4_A_X, ay = gy + HD_BUTTON4_A_Y;
     bx = gx + HD_BUTTON4_B_X, by = gy + HD_BUTTON4_B_Y;
-    int sx = gx - 10 - HD_SHOULDERS_W, sy = gy;
-    DrawImage(&cv, sx, sy, kHdShoulders, HD_SHOULDERS_W, HD_SHOULDERS_H);
     DrawButtonItem(&cv, gx + HD_BUTTON4_X_X, gy + HD_BUTTON4_X_Y, hud_cur_item_x);
-    DrawButtonItem(&cv, sx + HD_SHOULDER_L_X, sy + HD_SHOULDER_Y, hud_cur_item_l);
-    DrawButtonItem(&cv, sx + HD_SHOULDER_R_X, sy + HD_SHOULDER_Y, hud_cur_item_r);
   } else {
-    int gx = W - margin - HD_BUTTONS_W, gy = top;
+    int gx = W - margin - HD_BUTTONS_W;
     DrawImage(&cv, gx, gy, kHdButtons, HD_BUTTONS_W, HD_BUTTONS_H);
+    DrawButtonLetter(&cv, gx, gy, kHdButtons, HD_BUTTONS_W, HD_BUTTON_Y_X, HD_BUTTON_Y_Y, 'Y');
+    DrawButtonLetter(&cv, gx, gy, kHdButtons, HD_BUTTONS_W, HD_BUTTON_A_X, HD_BUTTON_A_Y, 'A');
+    DrawButtonLetter(&cv, gx, gy, kHdButtons, HD_BUTTONS_W, HD_BUTTON_B_X, HD_BUTTON_B_Y, 'B');
     yx = gx + HD_BUTTON_Y_X, yy = gy + HD_BUTTON_Y_Y;
     ax = gx + HD_BUTTON_A_X, ay = gy + HD_BUTTON_A_Y;
     bx = gx + HD_BUTTON_B_X, by = gy + HD_BUTTON_B_Y;

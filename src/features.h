@@ -63,8 +63,8 @@ enum {
   // caricamento si fanno in un frame, Link si disegna mentre cammina a
   // velocita' costante e la telecamera parte e frena dolcemente (hd_trans.c)
   kFeatures0_FastTransitions = 1 << 17,
-  // Mostra nell'HUD gli oggetti assegnati a X/L/R
-  kFeatures0_ShowXLRItemsInHud = 1 << 18,
+  // 1 << 18 era "Oggetti X, L, R nell'HUD" (ShowXLRItemsInHud), tolta: l'HUD
+  // mostra sempre i tasti a cui si possono dare oggetti (ItemOnX, ItemOnLR)
   // Pozione d'oro, da BS Zelda - Le Antiche Tavole di Pietra: quarto calderone
   // nella bottega della strega, con i calderoni a 32 pixel l'uno dall'altro
   // (sprite_main.c, Sprite_GoldCauldron). Prima 1 << 19 era la transizione
@@ -108,11 +108,15 @@ enum {
   kFeatures0_IcePalaceGba = 1 << 30,
 };
 
+// Meno flash GBA: i lampi come nella versione GBA (load_gfx.c, GbaFlash_*).
+// Fuori dall'enum perche' 1 << 31 non sta in un int; con DimFlashesGba la
+// versione Virtual Console (kFeatures0_DimFlashes) si spegne
+#define kFeatures0_DimFlashesGba 0x80000000u
+
 #define enhanced_features0 (*(uint32*)(g_ram+0x64c))
 #define msu_curr_sample (*(uint32*)(g_ram+0x650))
 #define msu_volume (*(uint8*)(g_ram+0x654))
 #define msu_track (*(uint8*)(g_ram+0x655))
-#define hud_inventory_order ((uint8*)(g_ram + 0x225)) // 4x6 bytes
 #define hud_cur_item_x (*(uint8*)(g_ram+0x656))
 #define hud_cur_item_l (*(uint8*)(g_ram+0x657))
 #define hud_cur_item_r (*(uint8*)(g_ram+0x658))

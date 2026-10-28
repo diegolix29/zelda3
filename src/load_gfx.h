@@ -161,5 +161,10 @@ void Palette_LoadForFileSelect_Sword(int k, uint8 sword);
 void Palette_LoadForFileSelect_Shield(int k, uint8 shield);
 void Palette_LoadAgahnim();
 void HandleScreenFlash();
+void Palette_ApplyDimFlashFloor(bool on);
+extern uint8 g_gba_dim_timer;
+void GbaFlash_DimStep(uint8 mask, uint8 min);
+void GbaFlash_DimHold(uint8 v);
+void GbaFlash_Bolt(uint8 len);
 
 #endif // ZELDA3_LOAD_GFX_H_
