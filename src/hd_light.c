@@ -586,6 +586,10 @@ void HdLight_BeforeRender(Ppu *ppu) {
   ppu->screenEnabled[1] &= ~1;
 }
 
+bool HdLight_DarkOverride(void) {
+  return g_dark_override;
+}
+
 void HdLight_AfterRender(Ppu *ppu) {
   if (!g_dark_override)
     return;
@@ -677,6 +681,8 @@ static struct {
   int width, height, sub;
   float extra, light_scale;
   int box_x0, box_y0, box_x1, box_y1;
+  bool room_box;                       // stanza buia: la luce resta nel riquadro room_*
+  int room_x0, room_y0, room_x1, room_y1;   // la stanza, non tagliata ai bordi dello schermo
   int n_items, item_x[4], item_y[4], item_w[4], item_h[4];
 } g_lp;
 
@@ -819,10 +825,13 @@ static void ApplyLights(uint8 *pixels, int pitch, int width, int height, int bia
   // le fasce dello schermo largo mostrano gia' la stanza vicina, che la luce
   // illuminava (si vedeva un pezzo dell'altra stanza)
   int box_x0 = 0, box_y0 = 0, box_x1 = width - 1, box_y1 = height - 1;
+  g_lp.room_box = dark;
   if (dark) {
     int ext = (width - 256) / 2;
     int cam_x = BG2HOFS_copy2 + bias_x, cam_y = BG2VOFS_copy2 + bias_y;
     int rx = (cam_x + 128) & ~511, ry = (cam_y + 112) & ~511;
+    g_lp.room_x0 = rx - cam_x + ext, g_lp.room_x1 = rx + 511 - cam_x + ext;
+    g_lp.room_y0 = ry - cam_y, g_lp.room_y1 = ry + 511 - cam_y;
     box_x0 = IntMax(rx - cam_x + ext, 0), box_x1 = IntMin(rx + 511 - cam_x + ext, width - 1);
     box_y0 = IntMax(ry - cam_y, 0), box_y1 = IntMin(ry + 511 - cam_y, height - 1);
   }
@@ -908,9 +917,10 @@ void HdLight_Projected(uint8 *pixels, int pitch, int width, int height, const ui
     return;
   float extra = g_lp.extra;
   int sub = g_lp.sub;
-  // nelle stanze buie la luce resta nella stanza: oltre il riquadro di
-  // ApplyLights (che arriva al bordo dello schermo) solo la luce ambiente
-  bool boxed = g_lp.box_x0 > 0 || g_lp.box_y0 > 0 || g_lp.box_x1 < width - 1 || g_lp.box_y1 < height - 1;
+  // nelle stanze buie la luce resta nella stanza (tutta: con la telecamera
+  // in terza persona si vede ben oltre lo schermo, e la luce delle torce e
+  // della Lanterna si fermava al vecchio bordo)
+  bool boxed = g_lp.room_box;
   for (int y = 0; y < height; y++) {
     uint32 *row = (uint32 *)(pixels + y * pitch);
     for (int x = 0; x < width; x++) {
@@ -933,7 +943,7 @@ void HdLight_Projected(uint8 *pixels, int pitch, int width, int height, const ui
         f[0] = g[0], f[1] = g[1], f[2] = g[2];
       } else {
         f[0] = f[1] = f[2] = g_ambient + extra;
-        bool in_box = !boxed || (u >= g_lp.box_x0 && u <= g_lp.box_x1 && v >= g_lp.box_y0 && v <= g_lp.box_y1);
+        bool in_box = !boxed || (u >= g_lp.room_x0 && u <= g_lp.room_x1 && v >= g_lp.room_y0 && v <= g_lp.room_y1);
         for (int li = 0; in_box && li < g_num_lights; li++) {
           const Light *l = &g_lights[li];
           float dx = u - l->x, dy = v - l->y;

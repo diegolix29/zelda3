@@ -11,6 +11,9 @@ extern bool g_dynamic_light;
 // Prima e dopo il disegno della PPU: sospende il buio originale delle stanze buie
 void HdLight_BeforeRender(Ppu *ppu);
 void HdLight_AfterRender(Ppu *ppu);
+// The game's darkness (fixed color subtraction, Lantern cone on BG1 of the
+// subscreen) was left out of this frame's render: HdLight_Apply replaces it
+bool HdLight_DarkOverride(void);
 // Applica luci e buio all'immagine appena disegnata (pixel 0xLLRRGGBB, LL = layer)
 void HdLight_Apply(uint8 *pixels, int pitch, int width, int height, int bias_x, int bias_y);
 // Vista 3D: la luce dell'ultimo HdLight_Apply sui pixel che non l'hanno avuta

@@ -80,6 +80,17 @@ static float g_pitch3 = 62.0f;
 static int g_stick_x, g_stick_y; // right stick
 static uint32 g_cam_ticks;
 
+// 9 = overworld, 11 = special overworld (Master Sword grove, Zora's
+// waterfall, areas 0x80 and up)
+static bool IsOverworldModule(int mod) {
+  return mod == 9 || mod == 11;
+}
+
+// walking around (no menu, no transition): indoors or out
+static bool IsWalkingModule(int mod) {
+  return mod == 7 || IsOverworldModule(mod);
+}
+
 static FILE *g_log;
 static float g_angle;            // current tilt in degrees (eases toward the target)
 static float g_radius_inv;       // current 1 / sphere radius (eases too)
@@ -296,7 +307,7 @@ static void UpdateThirdCamera(void) {
 }
 
 int Hd3d_ViewFacing(int facing) {
-  if (!Hd3d_ThirdPerson() || (main_module_index != 7 && main_module_index != 9))
+  if (!Hd3d_ThirdPerson() || !IsWalkingModule(main_module_index))
     return facing;
   static const float kYaw[4] = { 0.0f, 3.14159265f, -1.5707963f, 1.5707963f };
   // world direction minus the camera's, in quarter turns: 0 away from the
@@ -308,7 +319,7 @@ int Hd3d_ViewFacing(int facing) {
 
 int Hd3d_RotateInput(int inputs) {
   // only while walking around: menus and the map keep the plain d-pad
-  if (!Hd3d_ThirdPerson() || (main_module_index != 7 && main_module_index != 9))
+  if (!Hd3d_ThirdPerson() || !IsWalkingModule(main_module_index))
     return inputs;
   int dirs = inputs & 0xf0;
   if (!dirs)
@@ -357,12 +368,12 @@ static const char *const kReasonNames[] = {
 
 static bool IsGameplayModule(void) {
   int mod = main_module_index;
-  // 7 dungeon/indoors, 9 overworld, 15/16 iris transitions, 17 falling into a hole
-  if (mod == 7 || mod == 9 || mod == 15 || mod == 16 || mod == 17)
+  // 7 dungeon/indoors, 9/11 overworld, 15/16 iris transitions, 17 falling into a hole
+  if (IsWalkingModule(mod) || mod == 15 || mod == 16 || mod == 17)
     return true;
   // 14 = menus and dialogue over the game
   if (mod == 14)
-    return saved_module_for_menu == 7 || saved_module_for_menu == 9;
+    return IsWalkingModule(saved_module_for_menu);
   return false;
 }
 
@@ -511,19 +522,63 @@ static uint32 CgramToPixel(Ppu *ppu, int index, uint32 layer) {
          ppu->brightnessMult[(c >> 5) & 0x1f] << 8 | ppu->brightnessMult[(c >> 10) & 0x1f];
 }
 
-// BG1 and BG2 combined by priority, as the PPU does (BG3 and sprites excluded)
-static uint32 SampleVram(Ppu *ppu, int fx, int fy) {
-  int x = fx - ppu->extraLeftRight, y = fy + 1;   // frame row 0 = PPU line 1
+// Front pixel of BG1/BG2 on one screen (bit mask of enabled layers), by
+// priority: BG1 high, BG2 high, BG1 low, BG2 low. Returns the layer (0, 1,
+// 5 = backdrop) and the cgram index
+static int TopLayer(Ppu *ppu, int enabled, int x, int y, int *index) {
   int idx[2] = { 0, 0 }, pr[2] = { 0, 0 };
   for (int l = 0; l < 2; l++)
-    if (ppu->screenEnabled[0] & (1 << l))
+    if (enabled & (1 << l))
       idx[l] = VramLayerPixel(ppu, l, x, y, &pr[l]);
-  // order: BG1 high, BG2 high, BG1 low, BG2 low
-  if (idx[0] && pr[0]) return CgramToPixel(ppu, idx[0], 0);
-  if (idx[1] && pr[1]) return CgramToPixel(ppu, idx[1], 1);
-  if (idx[0]) return CgramToPixel(ppu, idx[0], 0);
-  if (idx[1]) return CgramToPixel(ppu, idx[1], 1);
-  return CgramToPixel(ppu, 0, 5);
+  static const int kOrder[4][2] = { { 0, 1 }, { 1, 1 }, { 0, 0 }, { 1, 0 } };
+  for (int k = 0; k < 4; k++) {
+    int l = kOrder[k][0];
+    if (idx[l] && pr[l] == kOrder[k][1]) {
+      *index = idx[l];
+      return l;
+    }
+  }
+  *index = 0;
+  return 5;
+}
+
+// BG1 and BG2 as the PPU shows them (BG3 and sprites excluded), with the
+// color math: rooms that lay a translucent or dark BG1 over the floor (added
+// or subtracted on the subscreen) showed that layer's black tiles instead
+static uint32 SampleVram(Ppu *ppu, int fx, int fy) {
+  int x = fx - ppu->extraLeftRight, y = fy + 1;   // frame row 0 = PPU line 1
+  bool hd_dark = HdLight_DarkOverride();   // as rendered: no game darkness
+  int mi, ml = TopLayer(ppu, ppu->screenEnabled[0], x, y, &mi);
+  uint32 main = CgramToPixel(ppu, mi, (uint32)ml);
+  if (!(ppu->mathEnabled & (1 << ml)))
+    return main;
+  uint32 sub;
+  bool half = ppu->halfColor;
+  if (ppu->addSubscreen) {
+    int sub_enabled = ppu->screenEnabled[1] & (hd_dark ? ~1 : ~0);
+    int si, sl = TopLayer(ppu, sub_enabled, x, y, &si);
+    if (sl == 5) {
+      // empty subscreen: the fixed color, never halved
+      half = false;
+      sub = hd_dark ? 0 : ppu->brightnessMult[ppu->fixedColorR & 0x1f] << 16 |
+                          ppu->brightnessMult[ppu->fixedColorG & 0x1f] << 8 | ppu->brightnessMult[ppu->fixedColorB & 0x1f];
+    } else {
+      sub = CgramToPixel(ppu, si, 0) & 0xffffff;
+    }
+  } else {
+    half = false;
+    sub = hd_dark ? 0 : ppu->brightnessMult[ppu->fixedColorR & 0x1f] << 16 |
+                        ppu->brightnessMult[ppu->fixedColorG & 0x1f] << 8 | ppu->brightnessMult[ppu->fixedColorB & 0x1f];
+  }
+  uint32 out = 0;
+  for (int sh = 0; sh <= 16; sh += 8) {
+    int a = main >> sh & 0xff, b = sub >> sh & 0xff;
+    int c = ppu->subtractColor ? a - b : a + b;
+    if (half) c >>= 1;
+    c = c < 0 ? 0 : c > 255 ? 255 : c;
+    out |= (uint32)c << sh;
+  }
+  return (main & 0xff000000) | out;
 }
 
 static void Ground_Setup(Ground *g, Ppu *ppu, int width) {
@@ -1625,14 +1680,20 @@ void Hd3d_EndFrame(uint8 *pixels, int pitch, int width, int height) {
   Ground_Setup(&gr, g_zenv.ppu, width);
   Cam cm;
   if (g_view3d_cam == kHd3d_CamThird) {
-    // Link's feet in frame coordinates (his position is the top left of his
-    // 16x16 body)
-    float lx = (int16)(link_x_coord - gr.org_x) + 8.0f, ly = (int16)(link_y_coord - gr.org_y) + 20.0f;
+    // Link's feet in frame coordinates, placed the way his sprite is (OAM
+    // position relative to the game camera, then the sprite bias, as in
+    // OamEntry). Not from the ground origin: indoors that comes from the PPU
+    // scroll, which wraps at 1024, while Link's dungeon coordinates do not
+    // (the camera looked far away from him in big dungeons: all black)
+    Ppu *ppu = g_zenv.ppu;
+    float lx = (int16)(link_x_coord - BG2HOFS_copy2) - ppu->objBiasX + ppu->extraLeftRight + 8.0f;
+    float ly = (int16)(link_y_coord - BG2VOFS_copy2) - ppu->objBiasY + 20.0f;
     Cam_SetupThird(&cm, width, height, lx, ly);
   } else {
     Cam_Setup(&cm, width, height);
   }
-  bool outdoors = main_module_index == 9 || (main_module_index == 14 && saved_module_for_menu == 9);
+  bool outdoors = IsOverworldModule(main_module_index) ||
+                  (main_module_index == 14 && IsOverworldModule(saved_module_for_menu));
   Sky sk;
   Sky_Setup(&sk, outdoors, width);
   uint32 *out = (uint32 *)pixels;
