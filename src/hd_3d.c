@@ -992,13 +992,14 @@ enum {
   kCls_Tall,       // statues, columns
   kCls_Torch,
   kCls_Pot,        // big pots (4x4)
+  kCls_Chair,      // chairs and thrones: a low seat in front, a tall back behind
   kCls_Count,
 };
-static const char kClsLetter[kCls_Count] = { '.', 'W', 'C', 'D', 'r', 'f', 'o', 'b', 'T', 't', 'P' };
+static const char kClsLetter[kCls_Count] = { '.', 'W', 'C', 'D', 'r', 'f', 'o', 'b', 'T', 't', 'P', 'h' };
 static const char *const kClsName[kCls_Count] = {
-  "floor", "wall", "ceiling", "door", "rail", "furniture", "small", "block", "tall", "torch", "bigpot",
+  "floor", "wall", "ceiling", "door", "rail", "furniture", "small", "block", "tall", "torch", "bigpot", "chair",
 };
-static const uint8 kClsHeight[kCls_Count] = { 0, kWallMax, kWallMax, kWallMax, 8, 12, 10, 16, 28, 14, 20 };
+static const uint8 kClsHeight[kCls_Count] = { 0, kWallMax, kWallMax, kWallMax, 8, 12, 10, 16, 28, 14, 20, 28 };
 
 // Object ids and names from the comments in dungeon.c (LoadType1ObjectSubtype1/2/3)
 static int ObjectClass(int code) {
@@ -1016,7 +1017,9 @@ static int ObjectClass(int code) {
     if (id == 0x22 || id == 0x2f || id == 0x30 || id == 0x5f || id == 0x69 || id == 0x6c || id == 0x6d ||
         id == 0x88 || id == 0x8a)
       return kCls_Rail;
-    if (id == 0x3c || id == 0xdd)
+    if (id == 0x3c)
+      return kCls_Chair;   // double chair
+    if (id == 0xdd)
       return kCls_Furniture;
     if (id == 0x38 || id == 0x39 || id == 0x3d || id == 0x75 || id == 0x87)
       return kCls_Tall;
@@ -1034,6 +1037,8 @@ static int ObjectClass(int code) {
       return kCls_Furniture;
     if (id == 0x20)
       return kCls_Torch;
+    if (id == 0x24 || id == 0x25)
+      return kCls_Chair;   // thrones (Hyrule Castle), drawn like the 4x4 wall corners
     if (id == 0x1c)
       return kCls_Pot;   // drawn like the 4x4 wall corners, collision 0x27
     return kCls_Floor;
@@ -1446,7 +1451,7 @@ static void RoomDump(const uint8 *attr, const uint8 *cls) {
   }
   Hd3d_Log("  %d object cells flattened by the floor flood", flat_cells);
   Hd3d_Log("  class map, then heights (64x64 tiles of 8 px; . floor W wall C ceiling D door r rail f furniture "
-           "o small b block T tall t torch P big pot; w = wall tile that is walkable for the game; heights in 8 px):");
+           "o small b block T tall t torch P big pot h chair; w = wall tile that is walkable for the game; heights in 8 px):");
   char line[3 * 64 + 8];
   for (int y = 0; y < 64; y++) {
     int n = 0;
@@ -1670,10 +1675,16 @@ static void BuildPixelMasks(Ppu *ppu, const uint8 *cls, const uint8 *attr) {
       for (int r = b->y0 * 8; r < b->y1 * 8; r++) {
         int i = r * 512 + px, rc = (r >> 3) * 64 + b->cx;
         bool in = r >= foot_top && r < front;
-        g_praise[i] = in ? (uint8)(g_hmap[rc] - g_hfloor[rc]) : 0;
+        int hmax = g_hmap[rc] - g_hfloor[rc], hgt = hmax;
+        // a chair: the front 55% of its depth is the seat, at 45% of the
+        // height; the back behind it stands full height
+        if (b->k == kCls_Chair && front - 1 - r < depth * 55 / 100)
+          hgt = hmax * 45 / 100;
+        int q = depth + hmax;
+        g_praise[i] = in ? (uint8)hgt : 0;
         g_pdown[i] = in ? (uint8)(front - 1 - r) : 0;
         g_pspan[i] = in ? (uint8)(span > 255 ? 255 : span) : 0;
-        g_pfoot[i] = in ? (uint8)(depth > 255 ? 255 : depth) : 0;
+        g_pfoot[i] = in ? (uint8)(q > 255 ? 255 : q) : 0;
         if (in)
           continue;
         // cover: the floor 16, 32... pixels to the side (floor patterns
@@ -2220,22 +2231,21 @@ static bool ShadeWall(const Ground *gr, const WallHit *h, uint32 *out, float *fu
     default: shade = 160; break;
     }
   } else if (h->pix >= 0 && g_pspan[h->pix]) {
-    // object box: the drawing's rows above the front, split like a box of
-    // this height and depth seen in 3/4 view: the lower `fa` rows are the
-    // face, the `ta` rows above them the top, spread over the depth
+    // object box (or chair): seen in 3/4 view, a surface point `d` pixels
+    // behind the front and `z` up is drawn d + z rows above the front. The
+    // drawing's `S` rows cover the box's whole range (depth + tallest
+    // height, g_pfoot), so that distance is scaled by S / range: the face
+    // is the lower rows, the top the rows above, a chair's seat front, seat,
+    // back front and back top in turn
     float base = floorf(iy) + g_pdown[h->pix] + 1.0f;
-    float S = g_pspan[h->pix], D = g_pfoot[h->pix];
-    float fa = S * H / (H + D);
-    if (fa < 1) fa = 1;
-    if (fa > S) fa = S;
-    float ta = S - fa;
-    float face_v = base - 0.5f - z * fa / H;
+    float k = g_pfoot[h->pix] ? g_pspan[h->pix] / (float)g_pfoot[h->pix] : 1.0f;
+    float face_v = base - 0.5f - z * k;
     // the sides and the back wear the front art too, wrapped around the
     // box: going back along a side walks across the front from that edge
     float d = g_pdown[h->pix] + 0.5f;
     switch (h->face) {
-    case kFace_Top: av = base - fa - d * ta / D; break;
-    case kFace_South: av = face_v; break;
+    case kFace_Top: av = base - (d + H) * k; break;
+    case kFace_South: av = base - 0.5f - (g_pdown[h->pix] + z) * k; break;
     case kFace_East: au = ix - d, av = face_v, shade = 212; break;
     case kFace_West: au = ix + d, av = face_v, shade = 196; break;
     case kFace_North: av = face_v, shade = 180; break;
