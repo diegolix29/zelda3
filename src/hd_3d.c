@@ -1057,7 +1057,7 @@ enum { kNumTileNums = 0x400, kNumRooms = 0x128 };
 static uint8 g_tile_cls[kNumTileNums];        // class + 1, 0 = never seen
 static uint8 g_tile_override[kNumTileNums];   // class + 1, 0 = none
 static uint8 g_tile_full[kNumTileNums];       // 1 = stands up whole, never cut by the floor mask
-static uint32 (*g_votes)[kCls_Count];         // while seeding
+static uint32 (*g_votes)[kCls_Count];         // filled while seeding, kept for the room dump
 static bool g_seeding, g_tiles_ready;
 
 void Hd3d_RoomBuildBegin(int room) {
@@ -1230,11 +1230,28 @@ static void SeedTileClasses(void) {
     unsure += top * 5 < total * 4;
   }
   WriteTileSeed();
-  free(ram), free(objs), free(tile_obj), free(g_votes), g_votes = NULL;
+  free(ram), free(objs), free(tile_obj);   // the votes stay, for the room dump
   double ms = (SDL_GetPerformanceCounter() - t0) * 1000.0 / SDL_GetPerformanceFrequency();
   Hd3d_Log("tile classes seeded from %d rooms in %.0f ms: %d tile numbers, %d unsure (hd3d_tiles_seed.txt)",
            kNumRooms, ms, seen, unsure);
   LoadTileOverrides();
+}
+
+// The room on screen was not built since launch (a saved game started in
+// it): build it again on a copy of the game RAM, only to learn its objects
+static void CaptureRoomObjects(void) {
+  static int tried = -1;
+  if (tried == dungeon_room_index)
+    return;
+  tried = dungeon_room_index;
+  uint8 *ram = malloc(sizeof(g_ram));
+  if (!ram)
+    return;
+  memcpy(ram, g_ram, sizeof(g_ram));
+  Dungeon_LoadRoom();
+  memcpy(g_ram, ram, sizeof(g_ram));
+  free(ram);
+  Hd3d_Log("room %d: objects read again (it was not built since launch)", g_room_id);
 }
 
 void Hd3d_RequestRoomDump(void) {
@@ -1265,17 +1282,124 @@ static bool IsWallClass(int c) {
   return c == kCls_Wall || c == kCls_Ceiling || c == kCls_Door;
 }
 
-static void RoomDump(const uint8 *attr, const uint8 *cls) {
-  Hd3d_Log("=== room dump: room %d (built for %d), layer %s, %d objects", dungeon_room_index, g_room_id,
-           link_is_on_lower_level ? "lower" : "upper", g_n_room_objs);
+// class letter of a tile number as the 3D view uses it, and the share of the
+// seed votes that agree (-1 = from hd3d_tiles.txt, 0 = never seen)
+static char TileClassLetter(int t, int *pct) {
+  if (g_tile_override[t]) {
+    *pct = -1;
+    return kClsLetter[g_tile_override[t] - 1];
+  }
+  *pct = 0;
+  if (!g_tile_cls[t])
+    return '?';
+  if (g_votes) {
+    uint32 total = 0;
+    for (int c = 0; c < kCls_Count; c++)
+      total += g_votes[t][c];
+    *pct = total ? (int)(g_votes[t][g_tile_cls[t] - 1] * 100 / total) : 0;
+  }
+  return kClsLetter[g_tile_cls[t] - 1];
+}
+
+// Close-up of the cells around Link, to find a tile that stands up wrong:
+// both layers' tile numbers, the class, the height, both collision tables
+// (the game keeps one per layer: bridges, stairs and the floor under them
+// differ there) and what the object mask did
+static void RoomDumpAroundLink(const uint8 *cls) {
+  int lx = ((link_x_coord + 8) >> 3) & 63, ly = ((link_y_coord + 20) >> 3) & 63;
+  Ppu *ppu = g_zenv.ppu;
+  Hd3d_Log("  --- around Link: cell (%d,%d), link (%d,%d) z %d, on %s level, room header bg2 properties %d, "
+           "main screen %02x sub screen %02x color math %02x %s", lx, ly, link_x_coord, link_y_coord, link_z_coord,
+           link_is_on_lower_level ? "lower" : "upper", dung_hdr_bg2_properties, ppu->screenEnabled[0],
+           ppu->screenEnabled[1], ppu->mathEnabled, ppu->subtractColor ? "subtract" : "add");
+  Hd3d_Log("  each cell: BG2 tile/BG1 tile, class letter (capital = from BG1), height in px, collision BG2/BG1, "
+           "mask (- whole cell, m object with raised pixels, F object flattened by the floor flood); [ ] = Link");
+  for (int y = ly - 7; y <= ly + 7; y++) {
+    char row[13 * 30 + 8];
+    int n = 0;
+    for (int x = lx - 6; x <= lx + 6; x++) {
+      int c = (y & 63) * 64 + (x & 63);
+      int t2 = dung_bg2[c] & 0x3ff, t1 = dung_bg1[c] & 0x3ff;
+      char k = kClsLetter[cls[c]];
+      if (g_hlayer[c] && k >= 'a' && k <= 'z') k = (char)(k - 32);
+      char m = '-';
+      if (g_partial[c]) {
+        int raised = 0;
+        for (int p = 0; p < 64; p++)
+          raised += g_praise[((c >> 6) * 8 + (p >> 3)) * 512 + (c & 63) * 8 + (p & 7)] != 0;
+        m = raised ? 'm' : 'F';
+      }
+      bool me = x == lx && y == ly;
+      n += snprintf(row + n, sizeof(row) - n, "%c%03x/%03x %c%2d %02x/%02x %c%c", me ? '[' : ' ', t2, t1, k, g_hmap[c],
+                    dung_bg2_attr_table[c], dung_bg1_attr_table[c], m, me ? ']' : ' ');
+    }
+    Hd3d_Log("  %2d %s", y & 63, row);
+  }
+}
+
+// Objects that stand flat although they should not: their tiles' classes
+// (an unknown object id is "floor", and so are the tiles only it draws)
+static void RoomDumpObjects(void) {
   for (int i = 0; i < g_n_room_objs; i++) {
     const RoomObj *o = &g_room_objs[i];
     const char *kind = (o->code & 0xf00) == kHd3d_ObjSubtype1 ? "T1" : (o->code & 0xf00) == kHd3d_ObjSubtype2 ? "T2" :
                        (o->code & 0xf00) == kHd3d_ObjSubtype3 ? "T3" : (o->code & 0xf00) == kHd3d_ObjDoor ? "door" :
                        o->code == kHd3d_ObjPushBlock ? "pushblock" : "torch";
-    Hd3d_Log("  obj %3d pass %d %s 0x%02x at (%d,%d) tiles %d -> %s", i, o->pass, kind, o->code & 0xff, o->x, o->y,
-             o->tiles, kClsName[o->cls]);
+    // the tile numbers it drew that are still on screen, with their classes
+    uint16 seen[12];
+    int ns = 0, flat = 0, owned = 0;
+    char tiles[12 * 12 + 1];
+    int n = 0;
+    tiles[0] = 0;
+    for (int l = 0; l < 2; l++) {
+      const uint16 *bg = l ? dung_bg1 : dung_bg2;
+      for (int c = 0; c < 64 * 64; c++) {
+        if (g_tile_obj[l][c] != i + 1)
+          continue;
+        owned++;
+        int t = bg[c] & 0x3ff, pct;
+        char k = TileClassLetter(t, &pct);
+        flat += k == '.';
+        bool dup = false;
+        for (int j = 0; j < ns; j++)
+          dup |= seen[j] == t;
+        if (dup || ns == 12)
+          continue;
+        seen[ns++] = (uint16)t;
+        if (pct < 0)
+          n += snprintf(tiles + n, sizeof(tiles) - n, " %03x%c!", t, k);
+        else
+          n += snprintf(tiles + n, sizeof(tiles) - n, " %03x%c%d", t, k, pct);
+      }
+    }
+    Hd3d_Log("  obj %3d pass %d %s 0x%02x at (%d,%d) -> %s, %d tiles (%d flat):%s%s", i, o->pass, kind,
+             o->code & 0xff, o->x, o->y, kClsName[o->cls], owned, flat, tiles,
+             o->cls == kCls_Floor && owned ? "   <- object id not classified" : "");
   }
+}
+
+static void RoomDump(const uint8 *attr, const uint8 *cls) {
+  Hd3d_Log("=== room dump: room %d (built for %d), layer %s, %d objects", dungeon_room_index, g_room_id,
+           link_is_on_lower_level ? "lower" : "upper", g_n_room_objs);
+  RoomDumpAroundLink(cls);
+  Hd3d_Log("  objects (tiles: number, class letter, %% of seed votes agreeing; ! = from hd3d_tiles.txt):");
+  RoomDumpObjects();
+  // object tiles that the floor flood flattened completely
+  int flat_cells = 0;
+  for (int c = 0; c < 64 * 64; c++) {
+    if (!g_partial[c])
+      continue;
+    int raised = 0;
+    for (int p = 0; p < 64; p++)
+      raised += g_praise[((c >> 6) * 8 + (p >> 3)) * 512 + (c & 63) * 8 + (p & 7)] != 0;
+    if (!raised) {
+      if (flat_cells++ < 40)
+        Hd3d_Log("  flattened by the floor flood: cell (%d,%d) tile %03x (%s) -> add \"%03x %s full\" to hd3d_tiles.txt "
+                 "if it should stand", c & 63, c >> 6, (g_hlayer[c] ? dung_bg1 : dung_bg2)[c] & 0x3ff, kClsName[cls[c]],
+                 (g_hlayer[c] ? dung_bg1 : dung_bg2)[c] & 0x3ff, kClsName[cls[c]]);
+    }
+  }
+  Hd3d_Log("  %d object cells flattened by the floor flood", flat_cells);
   Hd3d_Log("  class map, then heights (64x64 tiles of 8 px; . floor W wall C ceiling D door r rail f furniture "
            "o small b block T tall t torch; w = wall tile that is walkable for the game; heights in 8 px):");
   char line[3 * 64 + 8];
@@ -1463,6 +1587,8 @@ static void BuildHeightMap(void) {
   const uint8 *attr = dung_bg2_attr_table + (link_is_on_lower_level ? 0x1000 : 0);
   if (!g_tiles_ready)
     SeedTileClasses();
+  if (g_room_id != dungeon_room_index)
+    CaptureRoomObjects();
   bool objects = g_room_id == dungeon_room_index && g_n_room_objs > 0;
   uint8 cls[64 * 64];
   int cells = 0;
