@@ -2111,6 +2111,38 @@ static void BuildHeightMap(void) {
   uint8 floor_h[64 * 64];
   for (int i = 0; i < 64 * 64; i++)
     floor_h[i] = two && g_upper[i] ? (uint8)g_level_h : 0;
+  // One layer with ledges: the flood that found the upper floor stops at
+  // walls, so the walls around it stood on the lower floor, their tops level
+  // with the upper floor. A wall (or flat walkable wall tile, or ceiling)
+  // whose floor across walls (within 8: south if it finds one, else east or
+  // west, else north) is upper stands on the upper floor; the cliff below a
+  // ledge reaches the lower floor first.
+  if (two && !holes) {
+    static const int kDx[4] = { 0, 1, -1, 0 }, kDy[4] = { 1, 0, 0, -1 };
+    for (int i = 0; i < 64 * 64; i++) {
+      if (g_upper[i] || !solid[i])
+        continue;   // walls and the ceilings above them
+      // south decides when it finds floor (a north wall beside a door's
+      // opening looks onto the floor in front of it), else the nearest
+      int x = i & 63, y = i >> 6, best = 99, up = 0;
+      for (int d = 0; d < 4; d++) {
+        if ((d == 1 || d == 3) && best != 99)
+          break;   // south found it, or east/west did (north is the last resort)
+        for (int s = 1; s <= 8 && s < best; s++) {
+          int nx = x + kDx[d] * s, ny = y + kDy[d] * s;
+          if (nx < 0 || nx > 63 || ny < 0 || ny > 63)
+            break;
+          int n = ny * 64 + nx;
+          if (!solid[n]) {
+            best = s, up = g_upper[n];
+            break;
+          }
+        }
+      }
+      if (up)
+        floor_h[i] = (uint8)g_level_h;
+    }
+  }
   if (two) {
     for (int cx = 0; cx < 64; cx++) {
       for (int cy = 1; cy < 64; cy++) {
@@ -2468,7 +2500,11 @@ static bool ShadeWall(const Ground *gr, const WallHit *h, uint32 *out, float *fu
     switch (h->face) {
     case kFace_Top: break;
     case kFace_South: av = iy - fmodf(f + H - h->z > 0 ? f + H - h->z : 0, 8.0f), shade = 200; break;
-    default: shade = 160; break;
+    // the other faces: the art lying behind them, z pixels in (one edge
+    // pixel smeared up the face looked black)
+    case kFace_East: au = ix - z, shade = 196; break;
+    case kFace_West: au = ix + z, shade = 176; break;
+    case kFace_North: av = iy + z, shade = 160; break;
     }
   }
   *fu = au - gr->org_x, *fv = av - gr->org_y;
