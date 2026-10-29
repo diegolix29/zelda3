@@ -1853,6 +1853,21 @@ static int LevelHeight(const uint8 *cls) {
   return best * 8;
 }
 
+// an east/west wall's cell: floor beside it, through at most 6 wall cells
+// (flat walkable wall tiles included), to the east or the west; a north
+// wall reaches its door's opening only further along, and a door's opening
+// (collision 0x80-0x9f) does not count: the wall around a door is no side wall
+static bool FloorBeside(const uint8 *wall, const uint8 *solid, const uint8 *attr, int x, int y) {
+  for (int dir = -1; dir <= 1; dir += 2) {
+    int k = x + dir, steps = 0;
+    while (k >= 0 && k < 64 && wall[y * 64 + k] && steps < 7)
+      k += dir, steps++;
+    if (k >= 0 && k < 64 && steps < 7 && !solid[y * 64 + k] && !(attr[y * 64 + k] >= 0x80 && attr[y * 64 + k] <= 0x9f))
+      return true;
+  }
+  return false;
+}
+
 static void BuildHeightMap(void) {
   // the table of the layer Link is on, as the game's tile detection reads it
   const uint8 *link_attr = dung_bg2_attr_table + (link_is_on_lower_level ? 0x1000 : 0);
@@ -1972,8 +1987,10 @@ static void BuildHeightMap(void) {
       if (wall[c]) {
         int y0 = cy;
         bool any_solid = false, touches_upper = false;
+        int beside = 0;   // rows with floor to the east or west
         while (cy < 64 && wall[cy * 64 + cx] && g_upper[cy * 64 + cx] == g_upper[c]) {
           any_solid |= IsWallAttr(attr[cy * 64 + cx]);
+          beside += FloorBeside(wall, solid, attr, cx, cy);
           for (int dy = -1; dy <= 1; dy++)
             for (int dx = -1; dx <= 1; dx++) {
               int nx = cx + dx, ny = cy + dy;
@@ -1992,8 +2009,11 @@ static void BuildHeightMap(void) {
           hgt = g_level_h;                 // the cliff up to the upper floor
         } else if (holes && !g_upper[c] && touches_upper) {
           hgt = g_level_h, fold = false;   // the pit's other walls: up to the rim
-        } else if (cy - y0 > 6) {
-          hgt = 32, fold = false;          // east and west walls: long runs, folded sideways (below)
+        } else if (cy - y0 > 6 && beside * 2 >= cy - y0) {
+          // east and west walls: long runs with floor beside them, folded
+          // sideways (below); a north wall with walkable face tiles under it
+          // runs as long, but has wall on both sides
+          hgt = 32, fold = false;
           for (int y = y0; y < cy; y++)
             side[y * 64 + cx] = 1;
         } else if (floor_n && !floor_s) {

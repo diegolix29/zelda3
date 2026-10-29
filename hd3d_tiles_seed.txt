@@ -2,29 +2,29 @@
 # (every room built once). Not read back: copy lines to hd3d_tiles.txt and
 # change the class there. Classes: floor wall ceiling door rail furniture small block tall torch bigpot chair
 # ? = less than 80% of the votes agree
-000 door      #   attr 01, 100%: door 152
+000 door      #   attr 01, 100%: door 160
 001 door      #   attr 01, 100%: door 28
-002 door      #   attr 01, 100%: door 124
+002 door      #   attr 01, 100%: door 132
 003 door      #   attr 00, 100%: door 102
 004 door      #   attr 02, 100%: door 102
 005 door      #   attr 01, 100%: door 102
 006 door      #   attr 02, 100%: door 102
 007 floor     #   attr 00, 100%: floor 10
-008 door      # ? attr 01, 63%: floor 242 door 424
+008 door      # ? attr 01, 63%: floor 242 door 416
 009 door      #   attr 01, 98%: floor 4 door 384
 00a door      #   attr 02, 98%: floor 4 door 312
 00b door      #   attr 02, 100%: door 2
 00c door      #   attr 02, 100%: door 4
 00d door      # ? attr 02, 71%: floor 24 door 60
-010 door      #   attr 02, 100%: door 150
+010 door      #   attr 02, 100%: door 158
 011 door      #   attr 02, 100%: door 28
-012 door      #   attr 02, 100%: door 124
+012 door      #   attr 02, 100%: door 132
 013 floor     #   attr 00, 100%: floor 228
 014 floor     #   attr 00, 100%: floor 200
 015 ceiling   #   attr 01, 99%: wall 992 ceiling 409425
 016 floor     #   attr 00, 100%: floor 10
 017 floor     #   attr 00, 100%: floor 10
-018 door      # ? attr 02, 62%: floor 218 door 364
+018 door      # ? attr 02, 62%: floor 218 door 356
 019 floor     #   attr 00, 100%: floor 55
 01a floor     #   attr 00, 100%: floor 55
 01c door      #   attr 02, 100%: door 8
@@ -93,7 +93,7 @@
 071 wall      # ? attr 04, 57%: floor 2919 wall 3947
 075 door      #   attr 02, 100%: door 4
 077 door      #   attr 02, 100%: door 4
-078 door      #   attr 00, 99%: floor 2 door 424
+078 door      #   attr 00, 99%: floor 2 door 416
 079 door      #   attr 00, 97%: floor 8 door 384
 07a wall      #   attr 20, 99%: floor 7 wall 1044
 07b wall      #   attr 20, 100%: wall 84
@@ -208,8 +208,8 @@
 0eb floor     #   attr 24, 100%: floor 12
 0ec floor     #   attr 00, 99%: floor 31954 wall 6 door 2
 0ed floor     #   attr 00, 99%: floor 31985 wall 6 door 2
-0ee floor     #   attr 00, 99%: floor 105389 door 2
-0ef floor     #   attr 00, 99%: floor 105228 door 2
+0ee floor     #   attr 00, 99%: floor 105388 door 2
+0ef floor     #   attr 00, 99%: floor 105227 door 2
 0f0 block     #   attr 27, 100%: block 240
 0f1 block     # ? attr 27, 51%: floor 202 block 214
 0f2 floor     #   attr 27, 100%: floor 347
@@ -224,8 +224,8 @@
 0fb floor     #   attr 24, 100%: floor 12
 0fc floor     #   attr 00, 99%: floor 32004 wall 6 door 2
 0fd floor     #   attr 00, 99%: floor 32034 wall 6 door 2
-0fe floor     #   attr 00, 99%: floor 105519 door 6
-0ff floor     #   attr 00, 99%: floor 105384 door 6
+0fe floor     #   attr 00, 99%: floor 105518 door 6
+0ff floor     #   attr 00, 99%: floor 105383 door 6
 100 tall      #   attr 27, 100%: tall 156
 102 wall      #   attr 02, 100%: wall 248
 103 wall      #   attr 02, 97%: wall 148 door 4
@@ -376,8 +376,8 @@
 19f wall      # ? attr 02, 39%: floor 14 wall 50 furniture 14 small 48
 1a0 wall      # ? attr 02, 60%: floor 42 wall 72 door 2 furniture 4
 1a1 floor     # ? attr 02, 47%: floor 36 wall 32 door 2 furniture 6
-1a2 floor     # ? attr 02, 65%: floor 50 wall 22 furniture 4
-1a3 floor     # ? attr 02, 54%: floor 34 wall 22 furniture 6
+1a2 floor     # ? attr 02, 64%: floor 50 wall 24 furniture 4
+1a3 floor     # ? attr 02, 53%: floor 34 wall 24 furniture 6
 1a4 floor     #   attr 18, 100%: floor 65
 1a5 floor     # ? attr 00, 75%: floor 43 small 14
 1a6 floor     #   attr 00, 97%: floor 2427 small 70
@@ -437,8 +437,8 @@
 1de floor     #   attr 20, 100%: floor 1677
 1df floor     #   attr 20, 100%: floor 127
 1e0 torch     #   attr 27, 100%: torch 168
-1e1 small     #   attr 63, 84%: floor 44 small 248
-1e2 small     #   attr 27, 100%: small 10
+1e1 small     #   attr 63, 85%: floor 44 small 254
+1e2 small     #   attr 27, 100%: small 4
 1e3 block     #   attr 55, 100%: block 28
 1e4 block     #   attr 55, 100%: block 28
 1e5 floor     #   attr 01, 100%: floor 36
@@ -450,10 +450,10 @@
 1ec floor     #   attr 1c, 99%: floor 764212 ceiling 614 door 80
 1ed floor     #   attr 3a, 100%: floor 80
 1ee floor     #   attr 3b, 100%: floor 96
-1ef door      #   attr 00, 85%: floor 142 door 812
+1ef door      #   attr 00, 84%: floor 142 door 804
 1f0 torch     #   attr 27, 100%: torch 168
-1f1 small     #   attr 63, 84%: floor 44 small 248
-1f2 small     #   attr 27, 100%: small 10
+1f1 small     #   attr 63, 85%: floor 44 small 254
+1f2 small     #   attr 27, 100%: small 4
 1f3 block     #   attr 53, 100%: block 28
 1f4 block     #   attr 53, 100%: block 28
 1f5 floor     #   attr 01, 100%: floor 18
