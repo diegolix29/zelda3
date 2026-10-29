@@ -942,6 +942,11 @@ static uint8 g_partial[64 * 64]; // 1 = an object cell: only the pixels in g_pra
 static uint8 g_praise[512 * 512];// object cells: height of this pixel, 0 = floor drawn in the tile
 static uint8 g_pdown[512 * 512]; // object cells: rows from this pixel down to its column's front (face base)
 static uint8 g_pcol[512 * 512];  // object cells: cgram index shown (scratch for BuildPixelMasks)
+// object boxes (objects with solid collision): per pixel of the footprint,
+// the rows of the drawing above the box's front (face + top art) and the
+// box's depth; 0 = not a box pixel
+static uint8 g_pspan[512 * 512];
+static uint8 g_pfoot[512 * 512];
 static uint32 g_mask_hash;       // tiles the masks were built for
 // Two floor levels (see BuildHeightMap): the floor height of each cell, the
 // room's upper level height and the tallest surface (where rays start)
@@ -1495,7 +1500,13 @@ static bool IsMaskedClass(int c) {
 // rows) is raised, so the top shows the object's top and not the floor
 // north of it; a column too short for both keeps a 4 pixel deep footprint
 // and a lower face.
-static void BuildPixelMasks(Ppu *ppu, const uint8 *cls) {
+// collision of a solid object (pots, columns, statues): anything but the
+// floor, water, holes, stairs and ledges
+static bool IsFootAttr(uint8 a) {
+  return a != 0x00 && a != 0x08 && a != 0x09 && !(a >= 0x1c && a <= 0x1f) && !(a >= 0x28 && a <= 0x2b);
+}
+
+static void BuildPixelMasks(Ppu *ppu, const uint8 *cls, const uint8 *attr) {
   uint32 hash = 2166136261u;
   for (int i = 0; i < 64 * 64; i++)
     hash = (hash ^ dung_bg2[i] ^ (uint32)dung_bg1[i] << 16 ^ (uint32)g_hmap[i] << 8 ^ (uint32)g_hfloor[i] << 24) * 16777619u;
@@ -1551,6 +1562,7 @@ static void BuildPixelMasks(Ppu *ppu, const uint8 *cls) {
     for (int k = 0; k < 64; k++) {
       int x = wx + (k & 7), y = wy + (k >> 3), i = y * 512 + x;
       g_praise[i] = (uint8)(g_hmap[c] - g_hfloor[c]);   // above its floor
+      g_pspan[i] = g_pfoot[i] = 0;
       g_pcol[i] = (uint8)RoomPixel(ppu, x, y);
     }
   }
@@ -1582,18 +1594,65 @@ static void BuildPixelMasks(Ppu *ppu, const uint8 *cls) {
         g_praise[ni] = 0, queue[qn++] = (uint32)ni;
     }
   }
-  // 3/4 split of each column of object pixels
+  // Objects with solid collision stand up as a box over their collision
+  // tiles (the whole tiles: a column is as wide as it blocks Link). The
+  // drawing above the box's front is its art: the lower part stands up as
+  // the face, the rest lies on the top (see ShadeWall). Pixels of the run
+  // outside the box (the drawing above it, a shadow below it) are floor.
+  int boxes = 0;
+  for (int cx = 0; cx < 64; cx++) {
+    int cy = 0;
+    while (cy < 64) {
+      int c = cy * 64 + cx;
+      if (!g_partial[c]) {
+        cy++;
+        continue;
+      }
+      int y0 = cy, k = cls[c];
+      while (cy < 64 && g_partial[cy * 64 + cx] && cls[cy * 64 + cx] == k)
+        cy++;
+      int f0 = -1, f1 = -1;
+      for (int y = y0; y < cy; y++)
+        if (IsFootAttr(attr[y * 64 + cx])) {
+          if (f0 < 0) f0 = y;
+          f1 = y;
+        }
+      if (f0 < 0)
+        continue;
+      boxes++;
+      int front = (f1 + 1) * 8, foot_top = f0 * 8;
+      for (int px = cx * 8; px < cx * 8 + 8; px++) {
+        // the drawing's top in this pixel column: its first object pixel
+        int top = foot_top;
+        for (int r = y0 * 8; r < front; r++)
+          if (g_praise[r * 512 + px]) {
+            top = r;
+            break;
+          }
+        int span = front - top, depth = front - foot_top;
+        for (int r = y0 * 8; r < cy * 8; r++) {
+          int i = r * 512 + px, rc = (r >> 3) * 64 + cx;
+          bool in = r >= foot_top && r < front;
+          g_praise[i] = in ? (uint8)(g_hmap[rc] - g_hfloor[rc]) : 0;
+          g_pdown[i] = in ? (uint8)(front - 1 - r) : 0;
+          g_pspan[i] = in ? (uint8)(span > 255 ? 255 : span) : 0;
+          g_pfoot[i] = in ? (uint8)(depth > 255 ? 255 : depth) : 0;
+        }
+      }
+    }
+  }
+  // the others: 3/4 split of each column of object pixels
   int raised = 0;
   for (int x = 0; x < 512; x++) {
     int y = 0;
     while (y < 512) {
       int i = y * 512 + x;
-      if (!g_partial[(y >> 3) * 64 + (x >> 3)] || !g_praise[i]) {
+      if (!g_partial[(y >> 3) * 64 + (x >> 3)] || !g_praise[i] || g_pspan[i]) {
         y++;
         continue;
       }
       int y0 = y, h = 0;
-      while (y < 512 && g_partial[(y >> 3) * 64 + (x >> 3)] && g_praise[y * 512 + x]) {
+      while (y < 512 && g_partial[(y >> 3) * 64 + (x >> 3)] && g_praise[y * 512 + x] && !g_pspan[y * 512 + x]) {
         if (g_praise[y * 512 + x] > h) h = g_praise[y * 512 + x];
         y++;
       }
@@ -1613,8 +1672,8 @@ static void BuildPixelMasks(Ppu *ppu, const uint8 *cls) {
   int colors = 0;
   for (int i = 1; i < 128; i++)
     colors += floor_color[i];
-  Hd3d_Log("object masks (room %d): %d cells, %d raised pixels, %d floor colors", dungeon_room_index, partial, raised,
-           colors);
+  Hd3d_Log("object masks (room %d): %d cells, %d box columns, %d raised pixels (split), %d floor colors",
+           dungeon_room_index, partial, boxes, raised, colors);
 }
 
 // Two floor levels, drawn two ways:
@@ -1854,7 +1913,7 @@ static void BuildHeightMap(void) {
     if (g_hmap[i] > g_hmax) g_hmax = g_hmap[i];
   }
   g_stat_wall_cells += cells;
-  BuildPixelMasks(ppu, cls);
+  BuildPixelMasks(ppu, cls, attr);
   if (g_room_dump_request) {
     g_room_dump_request = false;
     if (!objects)
@@ -2034,6 +2093,24 @@ static bool ShadeWall(const Ground *gr, const WallHit *h, uint32 *out, float *fu
     case kFace_Top: break;
     case kFace_South: av = iy - fmodf(f - h->z > 0 ? f - h->z : 0, 8.0f), shade = 200; break;
     default: shade = 160; break;
+    }
+  } else if (h->pix >= 0 && g_pspan[h->pix]) {
+    // object box: the drawing's rows above the front, split like a box of
+    // this height and depth seen in 3/4 view: the lower `fa` rows are the
+    // face, the `ta` rows above them the top, spread over the depth
+    float base = floorf(iy) + g_pdown[h->pix] + 1.0f;
+    float S = g_pspan[h->pix], D = g_pfoot[h->pix];
+    float fa = S * H / (H + D);
+    if (fa < 1) fa = 1;
+    if (fa > S) fa = S;
+    float ta = S - fa;
+    float face_v = base - 0.5f - z * fa / H;
+    switch (h->face) {
+    case kFace_Top: av = base - fa - (g_pdown[h->pix] + 0.5f) * ta / D; break;
+    case kFace_South: av = face_v; break;
+    case kFace_East: av = face_v, shade = 196; break;
+    case kFace_West: av = face_v, shade = 176; break;
+    case kFace_North: av = base - S + 0.5f, shade = 150; break;
     }
   } else if (h->pix >= 0) {
     // object pixel: its column's face stands at its front, g_pdown rows south
