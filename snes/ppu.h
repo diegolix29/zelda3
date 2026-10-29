@@ -79,6 +79,10 @@ struct Ppu {
   // nemici congelati (palette 2), ogni colore v sostituito da iceRemap[v]
   uint8_t objIce[128];
   uint8_t iceRemap[16];
+  // Link sott'acqua al chiuso (hd_fx.c): le voci OAM con objUnderWater restano
+  // sopra il fondale ma si mescolano a meta' con lo schermo secondario
+  // (l'acqua), come su GBA; nel buffer i loro pixel hanno il bit 0x800
+  uint8_t objUnderWater[128];
   // Scala delle voci OAM in 1/256 (0 = normale): lo sprite si disegna
   // ingrandito o rimpicciolito attorno al suo centro (super bomba, hd_fx.c)
   uint16_t objScale[128];

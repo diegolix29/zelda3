@@ -655,6 +655,7 @@ void ZeldaDrawPpuFrame(uint8 *pixel_buffer, size_t pitch, uint32 render_flags) {
   HdFx_IrisBeforeRender(g_zenv.ppu);
   HdFx_ShadowsBeforeRender(g_zenv.ppu, 256 + 2 * g_zenv.ppu->extraLeftRight, height);
   HdFx_IceBeforeRender(g_zenv.ppu);
+  HdFx_DiveBeforeRender(g_zenv.ppu);
   HdFx_SuperBombBeforeRender(g_zenv.ppu);
   HdFx_FogBeforeRender(g_zenv.ppu);
   HdWorld_BeforeRender(256 + 2 * g_zenv.ppu->extraLeftRight, height);

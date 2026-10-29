@@ -76,6 +76,8 @@ void HdFx_ShadowsAfterRender(Ppu *ppu);
 // Cespugli congelati sollevati o lanciati e i loro pezzi (hd_burn.c): la PPU
 // li disegna con i blu dei nemici congelati
 void HdFx_IceBeforeRender(Ppu *ppu);
+// Link sott'acqua al chiuso: la PPU lo mescola con l'acqua come su GBA
+void HdFx_DiveBeforeRender(Ppu *ppu);
 // Super bomba che si gonfia e si sgonfia come su GBA (scala della sua voce OAM)
 void HdFx_SuperBombBeforeRender(Ppu *ppu);
 // Nebbia del Bosco Perduto migliorata: prima del disegno della PPU toglie

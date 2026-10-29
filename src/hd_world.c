@@ -2399,6 +2399,7 @@ static void RenderApart(const bool *sel, const GuestGfx *gfx, int width, int hei
   if (gfx) {
     LoadGfx(p, gfx);
     memset(p->objIce, 0, sizeof(p->objIce));
+    memset(p->objUnderWater, 0, sizeof(p->objUnderWater));
   }
   p->brightness = 15;  // la luminosita' del gioco si applica dopo (Dim)
   p->forcedBlank = false;
@@ -2995,6 +2996,7 @@ static void LiveRender(LiveArea *la, int width, int height) {
   p->objShadowOut = NULL;
   memset(p->objCastShadow, 0, sizeof(p->objCastShadow));
   memset(p->objIce, 0, sizeof(p->objIce));
+  memset(p->objUnderWater, 0, sizeof(p->objUnderWater));
   memset(p->objScale, 0, sizeof(p->objScale));
   for (int i = 0; i <= height; i++)
     ppu_runLine(p, i);

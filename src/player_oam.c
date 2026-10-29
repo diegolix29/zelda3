@@ -855,9 +855,8 @@ static void LinkOam_MainInner() {  // 8da18e
   if (link_is_in_deep_water)
     oam_priority_value = 0x2000;
   // immersione al chiuso: come su GBA (0x80a5298) Link resta visibile ma
-  // passa dietro l'acqua
-  if (g_link_dive_timer && player_is_indoors)
-    oam_priority_value = 0x1000;
+  // passa dietro l'acqua: priorita' del nuoto (sopra il fondale) e miscela
+  // con l'acqua fatta dalla PPU (HdFx_DiveBeforeRender in hd_fx.c)
 
   if (link_player_handler_state == kPlayerState_Swimming) {
     yt = 0x11, rt &= 1;

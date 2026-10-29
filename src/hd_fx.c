@@ -2026,6 +2026,7 @@ static uint8 g_hidden_idx[128];
 static int g_num_hidden;
 
 extern uint8 g_link_oam_mask[128], g_sprite_oam_owner[128];
+extern uint8 g_link_dive_timer;  // player.c
 
 // Ombra del gioco (SpriteDraw_Shadow): casella 0x6c (grande) o 0x38 (piccola)
 // della prima tabella, palette 4
@@ -2124,7 +2125,7 @@ void HdFx_ShadowsBeforeRender(Ppu *ppu, int width, int height) {
     int o = g_sprite_oam_owner[i];
     uint8 cast = 0;
     if (g_link_oam_mask[i]) {
-      cast = !shadow && link_on_ground;
+      cast = !shadow && link_on_ground && !(g_link_dive_timer && player_is_indoors);  // sott'acqua al chiuso niente ombra, come su GBA
     } else if (o < 16 && ground[o]) {
       if (shadow) {
         g_hidden_idx[g_num_hidden] = i;
@@ -2181,6 +2182,15 @@ void HdFx_IceBeforeRender(Ppu *ppu) {
     else
       ppu->objIce[i] = (oam1 & 0x1ff) == 0x48 || (oam1 & 0x1ff) == 0x58;
   }
+}
+
+// Immersione al chiuso come su GBA (0x80a5298): Link resta sopra il fondale
+// della vasca ma la PPU lo mescola a meta' con l'acqua (BG1 sullo schermo
+// secondario nelle stanze allagate); prima spariva sotto il fondale
+void HdFx_DiveBeforeRender(Ppu *ppu) {
+  bool on = g_link_dive_timer && player_is_indoors;
+  for (int i = 0; i < 128; i++)
+    ppu->objUnderWater[i] = on && g_link_oam_mask[i];
 }
 
 // Super bomba come su GBA (0x8116afc, sprite affine a doppia dimensione):

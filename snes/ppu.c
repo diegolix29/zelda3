@@ -1023,7 +1023,7 @@ static NOINLINE void PpuDrawWholeLine(Ppu *ppu, uint y) {
         // (0=BG1, 1=BG2, 2=BG3, 3=BG4, 4=OBJ/sprite, 5=backdrop). Il byte
         // alto era inutilizzato; la texture viene caricata come BGRA, quindi
         // lo shader lo legge come canale alpha e sa cosa non deve dipingere.
-        dst[0] = (z & 0xf00) << 16 |
+        dst[0] = (z & 0x700) << 16 |
                  ppu->brightnessMult[color & clip_color_mask] << 16 |
                  ppu->brightnessMult[(color >> 5) & clip_color_mask] << 8 |
                  ppu->brightnessMult[(color >> 10) & clip_color_mask];
@@ -1041,7 +1041,15 @@ static NOINLINE void PpuDrawWholeLine(Ppu *ppu, uint y) {
         uint32 g = (color >> 5) & clip_color_mask;
         uint32 b = (color >> 10) & clip_color_mask;
         uint8 *color_map = ppu->brightnessMult;
-        if (math_enabled_cur & (1 << main_layer)) {
+        if (main_layer & 8) {  // sott'acqua (objUnderWater): meta' sprite e meta' acqua
+          main_layer &= 7;
+          if (rendered_subscreen && (ppu->bgBuffers[1].data[i] & 0xff) != 0) {
+            color2 = ppu->cgram[ppu->bgBuffers[1].data[i] & 0xff];
+            r = (r + (color2 & 0x1f)) >> 1;
+            g = (g + ((color2 >> 5) & 0x1f)) >> 1;
+            b = (b + ((color2 >> 10) & 0x1f)) >> 1;
+          }
+        } else if (math_enabled_cur & (1 << main_layer)) {
           if (math_enabled_cur & 0x100) {  // addSubscreen ?
             if ((ppu->bgBuffers[1].data[i] & 0xff) != 0)
               color2 = ppu->cgram[ppu->bgBuffers[1].data[i] & 0xff], color_map = half_color_map;
@@ -1443,6 +1451,8 @@ static bool ppu_evaluateSprites(Ppu* ppu, int line) {
       ice = ppu->iceRemap;
       z = 0x80 + 16 * 2 + (prio << 8);
     }
+    if (ppu->objUnderWater[(index >> 1) & 127])
+      z |= 0x800;
     if (scale) {
       // ogni pixel dello schermo prende il pixel dello sprite che gli
       // corrisponde con la scala attorno al centro (come gli sprite affini GBA)
