@@ -35,6 +35,7 @@
 #include "snes/ppu.h"
 #include "variables.h"
 #include "config.h"
+#include "dungeon.h"
 #include "features.h"
 
 // same as in snes/ppu.c: the smooth camera offset applies to BG1 and BG2
@@ -1020,6 +1021,26 @@ static uint16 g_snap[2][64 * 64];
 static int g_room_id = -1, g_room_pass;
 static bool g_room_building, g_room_dump_request;
 
+// --- class of each tile number ---
+//
+// The game gives every 8x8 tile number (0-0x3ff) its collision type through
+// one table (attributes_for_tile), and every object draws its tiles from one
+// fixed table: a tile number means the same thing in every dungeon, only the
+// art changes. So the class (wall, ceiling, furniture...) is kept per tile
+// number too, not per object: a wall object also draws the ceiling above it
+// and the trim at its base, and those got the wall's class.
+//
+// The classes are seeded once per launch: every room is built (on a copy of
+// the game RAM, put back after) and each tile votes for the class of the
+// object that drew it. The result goes to hd3d_tiles_seed.txt; lines copied
+// to hd3d_tiles.txt ("1a3 wall") override single tiles. Key 8 (room dump)
+// reloads that file.
+enum { kNumTileNums = 0x400, kNumRooms = 0x128 };
+static uint8 g_tile_cls[kNumTileNums];        // class + 1, 0 = never seen
+static uint8 g_tile_override[kNumTileNums];   // class + 1, 0 = none
+static uint32 (*g_votes)[kCls_Count];         // while seeding
+static bool g_seeding, g_tiles_ready;
+
 void Hd3d_RoomBuildBegin(int room) {
   g_room_building = true;
   g_room_id = room;
@@ -1056,8 +1077,22 @@ void Hd3d_ObjEnd(int code, int x, int y) {
   o->tiles = (uint16)tiles;
 }
 
+static void VoteRoomTiles(void) {
+  for (int l = 0; l < 2; l++) {
+    const uint16 *bg = l ? dung_bg1 : dung_bg2;
+    for (int i = 0; i < 64 * 64; i++) {
+      int o = g_tile_obj[l][i];
+      g_votes[bg[i] & 0x3ff][o ? g_room_objs[o - 1].cls : kCls_Floor]++;
+    }
+  }
+}
+
 void Hd3d_RoomBuildEnd(void) {
   g_room_building = false;
+  if (g_seeding) {
+    VoteRoomTiles();
+    return;
+  }
   int counts[kCls_Count] = { 0 };
   for (int i = 0; i < g_n_room_objs; i++)
     counts[g_room_objs[i].cls]++;
@@ -1067,17 +1102,136 @@ void Hd3d_RoomBuildEnd(void) {
            counts[kCls_Tall], counts[kCls_Torch]);
 }
 
+static int ClassByName(const char *name) {
+  for (int c = 0; c < kCls_Count; c++)
+    if (!strcmp(name, kClsName[c]))
+      return c;
+  return -1;
+}
+
+// hd3d_tiles.txt: "<tile number in hex> <class>" per line, # starts a comment
+static void LoadTileOverrides(void) {
+  memset(g_tile_override, 0, sizeof(g_tile_override));
+  FILE *f = fopen("hd3d_tiles.txt", "r");
+  if (!f)
+    return;
+  char line[256], name[32];
+  int n = 0, bad = 0;
+  unsigned tile;
+  while (fgets(line, sizeof(line), f)) {
+    char *hash = strchr(line, '#');
+    if (hash) *hash = 0;
+    if (sscanf(line, "%x %31s", &tile, name) != 2)
+      continue;
+    int c = ClassByName(name);
+    if (tile >= kNumTileNums || c < 0) {
+      bad++;
+      continue;
+    }
+    g_tile_override[tile] = (uint8)(c + 1), n++;
+  }
+  fclose(f);
+  Hd3d_Log("hd3d_tiles.txt: %d tile classes%s", n, bad ? " (some lines not understood)" : "");
+}
+
+static void WriteTileSeed(void) {
+  FILE *f = fopen("hd3d_tiles_seed.txt", "w");
+  if (!f)
+    return;
+  fprintf(f, "# Class of each dungeon tile number, voted by the room objects that draw it\n"
+             "# (every room built once). Not read back: copy lines to hd3d_tiles.txt and\n"
+             "# change the class there. Classes:");
+  for (int c = 0; c < kCls_Count; c++)
+    fprintf(f, " %s", kClsName[c]);
+  fprintf(f, "\n# ? = less than 80%% of the votes agree\n");
+  for (int t = 0; t < kNumTileNums; t++) {
+    if (!g_tile_cls[t])
+      continue;
+    uint32 total = 0;
+    for (int c = 0; c < kCls_Count; c++)
+      total += g_votes[t][c];
+    int best = g_tile_cls[t] - 1;
+    int pct = (int)(g_votes[t][best] * 100 / total);
+    fprintf(f, "%03x %-9s # %s attr %02x, %d%%:", t, kClsName[best], pct < 80 ? "?" : " ", attributes_for_tile[t], pct);
+    for (int c = 0; c < kCls_Count; c++)
+      if (g_votes[t][c])
+        fprintf(f, " %s %u", kClsName[c], g_votes[t][c]);
+    fprintf(f, "\n");
+  }
+  fclose(f);
+}
+
+// Builds every room on a copy of the game RAM and puts it all back
+static void SeedTileClasses(void) {
+  g_tiles_ready = true;
+  uint8 *ram = malloc(sizeof(g_ram));
+  RoomObj *objs = malloc(sizeof(g_room_objs));
+  uint16 *tile_obj = malloc(sizeof(g_tile_obj));
+  g_votes = calloc(kNumTileNums, sizeof(*g_votes));
+  if (!ram || !objs || !tile_obj || !g_votes) {
+    free(ram), free(objs), free(tile_obj), free(g_votes), g_votes = NULL;
+    return;
+  }
+  uint64 t0 = SDL_GetPerformanceCounter();
+  memcpy(ram, g_ram, sizeof(g_ram));
+  memcpy(objs, g_room_objs, sizeof(g_room_objs));
+  memcpy(tile_obj, g_tile_obj, sizeof(g_tile_obj));
+  int n_objs = g_n_room_objs, room_id = g_room_id;
+
+  g_seeding = true;
+  for (int room = 0; room < kNumRooms; room++) {
+    dungeon_room_index = (uint16)room;
+    Dungeon_LoadRoom();
+  }
+  g_seeding = false;
+
+  memcpy(g_ram, ram, sizeof(g_ram));
+  memcpy(g_room_objs, objs, sizeof(g_room_objs));
+  memcpy(g_tile_obj, tile_obj, sizeof(g_tile_obj));
+  g_n_room_objs = n_objs, g_room_id = room_id;
+
+  int seen = 0, unsure = 0;
+  for (int t = 0; t < kNumTileNums; t++) {
+    uint32 total = 0, top = 0;
+    int best = 0;
+    for (int c = 0; c < kCls_Count; c++) {
+      total += g_votes[t][c];
+      if (g_votes[t][c] > top)
+        top = g_votes[t][c], best = c;
+    }
+    if (!total)
+      continue;
+    g_tile_cls[t] = (uint8)(best + 1);
+    seen++;
+    unsure += top * 5 < total * 4;
+  }
+  WriteTileSeed();
+  free(ram), free(objs), free(tile_obj), free(g_votes), g_votes = NULL;
+  double ms = (SDL_GetPerformanceCounter() - t0) * 1000.0 / SDL_GetPerformanceFrequency();
+  Hd3d_Log("tile classes seeded from %d rooms in %.0f ms: %d tile numbers, %d unsure (hd3d_tiles_seed.txt)",
+           kNumRooms, ms, seen, unsure);
+  LoadTileOverrides();
+}
+
 void Hd3d_RequestRoomDump(void) {
   g_room_dump_request = true;
   Hd3d_Log("room dump requested (key 8)");
+  if (g_tiles_ready)
+    LoadTileOverrides();
 }
 
-static int CellClass(int cell) {
+// Tallest class of the cell's two layers: by tile number (hd3d_tiles.txt,
+// then the seed), else by the object that drew it (objects = that info is
+// for this room)
+static int CellClass(int cell, bool objects) {
   int best = kCls_Floor;
   for (int l = 0; l < 2; l++) {
+    int t = (l ? dung_bg1 : dung_bg2)[cell] & 0x3ff;
+    int k = g_tile_override[t] ? g_tile_override[t] : g_tile_cls[t];
     int o = g_tile_obj[l][cell];
-    if (o && kClsHeight[g_room_objs[o - 1].cls] > kClsHeight[best])
-      best = g_room_objs[o - 1].cls;
+    int c = k ? k - 1 : objects && o ? g_room_objs[o - 1].cls : kCls_Floor;
+    if (kClsHeight[c] > kClsHeight[best])
+      best = c;
   }
   return best;
 }
@@ -1124,25 +1278,36 @@ static void RoomDump(const uint8 *attr, const uint8 *cls) {
       snprintf(hex + x * 2, 3, "%02x", attr[y * 64 + x]);
     Hd3d_Log("  %2d %s", y, hex);
   }
+  // to fix a tile: copy its number to hd3d_tiles.txt with the right class
+  for (int l = 0; l < 2; l++) {
+    const uint16 *bg = l ? dung_bg1 : dung_bg2;
+    Hd3d_Log("  %s tile numbers, each followed by its class letter (from hd3d_tiles.txt or the seed, ? = never seen):",
+             l ? "BG1" : "BG2");
+    for (int y = 0; y < 64; y++) {
+      char row[64 * 4 + 1];
+      for (int x = 0; x < 64; x++) {
+        int t = bg[y * 64 + x] & 0x3ff;
+        int k = g_tile_override[t] ? g_tile_override[t] : g_tile_cls[t];
+        snprintf(row + x * 4, 5, "%03x%c", t, k ? kClsLetter[k - 1] : '?');
+      }
+      Hd3d_Log("  %2d %s", y, row);
+    }
+  }
 }
 
 static void BuildHeightMap(void) {
   // the table of the layer Link is on, as the game's tile detection reads it
   const uint8 *attr = dung_bg2_attr_table + (link_is_on_lower_level ? 0x1000 : 0);
+  if (!g_tiles_ready)
+    SeedTileClasses();
   bool objects = g_room_id == dungeon_room_index && g_n_room_objs > 0;
   uint8 cls[64 * 64];
   int cells = 0;
-  if (!objects) {
-    // no object info: every solid tile is a wall (first version)
-    for (int i = 0; i < 64 * 64; i++)
-      cls[i] = IsWallAttr(attr[i]) ? kCls_Wall : kCls_Floor;
-  } else {
-    for (int i = 0; i < 64 * 64; i++) {
-      cls[i] = (uint8)CellClass(i);
-      // decorations drawn on a wall (shelves, the pot rack, bars...) are wall
-      if (cls[i] == kCls_Floor && IsWallAttr(attr[i]))
-        cls[i] = kCls_Wall;
-    }
+  for (int i = 0; i < 64 * 64; i++) {
+    cls[i] = (uint8)CellClass(i, objects);
+    // decorations drawn on a wall (shelves, the pot rack, bars...) are wall
+    if (cls[i] == kCls_Floor && IsWallAttr(attr[i]))
+      cls[i] = kCls_Wall;
   }
   // Wall tiles: the wall objects' tiles. Only the top rows of a north wall
   // are solid for the game; its painted face below them is walkable, but it
