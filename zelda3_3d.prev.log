@@ -1,32 +1,32 @@
 [   0.000] 3D view init: View3D=5 (75 deg), View3DCurve=1 (Light), View3DDrawDistance=1 (2x), View3DWalls=1, View3DCamera=1 (Third person), NewRenderer=1, OutputMethod=2, ExtendedAspectRatio=0, ContinuousWorld=1, shader='shaders/foursword/foursword.glslp'
-[   0.382] not gameplay (module=0 sub=1 saved=0 mode=1 tilt=75.0)
-[   4.431] 3D on (module=7 sub=0 saved=7 mode=1 tilt=75.0)
-[   4.432] buffers 256x224
-[   4.435] ground past the screen: video memory (module=7 area=0x00 indoors=1)
-[   4.570] tile classes seeded from 296 rooms in 135 ms: 465 tile numbers, 78 unsure (hd3d_tiles_seed.txt)
-[   4.571] room 97 built: 123 objects (walls 41, ceiling 11, doors 7, rails 8, furniture 0, small 0, blocks 0, tall 7, torches 8)
-[   4.574] room 97: objects read again (it was not built since launch)
-[   4.576] object masks (room 97): 212 cells, 82 box columns, 0 raised pixels (split), 12 floor colors
-[   5.404] object masks (room 97): 212 cells, 82 box columns, 0 raised pixels (split), 12 floor colors
-[  11.668] stats: 300 frames, 3D compose 20.892 ms/frame, sprite groups avg 1.0 max 1, tilt 75.0, camera Third person (yaw -88 pitch 62), curve R=3000, past-screen px/frame 12888 (missing 0), source video memory, far sprites avg 0.0 (draw distance 2x, ok), walls on (wall tiles avg 2666), frame 256x224, module=7 area=0x00
-[  19.087] stats: 300 frames, 3D compose 21.303 ms/frame, sprite groups avg 1.0 max 1, tilt 75.0, camera Third person (yaw -98 pitch 60), curve R=3000, past-screen px/frame 11716 (missing 0), source video memory, far sprites avg 0.0 (draw distance 2x, ok), walls on (wall tiles avg 2666), frame 256x224, module=7 area=0x00
-[  26.232] stats: 300 frames, 3D compose 20.630 ms/frame, sprite groups avg 1.0 max 1, tilt 75.0, camera Third person (yaw -116 pitch 59), curve R=3000, past-screen px/frame 10137 (missing 0), source video memory, far sprites avg 0.0 (draw distance 2x, ok), walls on (wall tiles avg 2666), frame 256x224, module=7 area=0x00
-[  33.550] stats: 300 frames, 3D compose 21.192 ms/frame, sprite groups avg 1.0 max 1, tilt 75.0, camera Third person (yaw -73 pitch 52), curve R=3000, past-screen px/frame 10378 (missing 0), source video memory, far sprites avg 0.0 (draw distance 2x, ok), walls on (wall tiles avg 2666), frame 256x224, module=7 area=0x00
-[  40.834] stats: 300 frames, 3D compose 20.715 ms/frame, sprite groups avg 1.0 max 1, tilt 75.0, camera Third person (yaw -4 pitch 63), curve R=3000, past-screen px/frame 10667 (missing 0), source video memory, far sprites avg 0.0 (draw distance 2x, ok), walls on (wall tiles avg 2666), frame 256x224, module=7 area=0x00
-[  50.107] stats: 300 frames, 3D compose 27.295 ms/frame, sprite groups avg 1.0 max 1, tilt 75.0, camera Third person (yaw -58 pitch 64), curve R=3000, past-screen px/frame 14976 (missing 0), source video memory, far sprites avg 0.0 (draw distance 2x, ok), walls on (wall tiles avg 2666), frame 256x224, module=7 area=0x00
-[  58.906] stats: 300 frames, 3D compose 25.756 ms/frame, sprite groups avg 1.0 max 1, tilt 75.0, camera Third person (yaw -58 pitch 64), curve R=3000, past-screen px/frame 14969 (missing 0), source video memory, far sprites avg 0.0 (draw distance 2x, ok), walls on (wall tiles avg 2666), frame 256x224, module=7 area=0x00
-[  67.682] stats: 300 frames, 3D compose 25.692 ms/frame, sprite groups avg 1.0 max 1, tilt 75.0, camera Third person (yaw -58 pitch 64), curve R=3000, past-screen px/frame 14969 (missing 0), source video memory, far sprites avg 0.0 (draw distance 2x, ok), walls on (wall tiles avg 2666), frame 256x224, module=7 area=0x00
-[  76.524] stats: 300 frames, 3D compose 25.913 ms/frame, sprite groups avg 1.0 max 1, tilt 75.0, camera Third person (yaw -58 pitch 64), curve R=3000, past-screen px/frame 14969 (missing 0), source video memory, far sprites avg 0.0 (draw distance 2x, ok), walls on (wall tiles avg 2666), frame 256x224, module=7 area=0x00
-[  85.317] stats: 300 frames, 3D compose 25.795 ms/frame, sprite groups avg 1.0 max 1, tilt 75.0, camera Third person (yaw -58 pitch 64), curve R=3000, past-screen px/frame 14969 (missing 0), source video memory, far sprites avg 0.0 (draw distance 2x, ok), walls on (wall tiles avg 2666), frame 256x224, module=7 area=0x00
-[  94.133] stats: 300 frames, 3D compose 25.852 ms/frame, sprite groups avg 1.0 max 1, tilt 75.0, camera Third person (yaw -58 pitch 64), curve R=3000, past-screen px/frame 14969 (missing 0), source video memory, far sprites avg 0.0 (draw distance 2x, ok), walls on (wall tiles avg 2666), frame 256x224, module=7 area=0x00
-[ 102.983] stats: 300 frames, 3D compose 25.957 ms/frame, sprite groups avg 1.0 max 1, tilt 75.0, camera Third person (yaw -58 pitch 64), curve R=3000, past-screen px/frame 14969 (missing 0), source video memory, far sprites avg 0.0 (draw distance 2x, ok), walls on (wall tiles avg 2666), frame 256x224, module=7 area=0x00
-[ 111.811] stats: 300 frames, 3D compose 25.847 ms/frame, sprite groups avg 1.0 max 1, tilt 75.0, camera Third person (yaw -58 pitch 64), curve R=3000, past-screen px/frame 14969 (missing 0), source video memory, far sprites avg 0.0 (draw distance 2x, ok), walls on (wall tiles avg 2666), frame 256x224, module=7 area=0x00
-[ 120.665] stats: 300 frames, 3D compose 25.862 ms/frame, sprite groups avg 1.0 max 1, tilt 75.0, camera Third person (yaw -58 pitch 64), curve R=3000, past-screen px/frame 14969 (missing 0), source video memory, far sprites avg 0.0 (draw distance 2x, ok), walls on (wall tiles avg 2666), frame 256x224, module=7 area=0x00
-[ 129.482] stats: 300 frames, 3D compose 25.805 ms/frame, sprite groups avg 1.0 max 1, tilt 75.0, camera Third person (yaw -58 pitch 64), curve R=3000, past-screen px/frame 14969 (missing 0), source video memory, far sprites avg 0.0 (draw distance 2x, ok), walls on (wall tiles avg 2666), frame 256x224, module=7 area=0x00
-[ 138.277] stats: 300 frames, 3D compose 25.775 ms/frame, sprite groups avg 1.0 max 1, tilt 75.0, camera Third person (yaw -58 pitch 64), curve R=3000, past-screen px/frame 14969 (missing 0), source video memory, far sprites avg 0.0 (draw distance 2x, ok), walls on (wall tiles avg 2666), frame 256x224, module=7 area=0x00
-[ 147.050] stats: 300 frames, 3D compose 25.727 ms/frame, sprite groups avg 1.0 max 1, tilt 75.0, camera Third person (yaw -58 pitch 64), curve R=3000, past-screen px/frame 14969 (missing 0), source video memory, far sprites avg 0.0 (draw distance 2x, ok), walls on (wall tiles avg 2666), frame 256x224, module=7 area=0x00
-[ 155.921] stats: 300 frames, 3D compose 25.956 ms/frame, sprite groups avg 1.0 max 1, tilt 75.0, camera Third person (yaw -58 pitch 64), curve R=3000, past-screen px/frame 14969 (missing 0), source video memory, far sprites avg 0.0 (draw distance 2x, ok), walls on (wall tiles avg 2666), frame 256x224, module=7 area=0x00
-[ 164.724] stats: 300 frames, 3D compose 25.786 ms/frame, sprite groups avg 1.0 max 1, tilt 75.0, camera Third person (yaw -58 pitch 64), curve R=3000, past-screen px/frame 14969 (missing 0), source video memory, far sprites avg 0.0 (draw distance 2x, ok), walls on (wall tiles avg 2666), frame 256x224, module=7 area=0x00
-[ 173.526] stats: 300 frames, 3D compose 25.762 ms/frame, sprite groups avg 1.0 max 1, tilt 75.0, camera Third person (yaw -58 pitch 64), curve R=3000, past-screen px/frame 14969 (missing 0), source video memory, far sprites avg 0.0 (draw distance 2x, ok), walls on (wall tiles avg 2666), frame 256x224, module=7 area=0x00
-[ 182.318] stats: 300 frames, 3D compose 25.770 ms/frame, sprite groups avg 1.0 max 1, tilt 75.0, camera Third person (yaw -58 pitch 64), curve R=3000, past-screen px/frame 14969 (missing 0), source video memory, far sprites avg 0.0 (draw distance 2x, ok), walls on (wall tiles avg 2666), frame 256x224, module=7 area=0x00
-[ 191.148] stats: 300 frames, 3D compose 25.829 ms/frame, sprite groups avg 1.0 max 1, tilt 75.0, camera Third person (yaw -58 pitch 64), curve R=3000, past-screen px/frame 14969 (missing 0), source video memory, far sprites avg 0.0 (draw distance 2x, ok), walls on (wall tiles avg 2666), frame 256x224, module=7 area=0x00
+[   0.396] not gameplay (module=0 sub=1 saved=0 mode=1 tilt=75.0)
+[   3.344] 3D on (module=7 sub=0 saved=7 mode=1 tilt=75.0)
+[   3.345] buffers 256x224
+[   3.348] ground past the screen: video memory (module=7 area=0x00 indoors=1)
+[   3.485] tile classes seeded from 296 rooms in 136 ms: 465 tile numbers, 78 unsure (hd3d_tiles_seed.txt)
+[   3.486] room 97 built: 123 objects (walls 41, ceiling 11, doors 7, rails 8, furniture 0, small 0, blocks 0, tall 7, torches 8)
+[   3.487] room 97: objects read again (it was not built since launch)
+[   3.489] object masks (room 97): 212 cells, 82 box columns, 0 raised pixels (split), 12 floor colors
+[   4.176] object masks (room 97): 212 cells, 82 box columns, 0 raised pixels (split), 12 floor colors
+[  13.514] stats: 300 frames, 3D compose 30.833 ms/frame, sprite groups avg 1.0 max 1, tilt 75.0, camera Third person (yaw -88 pitch 67), curve R=3000, past-screen px/frame 10034 (missing 0), source video memory, far sprites avg 0.0 (draw distance 2x, ok), walls on (wall tiles avg 2628), frame 256x224, module=7 area=0x00
+[  16.468] room 96 built: 94 objects (walls 36, ceiling 9, doors 6, rails 11, furniture 0, small 2, blocks 0, tall 0, torches 2)
+[  16.471] object masks (room 96): 125 cells, 29 box columns, 116 raised pixels (split), 16 floor colors
+[  16.494] object masks (room 96): 125 cells, 29 box columns, 116 raised pixels (split), 16 floor colors
+[  16.518] object masks (room 96): 125 cells, 40 box columns, 72 raised pixels (split), 15 floor colors
+[  16.543] object masks (room 96): 125 cells, 40 box columns, 72 raised pixels (split), 15 floor colors
+[  16.569] object masks (room 96): 125 cells, 47 box columns, 44 raised pixels (split), 16 floor colors
+[  16.598] object masks (room 96): 125 cells, 48 box columns, 36 raised pixels (split), 17 floor colors
+[  16.627] object masks (room 96): 125 cells, 48 box columns, 36 raised pixels (split), 17 floor colors
+[  16.657] object masks (room 96): 125 cells, 48 box columns, 36 raised pixels (split), 16 floor colors
+[  16.686] object masks (room 96): 125 cells, 48 box columns, 36 raised pixels (split), 16 floor colors
+[  16.715] object masks (room 96): 125 cells, 48 box columns, 36 raised pixels (split), 16 floor colors
+[  16.735] object masks (room 96): 125 cells, 48 box columns, 36 raised pixels (split), 16 floor colors
+[  16.755] object masks (room 96): 125 cells, 48 box columns, 36 raised pixels (split), 16 floor colors
+[  16.776] object masks (room 96): 125 cells, 49 box columns, 32 raised pixels (split), 16 floor colors
+[  16.806] object masks (room 96): 125 cells, 49 box columns, 32 raised pixels (split), 16 floor colors
+[  16.836] object masks (room 96): 125 cells, 50 box columns, 0 raised pixels (split), 15 floor colors
+[  16.858] object masks (room 96): 125 cells, 50 box columns, 0 raised pixels (split), 17 floor colors
+[  16.880] object masks (room 96): 125 cells, 50 box columns, 0 raised pixels (split), 18 floor colors
+[  16.968] object masks (room 96): 125 cells, 50 box columns, 0 raised pixels (split), 19 floor colors
+[  17.735] object masks (room 96): 125 cells, 50 box columns, 0 raised pixels (split), 19 floor colors
+[  23.946] stats: 300 frames, 3D compose 32.329 ms/frame, sprite groups avg 0.9 max 1, tilt 75.0, camera Third person (yaw 32 pitch 60), curve R=3000, past-screen px/frame 13207 (missing 0), source video memory, far sprites avg 0.0 (draw distance 2x, ok), walls on (wall tiles avg 2291), frame 256x224, module=7 area=0x00

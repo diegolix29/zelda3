@@ -1828,10 +1828,43 @@ static void BuildHeightMap(void) {
     // decorations drawn on a wall (shelves, the pot rack, bars...) are wall
     if (cls[i] == kCls_Floor && IsWallAttr(attr[i]))
       cls[i] = kCls_Wall;
+    // door openings (collision 0x80-0x8f, 0xf0 and up): walked through, so
+    // flat; the wall around them still stands
+    if (IsWallClass(cls[i]) && (attr[i] >= 0x80 && attr[i] <= 0x8f || attr[i] >= 0xf0))
+      cls[i] = kCls_Floor;
   }
   FindUpper(attr, cls);
   bool two = g_two_levels;
   g_level_h = two ? LevelHeight(cls) : 0;
+  bool holes = false;
+  for (int i = 0; i < 64 * 64 && !holes; i++)
+    holes = g_lower[i];
+  // Upper floor edges over a hole are drawn as walls (the ledge lips, 0x28-
+  // 0x2b, and the solid corners between them): they are the upper floor's
+  // rim, flat at its height, and the drop below them is its side
+  if (holes) {
+    uint8 rim[64 * 64];
+    for (int i = 0; i < 64 * 64; i++) {
+      rim[i] = 0;
+      if (!g_upper[i] || !IsWallClass(cls[i]) || cls[i] == kCls_Ceiling)
+        continue;
+      int x = i & 63, y = i >> 6;
+      bool ledge_n = false, lower_n = false;
+      for (int dy = -1; dy <= 1; dy++)
+        for (int dx = -1; dx <= 1; dx++) {
+          int nx = x + dx, ny = y + dy;
+          if ((dx | dy) == 0 || nx < 0 || nx > 63 || ny < 0 || ny > 63)
+            continue;
+          int n = ny * 64 + nx;
+          lower_n |= g_lower[n];
+          ledge_n |= (dx == 0 || dy == 0) && IsLedgeAttr(attr[n]);
+        }
+      rim[i] = IsLedgeAttr(attr[i]) || (IsWallAttr(attr[i]) && ledge_n && lower_n);
+    }
+    for (int i = 0; i < 64 * 64; i++)
+      if (rim[i])
+        cls[i] = kCls_Floor;
+  }
   // Wall tiles: the wall objects' tiles. Only the top rows of a north wall
   // are solid for the game; its painted face below them is walkable, but it
   // is part of the wall and stands up with it. A run of wall tiles with no
@@ -1854,9 +1887,17 @@ static void BuildHeightMap(void) {
       int c = cy * 64 + cx;
       if (wall[c]) {
         int y0 = cy;
-        bool any_solid = false;
-        while (cy < 64 && wall[cy * 64 + cx] && g_upper[cy * 64 + cx] == g_upper[c])
-          any_solid |= IsWallAttr(attr[cy * 64 + cx]), cy++;
+        bool any_solid = false, touches_upper = false;
+        while (cy < 64 && wall[cy * 64 + cx] && g_upper[cy * 64 + cx] == g_upper[c]) {
+          any_solid |= IsWallAttr(attr[cy * 64 + cx]);
+          for (int dy = -1; dy <= 1; dy++)
+            for (int dx = -1; dx <= 1; dx++) {
+              int nx = cx + dx, ny = cy + dy;
+              if (nx >= 0 && nx < 64 && ny >= 0 && ny < 64)
+                touches_upper |= g_upper[ny * 64 + nx];
+            }
+          cy++;
+        }
         if (!any_solid)
           continue;   // a doorway: walkable all the way
         bool floor_n = y0 > 0 && !solid[(y0 - 1) * 64 + cx];
@@ -1865,6 +1906,10 @@ static void BuildHeightMap(void) {
         bool fold = true;
         if (two && !g_upper[c] && y0 > 0 && g_upper[(y0 - 1) * 64 + cx]) {
           hgt = g_level_h;                 // the cliff up to the upper floor
+        } else if (holes && !g_upper[c] && touches_upper) {
+          hgt = g_level_h, fold = false;   // the pit's other walls: up to the rim
+        } else if (cy - y0 > 6) {
+          hgt = 32, fold = false;          // east and west walls: long runs, seen from above
         } else if (floor_n && !floor_s) {
           hgt = 16, fold = false;          // south wall: we look at its top
         } else if (!floor_s) {
