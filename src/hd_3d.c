@@ -1014,9 +1014,10 @@ static int ObjectClass(int code) {
         id == 0x73 || id == 0x74 || id == 0x76 || id == 0x77 || id == 0x78 || id == 0x7b ||
         (id >= 0x7f && id <= 0x86) || id == 0xcd || id == 0xce)
       return kCls_Wall;
-    if (id == 0x22 || id == 0x2f || id == 0x30 || id == 0x5f || id == 0x69 || id == 0x6c || id == 0x6d ||
-        id == 0x88 || id == 0x8a)
+    if (id == 0x22 || id == 0x2f || id == 0x30 || id == 0x5f || id == 0x69 || id == 0x6c || id == 0x6d)
       return kCls_Rail;
+    if (id == 0x88 || id == 0x8a)
+      return kCls_Block;   // large / long vertical rails: long low barriers
     if (id == 0x3c)
       return kCls_Chair;   // double chair
     if (id == 0xdd)
@@ -1625,7 +1626,7 @@ static void BuildPixelMasks(Ppu *ppu, const uint8 *cls, const uint8 *attr) {
   // the face, the rest lies on the top (see ShadeWall). The rest of the
   // drawing (above the box, a shadow below it) would lie flat on the floor
   // as a copy: it is covered with the floor beside the object (g_pcover).
-  typedef struct BoxRun { uint8 cx, y0, y1, f1, k; } BoxRun;   // cells y0..y1-1, collision ends at f1
+  typedef struct BoxRun { uint8 cx, y0, y1, f0, f1, k; } BoxRun;   // cells y0..y1-1, collision f0..f1
   static BoxRun runs[64 * 32];
   int nruns = 0;
   for (int cx = 0; cx < 64; cx++) {
@@ -1639,12 +1640,14 @@ static void BuildPixelMasks(Ppu *ppu, const uint8 *cls, const uint8 *attr) {
       int y0 = cy, k = cls[c];
       while (cy < 64 && g_partial[cy * 64 + cx] && cls[cy * 64 + cx] == k)
         cy++;
-      int f1 = -1;
+      int f0 = -1, f1 = -1;
       for (int y = y0; y < cy; y++)
-        if (IsFootAttr(attr[y * 64 + cx]))
+        if (IsFootAttr(attr[y * 64 + cx])) {
+          if (f0 < 0) f0 = y;
           f1 = y;
+        }
       if (f1 >= 0 && nruns < 64 * 32)
-        runs[nruns++] = (BoxRun){ (uint8)cx, (uint8)y0, (uint8)cy, (uint8)f1, (uint8)k };
+        runs[nruns++] = (BoxRun){ (uint8)cx, (uint8)y0, (uint8)cy, (uint8)f0, (uint8)f1, (uint8)k };
     }
   }
   for (int n = 0; n < nruns; n++) {
@@ -1660,7 +1663,14 @@ static void BuildPixelMasks(Ppu *ppu, const uint8 *cls, const uint8 *attr) {
         w++;
       }
     }
-    int front = (b->f1 + 1) * 8, depth = w * 8;
+    // depth: what the drawing leaves after the face (a long barrier is long),
+    // at least the width (a column is as deep as it is wide), at most the
+    // collision (a pot's drawing is taller than it is deep)
+    int front = (b->f1 + 1) * 8;
+    int hmax = g_hmap[b->f1 * 64 + b->cx] - g_hfloor[b->f1 * 64 + b->cx];
+    int depth = front - b->y0 * 8 - hmax;
+    if (depth < w * 8) depth = w * 8;
+    if (depth > front - b->f0 * 8) depth = front - b->f0 * 8;
     int foot_top = front - depth;
     if (foot_top < b->y0 * 8) foot_top = b->y0 * 8, depth = front - foot_top;
     for (int px = b->cx * 8; px < b->cx * 8 + 8; px++) {

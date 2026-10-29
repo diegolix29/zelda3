@@ -1,6 +1,6 @@
 # Class of each dungeon tile number, voted by the room objects that draw it
 # (every room built once). Not read back: copy lines to hd3d_tiles.txt and
-# change the class there. Classes: floor wall ceiling door rail furniture small block tall torch bigpot
+# change the class there. Classes: floor wall ceiling door rail furniture small block tall torch bigpot chair
 # ? = less than 80% of the votes agree
 000 door      #   attr 01, 100%: door 160
 001 door      #   attr 01, 100%: door 28
@@ -194,11 +194,11 @@
 0dd floor     #   attr 00, 100%: floor 65
 0de floor     #   attr 62, 100%: floor 7
 0df floor     #   attr 62, 100%: floor 7
-0e0 rail      # ? attr 27, 65%: floor 224 rail 432
-0e1 rail      #   attr 02, 99%: wall 5 ceiling 3 rail 1719
+0e0 block     # ? attr 27, 65%: floor 224 block 432
+0e1 rail      #   attr 02, 97%: wall 5 ceiling 3 rail 1688 block 31
 0e2 rail      #   attr 02, 99%: wall 3 rail 3083
-0e3 rail      #   attr 02, 99%: wall 12 rail 3701
-0e4 rail      # ? attr 27, 50%: floor 206 rail 214
+0e3 rail      #   attr 02, 83%: wall 12 rail 3084 block 617
+0e4 block     # ? attr 27, 50%: floor 206 block 214
 0e5 floor     #   attr 27, 100%: floor 351
 0e6 tall      #   attr 01, 100%: tall 50
 0e7 tall      #   attr 00, 100%: tall 50
@@ -210,10 +210,10 @@
 0ed floor     #   attr 00, 99%: floor 31985 wall 6 door 2
 0ee floor     #   attr 00, 99%: floor 105388 door 2
 0ef floor     #   attr 00, 99%: floor 105227 door 2
-0f0 rail      #   attr 27, 100%: rail 240
-0f1 rail      # ? attr 27, 51%: floor 202 rail 214
+0f0 block     #   attr 27, 100%: block 240
+0f1 block     # ? attr 27, 51%: floor 202 block 214
 0f2 floor     #   attr 27, 100%: floor 347
-0f3 rail      #   attr 27, 100%: rail 1108
+0f3 block     #   attr 27, 100%: block 1108
 0f4 floor     #   attr 27, 100%: floor 347
 0f5 floor     #   attr 10, 100%: floor 16
 0f6 tall      #   attr 02, 100%: tall 50
@@ -286,10 +286,10 @@
 145 wall      #   attr 02, 98%: floor 2 wall 194
 146 wall      #   attr 6e, 84%: floor 19 wall 104
 147 wall      # ? attr 6f, 64%: floor 59 wall 106
-148 wall      # ? attr 01, 45%: floor 62 wall 135 door 2 furniture 100
-149 wall      # ? attr 6c, 49%: floor 42 wall 131 door 2 furniture 88
-14a floor     #   attr 02, 100%: floor 168
-14b floor     #   attr 01, 100%: floor 170
+148 wall      # ? attr 01, 45%: floor 62 wall 135 door 2 chair 100
+149 wall      # ? attr 6c, 49%: floor 42 wall 131 door 2 chair 88
+14a floor     #   attr 02, 83%: floor 140 chair 28
+14b floor     #   attr 01, 83%: floor 142 chair 28
 14c door      #   attr 01, 100%: door 44
 14d tall      # ? attr 01, 73%: door 44 tall 122
 14e door      # ? attr 01, 70%: floor 42 wall 6 door 114
@@ -304,8 +304,8 @@
 157 floor     # ? attr 00, 52%: floor 77 wall 70
 158 wall      #   attr 00, 98%: floor 2 wall 109
 159 wall      #   attr 00, 96%: floor 2 wall 185 door 4
-15a floor     #   attr 02, 100%: floor 166
-15b floor     #   attr 01, 100%: floor 166
+15a floor     #   attr 02, 83%: floor 138 chair 28
+15b floor     #   attr 01, 83%: floor 138 chair 28
 15c door      #   attr 01, 100%: door 42
 15d tall      # ? attr 01, 74%: door 42 tall 122
 15e door      # ? attr 01, 77%: floor 28 wall 6 door 114
@@ -320,8 +320,8 @@
 167 wall      #   attr 6f, 84%: floor 20 wall 106
 168 wall      #   attr 01, 97%: floor 2 wall 149 door 2
 169 wall      #   attr 6c, 97%: floor 2 wall 145 door 2
-16a floor     #   attr 02, 100%: floor 168
-16b floor     #   attr 02, 100%: floor 166
+16a floor     #   attr 02, 83%: floor 140 chair 28
+16b floor     #   attr 02, 83%: floor 138 chair 28
 16c door      # ? attr 02, 61%: floor 4 door 42 small 22
 16d tall      # ? attr 02, 61%: door 42 tall 68
 16e door      # ? attr 01, 50%: floor 28 wall 86 door 114
@@ -336,8 +336,8 @@
 177 floor     #   attr 02, 80%: floor 193 furniture 48
 178 floor     #   attr 02, 99%: floor 205 door 2
 179 floor     #   attr 02, 99%: floor 205 door 2
-17a floor     #   attr 02, 100%: floor 168
-17b floor     #   attr 02, 100%: floor 166
+17a floor     #   attr 02, 83%: floor 140 chair 28
+17b floor     #   attr 02, 83%: floor 138 chair 28
 17c door      # ? attr 00, 61%: floor 4 door 42 small 22
 17d door      # ? attr 00, 61%: floor 4 door 42 small 22
 17e wall      # ? attr 01, 51%: floor 21 wall 140 door 110
