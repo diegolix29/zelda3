@@ -953,10 +953,16 @@ static uint8 g_praise[512 * 512];// object cells: height of this pixel, 0 = floo
 static uint8 g_pdown[512 * 512]; // object cells: rows from this pixel down to its column's front (face base)
 static uint8 g_pcol[512 * 512];  // object cells: cgram index shown (scratch for BuildPixelMasks)
 // object boxes (objects with solid collision): per pixel of the footprint,
-// the rows of the drawing above the box's front (face + top art) and the
-// box's depth; 0 = not a box pixel
-static uint8 g_pspan[512 * 512];
-static uint8 g_pfoot[512 * 512];
+// the box it belongs to (index + 1, 0 = not a box pixel)
+typedef struct ObjBox {
+  int16 x0, w;           // room pixel column of the west edge, width
+  int16 depth;           // pixels from the front to the back
+  uint8 seat_h, seat_d;  // chairs: seat height and depth (0 = a plain box)
+  float k, kt;           // drawing rows per pixel of surface, weight of a top (see ShadeWall)
+} ObjBox;
+enum { kMaxBoxes = 64 * 32 };
+static ObjBox g_boxes[kMaxBoxes];
+static uint16 g_pbox[512 * 512];
 // floor drawn over the rest of a box object's drawing: the floor this many
 // 16 pixel steps to the side (0 = none)
 static int8 g_pcover[512 * 512];
@@ -1440,10 +1446,12 @@ static void RoomDump(const uint8 *attr, const uint8 *cls) {
   for (int c = 0; c < 64 * 64; c++) {
     if (!g_partial[c])
       continue;
-    int raised = 0;
-    for (int p = 0; p < 64; p++)
-      raised += g_praise[((c >> 6) * 8 + (p >> 3)) * 512 + (c & 63) * 8 + (p & 7)] != 0;
-    if (!raised) {
+    int raised = 0, covered = 0;
+    for (int p = 0; p < 64; p++) {
+      int i = ((c >> 6) * 8 + (p >> 3)) * 512 + (c & 63) * 8 + (p & 7);
+      raised += g_praise[i] != 0, covered += g_pcover[i] != 0;
+    }
+    if (!raised && !covered) {   // (covered: the drawing above a box, on purpose)
       if (flat_cells++ < 40)
         Hd3d_Log("  flattened by the floor flood: cell (%d,%d) tile %03x (%s) -> add \"%03x %s full\" to hd3d_tiles.txt "
                  "if it should stand", c & 63, c >> 6, (g_hlayer[c] ? dung_bg1 : dung_bg2)[c] & 0x3ff, kClsName[cls[c]],
@@ -1587,7 +1595,7 @@ static void BuildPixelMasks(Ppu *ppu, const uint8 *cls, const uint8 *attr) {
     for (int k = 0; k < 64; k++) {
       int x = wx + (k & 7), y = wy + (k >> 3), i = y * 512 + x;
       g_praise[i] = (uint8)(g_hmap[c] - g_hfloor[c]);   // above its floor
-      g_pspan[i] = g_pfoot[i] = 0;
+      g_pbox[i] = 0;
       g_pcol[i] = (uint8)RoomPixel(ppu, x, y);
     }
   }
@@ -1627,7 +1635,7 @@ static void BuildPixelMasks(Ppu *ppu, const uint8 *cls, const uint8 *attr) {
   // drawing (above the box, a shadow below it) would lie flat on the floor
   // as a copy: it is covered with the floor beside the object (g_pcover).
   typedef struct BoxRun { uint8 cx, y0, y1, f0, f1, k; } BoxRun;   // cells y0..y1-1, collision f0..f1
-  static BoxRun runs[64 * 32];
+  static BoxRun runs[kMaxBoxes];
   int nruns = 0;
   for (int cx = 0; cx < 64; cx++) {
     int cy = 0;
@@ -1646,23 +1654,24 @@ static void BuildPixelMasks(Ppu *ppu, const uint8 *cls, const uint8 *attr) {
           if (f0 < 0) f0 = y;
           f1 = y;
         }
-      if (f1 >= 0 && nruns < 64 * 32)
+      if (f1 >= 0 && nruns < kMaxBoxes)
         runs[nruns++] = (BoxRun){ (uint8)cx, (uint8)y0, (uint8)cy, (uint8)f0, (uint8)f1, (uint8)k };
     }
   }
   for (int n = 0; n < nruns; n++) {
     const BoxRun *b = &runs[n];
     // width: the neighbouring box columns with the same front and class
-    int w = 1;
+    int cx0 = b->cx, cx1 = b->cx;
     for (int dir = -1; dir <= 1; dir += 2) {
       for (int cx = b->cx + dir; cx >= 0 && cx < 64; cx += dir) {
         bool found = false;
         for (int m = 0; m < nruns && !found; m++)
           found = runs[m].cx == cx && runs[m].f1 == b->f1 && runs[m].k == b->k;
         if (!found) break;
-        w++;
+        if (dir < 0) cx0 = cx; else cx1 = cx;
       }
     }
+    int w = cx1 - cx0 + 1;
     // depth: what the drawing leaves after the face (a long barrier is long),
     // at least the width (a column is as deep as it is wide), at most the
     // collision (a pot's drawing is taller than it is deep)
@@ -1673,28 +1682,27 @@ static void BuildPixelMasks(Ppu *ppu, const uint8 *cls, const uint8 *attr) {
     if (depth > front - b->f0 * 8) depth = front - b->f0 * 8;
     int foot_top = front - depth;
     if (foot_top < b->y0 * 8) foot_top = b->y0 * 8, depth = front - foot_top;
+    // The drawing is every row of the run's cells. Not from its first object
+    // pixel: the flood eats the top of a column that shares the floor's
+    // colors, and the few rows left were stretched over the whole height.
+    // A chair: the front 55% of its depth is the seat, at 45% of the height;
+    // the back behind it stands full height. Its tops weigh less: a throne's
+    // drawing is mostly the seat front and the back's face (see ShadeWall)
+    ObjBox *bx = &g_boxes[n];
+    bool chair = b->k == kCls_Chair;
+    bx->x0 = (int16)(cx0 * 8), bx->w = (int16)(w * 8), bx->depth = (int16)depth;
+    bx->seat_d = chair ? (uint8)(depth * 55 / 100) : 0;
+    bx->seat_h = chair ? (uint8)(hmax * 45 / 100) : 0;
+    bx->kt = chair ? 0.35f : 1.0f;
+    bx->k = hmax > 0 ? (front - b->y0 * 8) / (hmax + bx->kt * depth) : 1.0f;
     for (int px = b->cx * 8; px < b->cx * 8 + 8; px++) {
-      // the drawing's top in this pixel column: its first object pixel
-      int top = foot_top;
-      for (int r = b->y0 * 8; r < front; r++)
-        if (g_praise[r * 512 + px]) {
-          top = r;
-          break;
-        }
-      int span = front - top;
       for (int r = b->y0 * 8; r < b->y1 * 8; r++) {
-        int i = r * 512 + px, rc = (r >> 3) * 64 + b->cx;
+        int i = r * 512 + px;
         bool in = r >= foot_top && r < front;
-        int hmax = g_hmap[rc] - g_hfloor[rc], hgt = hmax;
-        // a chair: the front 55% of its depth is the seat, at 45% of the
-        // height; the back behind it stands full height
-        if (b->k == kCls_Chair && front - 1 - r < depth * 55 / 100)
-          hgt = hmax * 45 / 100;
-        int q = depth + hmax;
+        int hgt = front - 1 - r < bx->seat_d ? bx->seat_h : hmax;
         g_praise[i] = in ? (uint8)hgt : 0;
         g_pdown[i] = in ? (uint8)(front - 1 - r) : 0;
-        g_pspan[i] = in ? (uint8)(span > 255 ? 255 : span) : 0;
-        g_pfoot[i] = in ? (uint8)(q > 255 ? 255 : q) : 0;
+        g_pbox[i] = in ? (uint16)(n + 1) : 0;
         if (in)
           continue;
         // cover: the floor 16, 32... pixels to the side (floor patterns
@@ -1716,12 +1724,12 @@ static void BuildPixelMasks(Ppu *ppu, const uint8 *cls, const uint8 *attr) {
     int y = 0;
     while (y < 512) {
       int i = y * 512 + x;
-      if (!g_partial[(y >> 3) * 64 + (x >> 3)] || !g_praise[i] || g_pspan[i]) {
+      if (!g_partial[(y >> 3) * 64 + (x >> 3)] || !g_praise[i] || g_pbox[i]) {
         y++;
         continue;
       }
       int y0 = y, h = 0;
-      while (y < 512 && g_partial[(y >> 3) * 64 + (x >> 3)] && g_praise[y * 512 + x] && !g_pspan[y * 512 + x]) {
+      while (y < 512 && g_partial[(y >> 3) * 64 + (x >> 3)] && g_praise[y * 512 + x] && !g_pbox[y * 512 + x]) {
         if (g_praise[y * 512 + x] > h) h = g_praise[y * 512 + x];
         y++;
       }
@@ -1861,6 +1869,19 @@ static void BuildHeightMap(void) {
   int cells = 0;
   for (int i = 0; i < 64 * 64; i++) {
     cls[i] = (uint8)CellClass(i, objects, &g_hlayer[i], !bg2_only ? -1 : g_lower[i] ? 1 : 0);
+    // a solid tile the seed calls floor, drawn here by furniture: its own
+    // class (the thrones' tiles are floor in most other rooms, and the wall
+    // rule below made them 32 pixel walls)
+    if (cls[i] == kCls_Floor && objects && IsFootAttr(attr[i])) {
+      for (int l = 0; l < 2; l++) {
+        int o = g_tile_obj[l][i], t = (l ? dung_bg1 : dung_bg2)[i] & 0x3ff;
+        if ((bg2_only && l != (g_lower[i] ? 1 : 0)) || !o || g_tile_override[t] ||
+            !IsMaskedClass(g_room_objs[o - 1].cls))
+          continue;
+        cls[i] = g_room_objs[o - 1].cls, g_hlayer[i] = (uint8)l;
+        break;
+      }
+    }
     // decorations drawn on a wall (shelves, the pot rack, bars...) are wall
     if (cls[i] == kCls_Floor && IsWallAttr(attr[i]))
       cls[i] = kCls_Wall;
@@ -2072,8 +2093,7 @@ static bool SampleSurface(const Ground *gr, float u, float v, uint32 *out) {
     *out = g_floor[vi * g_w + ui];
     return true;
   }
-  g_stat_outside++;
-  return Ground_Sample(gr, ui, vi, out);
+  return Ground_Sample(gr, ui, vi, out);   // (DrawTerrain counts these)
 }
 
 // --- ray casting the raised room ---
@@ -2113,16 +2133,27 @@ static inline float RayZ(const Cam *cm, const float *d, float t) {
 // one surface of height H between t0 and t1, entered through face `entered`:
 // false = the ray passes over it
 // B: underside of a bridge deck (rays passing below it go on), 0 = solid
+// The ray's height at the last t asked: each cell starts where the one
+// before it ended, so a walk takes one RayZ (a square root with the curve
+// on) per cell instead of two
+typedef struct RayZCache { float t, z; } RayZCache;
+
+static inline float RayZAt(const Cam *cm, const float *d, float t, RayZCache *zc) {
+  if (t != zc->t)
+    zc->t = t, zc->z = RayZ(cm, d, t);
+  return zc->z;
+}
+
 static inline bool HitBox(const Cam *cm, const float *d, float t0, float t1, float H, float B, int entered,
-                          WallHit *hit) {
-  float z0 = RayZ(cm, d, t0);
+                          RayZCache *zc, WallHit *hit) {
+  float z0 = RayZAt(cm, d, t0, zc);
   if (z0 < B)
     return false;   // under the deck (rays only go down)
   if (z0 < H) {
     hit->t = t0, hit->z = z0, hit->face = entered;
     return true;
   }
-  float z1 = RayZ(cm, d, t1);
+  float z1 = RayZAt(cm, d, t1, zc);
   if (z1 >= H)
     return false;
   hit->t = t0 + (z0 - H) / (z0 - z1) * (t1 - t0);
@@ -2132,7 +2163,7 @@ static inline bool HitBox(const Cam *cm, const float *d, float t0, float t1, flo
 
 // the object pixels of cell (cx, cy) between t0 and t1
 static bool CastPixels(const Cam *cm, const float *d, float px0, float py0, float t0, float t1, int cx, int cy,
-                       int entered, WallHit *hit) {
+                       int entered, RayZCache *zc, WallHit *hit) {
   int floor_h = g_hfloor[(cy & 63) * 64 + (cx & 63)];
   float x = px0 + t0 * d[0], y = py0 + t0 * d[1];
   int x0 = cx * 8, y0 = cy * 8;
@@ -2150,7 +2181,7 @@ static bool CastPixels(const Cam *cm, const float *d, float px0, float py0, floa
     if (te > t1) te = t1;
     int i = (iy & 511) * 512 + (ix & 511);
     int H = floor_h + g_praise[i];
-    if (H && HitBox(cm, d, t, te, (float)H, g_hbot[(cy & 63) * 64 + (cx & 63)], entered, hit)) {
+    if (H && HitBox(cm, d, t, te, (float)H, g_hbot[(cy & 63) * 64 + (cx & 63)], entered, zc, hit)) {
       hit->pix = i;
       return true;
     }
@@ -2184,6 +2215,7 @@ static bool CastWalls(const Cam *cm, const Ground *gr, const float *d, float t_e
   float nx = adx > 1e-9f ? t + (sx > 0 ? (cx + 1) * 8 - x : x - cx * 8) / adx : 1e30f;
   float ny = ady > 1e-9f ? t + (sy > 0 ? (cy + 1) * 8 - y : y - cy * 8) / ady : 1e30f;
   int entered = kFace_Top;   // starting inside a cell: as if from above
+  RayZCache zc = { -1.0f, 0.0f };
   for (;;) {
     float te = nx < ny ? nx : ny;
     if (te > t_end) te = t_end;
@@ -2191,10 +2223,10 @@ static bool CastWalls(const Cam *cm, const Ground *gr, const float *d, float t_e
     if (g_hmap[c]) {
       bool got;
       if (g_partial[c]) {
-        got = CastPixels(cm, d, px0, py0, t, te, cx, cy, entered, hit);
+        got = CastPixels(cm, d, px0, py0, t, te, cx, cy, entered, &zc, hit);
       } else {
         hit->pix = -1;
-        got = HitBox(cm, d, t, te, g_hmap[c], g_hbot[c], entered, hit);
+        got = HitBox(cm, d, t, te, g_hmap[c], g_hbot[c], entered, &zc, hit);
       }
       if (got) {
         hit->cell = c;
@@ -2240,25 +2272,28 @@ static bool ShadeWall(const Ground *gr, const WallHit *h, uint32 *out, float *fu
     case kFace_South: av = iy - fmodf(f - h->z > 0 ? f - h->z : 0, 8.0f), shade = 200; break;
     default: shade = 160; break;
     }
-  } else if (h->pix >= 0 && g_pspan[h->pix]) {
+  } else if (h->pix >= 0 && g_pbox[h->pix]) {
     // object box (or chair): seen in 3/4 view, a surface point `d` pixels
-    // behind the front and `z` up is drawn d + z rows above the front. The
-    // drawing's `S` rows cover the box's whole range (depth + tallest
-    // height, g_pfoot), so that distance is scaled by S / range: the face
-    // is the lower rows, the top the rows above, a chair's seat front, seat,
-    // back front and back top in turn
+    // behind the front and `z` up is drawn z + kt * d rows above the front,
+    // scaled by k so the drawing's rows cover the whole box: the face is the
+    // lower rows, the top the rows above; a chair's seat front, seat, back
+    // and back top in turn
+    const ObjBox *bx = &g_boxes[g_pbox[h->pix] - 1];
     float base = floorf(iy) + g_pdown[h->pix] + 1.0f;
-    float k = g_pfoot[h->pix] ? g_pspan[h->pix] / (float)g_pfoot[h->pix] : 1.0f;
-    float face_v = base - 0.5f - z * k;
-    // the sides and the back wear the front art too, wrapped around the
-    // box: going back along a side walks across the front from that edge
     float d = g_pdown[h->pix] + 0.5f;
+    // the sides and the back wear the front art at the same height (a
+    // chair's back above its seat), wrapped around the box: each side and
+    // the back show the whole front once, so the corners meet
+    float p = z > bx->seat_h ? z + bx->kt * bx->seat_d : z;
+    float face_v = base - 0.5f - p * bx->k;
+    float lx = (float)(((h->pix & 511) - bx->x0) & 511) + (ix - floorf(ix));   // across the front
+    float across = d * bx->w / bx->depth;
     switch (h->face) {
-    case kFace_Top: av = base - (d + H) * k; break;
-    case kFace_South: av = base - 0.5f - (g_pdown[h->pix] + z) * k; break;
-    case kFace_East: au = ix - d, av = face_v, shade = 212; break;
-    case kFace_West: au = ix + d, av = face_v, shade = 196; break;
-    case kFace_North: av = face_v, shade = 180; break;
+    case kFace_Top: av = base - (H + bx->kt * d) * bx->k; break;
+    case kFace_South: av = base - 0.5f - (z + bx->kt * g_pdown[h->pix]) * bx->k; break;
+    case kFace_East: au = ix - lx + bx->w - across, av = face_v, shade = 212; break;
+    case kFace_West: au = ix - lx + across, av = face_v, shade = 196; break;
+    case kFace_North: au = ix - lx + bx->w - lx, av = face_v, shade = 180; break;
     }
   } else if (h->pix >= 0) {
     // object pixel: its column's face stands at its front, g_pdown rows south
@@ -2298,49 +2333,127 @@ static bool ShadeWall(const Ground *gr, const WallHit *h, uint32 *out, float *fu
   return true;
 }
 
-static void DrawTerrain(uint32 *out, int pitch_px, const Cam *cm, const Ground *gr, const Sky *sk) {
-  int w = g_w, h = g_h;
-  uint32 fog = sk->outdoors ? 3u << 24 | sk->horizon : 5u << 24;
-  for (int y = 0; y < h; y++) {
-    uint32 *dst = out + y * pitch_px;
-    for (int x = 0; x < w; x++) {
-      int i = y * w + x;
-      float d[3], u, v, depth;
-      Cam_Dir(cm, x + 0.5f, y + 0.5f, &d[0], &d[1], &d[2]);
-      bool ground = Cam_Ray(cm, x + 0.5f, y + 0.5f, &u, &v, &depth) && depth < kFogEnd;
-      WallHit hit;
-      uint32 px;
-      bool ok;
-      if (CastWalls(cm, gr, d, (ground ? depth : kFogEnd) / cm->F, &hit)) {
-        depth = hit.t * cm->F;
-        ok = ShadeWall(gr, &hit, &px, &u, &v);
-      } else if (ground) {
-        int wx = gr->org_x + (int)floorf(u), wy = gr->org_y + (int)floorf(v);
-        int pi = (wy & 511) * 512 + (wx & 511);
-        if (g_partial[((wy >> 3) & 63) * 64 + ((wx >> 3) & 63)] && g_pcover[pi])
-          u += g_pcover[pi] * 16;
-        ok = SampleSurface(gr, u, v, &px);
-      } else {
-        dst[x] = Sky_Color(sk, cm, x + 0.5f, y + 0.5f, x, y);
-        g_depth[i] = 1e9f, g_uv[i] = kUvNone, g_kind[i] = kKind_Sky;
-        continue;
-      }
-      int su = (int)floorf(u), sv = (int)floorf(v);
-      g_depth[i] = depth;
-      g_uv[i] = PackUv(su, sv);
-      if (!ok) {
-        g_stat_missing++;
-        dst[x] = fog, g_kind[i] = kKind_Sky;
-        continue;
-      }
-      g_kind[i] = su >= 0 && su < w && sv >= 0 && sv < h ? kKind_Frame : kKind_Outside;
-      if (depth > kFogStart) {
-        int f = (int)((depth - kFogStart) * (256.0f / (kFogEnd - kFogStart)));
-        px = (px & 0xff000000) | Lerp(px, fog, f > 256 ? 256 : f);
-      }
-      dst[x] = px;
-    }
+// Worker threads for the ray caster: every pixel is its own ray and only
+// reads the room, so the rows are shared out (an atomic row counter) between
+// this thread and one worker per extra core
+typedef void RowFn(void *ctx, int y);
+static struct {
+  int n;               // workers, -1 = not started yet
+  SDL_sem *go, *done;
+  SDL_atomic_t next;
+  int rows;
+  RowFn *fn;
+  void *ctx;
+} g_pool = { -1 };
+
+static void Pool_RunRows(void) {
+  int y;
+  while ((y = SDL_AtomicAdd(&g_pool.next, 1)) < g_pool.rows)
+    g_pool.fn(g_pool.ctx, y);
+}
+
+static int SDLCALL Pool_Worker(void *arg) {
+  (void)arg;
+  for (;;) {
+    SDL_SemWait(g_pool.go);
+    Pool_RunRows();
+    SDL_SemPost(g_pool.done);
   }
+  return 0;
+}
+
+static void ParallelRows(int rows, RowFn *fn, void *ctx) {
+  if (g_pool.n < 0) {
+    g_pool.n = 0;
+    int want = SDL_GetCPUCount() - 1;
+    want = want < 0 ? 0 : want > 7 ? 7 : want;
+    g_pool.go = SDL_CreateSemaphore(0), g_pool.done = SDL_CreateSemaphore(0);
+    for (int i = 0; i < want && g_pool.go && g_pool.done; i++) {
+      SDL_Thread *t = SDL_CreateThread(Pool_Worker, "hd3d_rays", NULL);
+      if (!t)
+        break;
+      SDL_DetachThread(t);
+      g_pool.n++;
+    }
+    Hd3d_Log("ray caster: %d worker threads", g_pool.n);
+  }
+  g_pool.rows = rows, g_pool.fn = fn, g_pool.ctx = ctx;
+  SDL_AtomicSet(&g_pool.next, 0);
+  for (int i = 0; i < g_pool.n; i++)
+    SDL_SemPost(g_pool.go);
+  Pool_RunRows();
+  for (int i = 0; i < g_pool.n; i++)
+    SDL_SemWait(g_pool.done);
+}
+
+typedef struct TerrainCtx {
+  uint32 *out;
+  int pitch_px;
+  const Cam *cm;
+  const Ground *gr;
+  const Sky *sk;
+  uint32 fog;
+  SDL_atomic_t outside, missing;
+} TerrainCtx;
+
+static void DrawTerrainRow(void *ctx, int y) {
+  TerrainCtx *tc = (TerrainCtx *)ctx;
+  const Cam *cm = tc->cm;
+  const Ground *gr = tc->gr;
+  const Sky *sk = tc->sk;
+  int w = g_w, h = g_h, outside = 0, missing = 0;
+  uint32 fog = tc->fog, *out = tc->out;
+  int pitch_px = tc->pitch_px;
+  uint32 *dst = out + y * pitch_px;
+  for (int x = 0; x < w; x++) {
+    int i = y * w + x;
+    float d[3], u, v, depth;
+    Cam_Dir(cm, x + 0.5f, y + 0.5f, &d[0], &d[1], &d[2]);
+    bool ground = Cam_Ray(cm, x + 0.5f, y + 0.5f, &u, &v, &depth) && depth < kFogEnd;
+    WallHit hit;
+    uint32 px;
+    bool ok;
+    if (CastWalls(cm, gr, d, (ground ? depth : kFogEnd) / cm->F, &hit)) {
+      depth = hit.t * cm->F;
+      ok = ShadeWall(gr, &hit, &px, &u, &v);
+    } else if (ground) {
+      int wx = gr->org_x + (int)floorf(u), wy = gr->org_y + (int)floorf(v);
+      int pi = (wy & 511) * 512 + (wx & 511);
+      if (g_partial[((wy >> 3) & 63) * 64 + ((wx >> 3) & 63)] && g_pcover[pi])
+        u += g_pcover[pi] * 16;
+      ok = SampleSurface(gr, u, v, &px);
+    } else {
+      dst[x] = Sky_Color(sk, cm, x + 0.5f, y + 0.5f, x, y);
+      g_depth[i] = 1e9f, g_uv[i] = kUvNone, g_kind[i] = kKind_Sky;
+      continue;
+    }
+    int su = (int)floorf(u), sv = (int)floorf(v);
+    bool in_frame = su >= 0 && su < w && sv >= 0 && sv < h;
+    outside += !in_frame;
+    g_depth[i] = depth;
+    g_uv[i] = PackUv(su, sv);
+    if (!ok) {
+      missing++;
+      dst[x] = fog, g_kind[i] = kKind_Sky;
+      continue;
+    }
+    g_kind[i] = in_frame ? kKind_Frame : kKind_Outside;
+    if (depth > kFogStart) {
+      int f = (int)((depth - kFogStart) * (256.0f / (kFogEnd - kFogStart)));
+      px = (px & 0xff000000) | Lerp(px, fog, f > 256 ? 256 : f);
+    }
+    dst[x] = px;
+  }
+  SDL_AtomicAdd(&tc->outside, outside);
+  SDL_AtomicAdd(&tc->missing, missing);
+}
+
+static void DrawTerrain(uint32 *out, int pitch_px, const Cam *cm, const Ground *gr, const Sky *sk) {
+  TerrainCtx tc = { out, pitch_px, cm, gr, sk, sk->outdoors ? 3u << 24 | sk->horizon : 5u << 24 };
+  SDL_AtomicSet(&tc.outside, 0);
+  SDL_AtomicSet(&tc.missing, 0);
+  ParallelRows(g_h, DrawTerrainRow, &tc);
+  g_stat_outside += SDL_AtomicGet(&tc.outside), g_stat_missing += SDL_AtomicGet(&tc.missing);
 }
 
 // floor height under frame point (u, v) in the last 3D frame with walls

@@ -259,7 +259,13 @@
     <ClCompile Include="src\hd_art.c" />
     <ClCompile Include="src\hd_hud.c" />
     <ClCompile Include="src\hd_world.c" />
-    <ClCompile Include="src\hd_3d.c" />
+    <ClCompile Include="src\hd_3d.c">
+      <!-- the 3D ray caster: optimized in Debug too, it was 20-60 ms a frame unoptimized -->
+      <Optimization Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">MaxSpeed</Optimization>
+      <InlineFunctionExpansion Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">AnySuitable</InlineFunctionExpansion>
+      <IntrinsicFunctions Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</IntrinsicFunctions>
+      <DebugInformationFormat Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">ProgramDatabase</DebugInformationFormat>
+    </ClCompile>
     <ClCompile Include="src\hd_trans.c" />
     <ClCompile Include="src\hud.c" />
     <ClCompile Include="src\load_gfx.c" />

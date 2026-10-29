@@ -1,36 +1,528 @@
 [   0.000] 3D view init: View3D=5 (75 deg), View3DCurve=1 (Light), View3DDrawDistance=1 (2x), View3DWalls=1, View3DCamera=1 (Third person), NewRenderer=1, OutputMethod=2, ExtendedAspectRatio=0, ContinuousWorld=1, shader='shaders/foursword/foursword.glslp'
-[   0.368] not gameplay (module=0 sub=1 saved=0 mode=1 tilt=75.0)
-[   3.088] 3D on (module=7 sub=0 saved=7 mode=1 tilt=75.0)
-[   3.088] buffers 256x224
-[   3.092] ground past the screen: video memory (module=7 area=0x00 indoors=1)
-[   3.230] tile classes seeded from 296 rooms in 138 ms: 465 tile numbers, 78 unsure (hd3d_tiles_seed.txt)
-[   3.231] room 97 built: 123 objects (walls 41, ceiling 11, doors 7, rails 8, furniture 0, small 0, blocks 0, tall 7, torches 8)
-[   3.231] room 97: objects read again (it was not built since launch)
-[   3.233] object masks (room 97): 212 cells, 82 box columns, 0 raised pixels (split), 12 floor colors
-[   3.942] object masks (room 97): 212 cells, 82 box columns, 0 raised pixels (split), 12 floor colors
-[   7.233] room 81 built: 103 objects (walls 33, ceiling 19, doors 2, rails 14, furniture 0, small 1, blocks 0, tall 2, torches 0)
-[   7.237] object masks (room 81): 154 cells, 34 box columns, 764 raised pixels (split), 13 floor colors
-[   7.292] object masks (room 81): 154 cells, 34 box columns, 764 raised pixels (split), 13 floor colors
-[   7.320] object masks (room 81): 154 cells, 34 box columns, 764 raised pixels (split), 13 floor colors
-[   7.348] object masks (room 81): 154 cells, 34 box columns, 636 raised pixels (split), 16 floor colors
-[   7.369] object masks (room 81): 154 cells, 34 box columns, 764 raised pixels (split), 14 floor colors
-[   7.391] object masks (room 81): 154 cells, 38 box columns, 636 raised pixels (split), 14 floor colors
-[   7.492] object masks (room 81): 154 cells, 44 box columns, 396 raised pixels (split), 14 floor colors
-[   7.513] object masks (room 81): 154 cells, 44 box columns, 396 raised pixels (split), 14 floor colors
-[   7.553] object masks (room 81): 154 cells, 48 box columns, 236 raised pixels (split), 15 floor colors
-[   7.576] object masks (room 81): 154 cells, 62 box columns, 16 raised pixels (split), 15 floor colors
-[   7.601] object masks (room 81): 154 cells, 62 box columns, 16 raised pixels (split), 16 floor colors
-[   7.626] object masks (room 81): 154 cells, 62 box columns, 16 raised pixels (split), 16 floor colors
-[   7.658] object masks (room 81): 154 cells, 62 box columns, 16 raised pixels (split), 16 floor colors
-[   7.684] object masks (room 81): 154 cells, 66 box columns, 0 raised pixels (split), 16 floor colors
-[   7.710] object masks (room 81): 154 cells, 66 box columns, 0 raised pixels (split), 15 floor colors
-[   7.737] object masks (room 81): 154 cells, 66 box columns, 0 raised pixels (split), 17 floor colors
-[   7.765] object masks (room 81): 154 cells, 66 box columns, 0 raised pixels (split), 17 floor colors
-[   8.114] object masks (room 81): 154 cells, 66 box columns, 0 raised pixels (split), 17 floor colors
-[   8.146] object masks (room 81): 154 cells, 66 box columns, 0 raised pixels (split), 15 floor colors
-[   8.178] object masks (room 81): 154 cells, 66 box columns, 0 raised pixels (split), 15 floor colors
-[   8.211] object masks (room 81): 154 cells, 66 box columns, 0 raised pixels (split), 15 floor colors
-[   8.244] object masks (room 81): 154 cells, 66 box columns, 0 raised pixels (split), 15 floor colors
-[   8.338] object masks (room 81): 154 cells, 66 box columns, 0 raised pixels (split), 15 floor colors
-[   9.078] object masks (room 81): 154 cells, 66 box columns, 0 raised pixels (split), 15 floor colors
-[  12.754] stats: 300 frames, 3D compose 29.588 ms/frame, sprite groups avg 2.6 max 4, tilt 75.0, camera Third person (yaw -3 pitch 61), curve R=3000, past-screen px/frame 13592 (missing 0), source video memory, far sprites avg 0.9 (draw distance 2x, ok), walls on (wall tiles avg 2695), frame 256x224, module=7 area=0x00
+[   0.381] not gameplay (module=0 sub=1 saved=0 mode=1 tilt=75.0)
+[   2.761] 3D on (module=7 sub=0 saved=7 mode=1 tilt=75.0)
+[   2.762] buffers 256x224
+[   2.767] ground past the screen: video memory (module=7 area=0x00 indoors=1)
+[   2.904] tile classes seeded from 296 rooms in 137 ms: 465 tile numbers, 78 unsure (hd3d_tiles_seed.txt)
+[   2.905] room 97 built: 123 objects (walls 41, ceiling 11, doors 7, rails 8, furniture 0, small 0, blocks 0, tall 7, torches 8)
+[   2.909] room 97: objects read again (it was not built since launch)
+[   2.911] object masks (room 97): 212 cells, 82 box columns, 0 raised pixels (split), 12 floor colors
+[   3.612] object masks (room 97): 212 cells, 82 box columns, 0 raised pixels (split), 12 floor colors
+[   7.081] room 81 built: 103 objects (walls 33, ceiling 19, doors 2, rails 14, furniture 0, small 1, blocks 0, tall 2, torches 0)
+[   7.085] object masks (room 81): 154 cells, 34 box columns, 764 raised pixels (split), 13 floor colors
+[   7.131] object masks (room 81): 154 cells, 34 box columns, 764 raised pixels (split), 13 floor colors
+[   7.156] object masks (room 81): 154 cells, 34 box columns, 764 raised pixels (split), 13 floor colors
+[   7.180] object masks (room 81): 154 cells, 34 box columns, 764 raised pixels (split), 13 floor colors
+[   7.204] object masks (room 81): 154 cells, 34 box columns, 764 raised pixels (split), 14 floor colors
+[   7.222] object masks (room 81): 154 cells, 38 box columns, 636 raised pixels (split), 14 floor colors
+[   7.322] object masks (room 81): 154 cells, 44 box columns, 396 raised pixels (split), 14 floor colors
+[   7.339] object masks (room 81): 154 cells, 44 box columns, 396 raised pixels (split), 14 floor colors
+[   7.357] object masks (room 81): 154 cells, 44 box columns, 396 raised pixels (split), 14 floor colors
+[   7.390] object masks (room 81): 154 cells, 48 box columns, 236 raised pixels (split), 15 floor colors
+[   7.409] object masks (room 81): 154 cells, 62 box columns, 16 raised pixels (split), 15 floor colors
+[   7.437] object masks (room 81): 154 cells, 62 box columns, 16 raised pixels (split), 16 floor colors
+[   7.459] object masks (room 81): 154 cells, 62 box columns, 16 raised pixels (split), 16 floor colors
+[   7.492] object masks (room 81): 154 cells, 62 box columns, 16 raised pixels (split), 16 floor colors
+[   7.515] object masks (room 81): 154 cells, 62 box columns, 16 raised pixels (split), 16 floor colors
+[   7.539] object masks (room 81): 154 cells, 66 box columns, 0 raised pixels (split), 16 floor colors
+[   7.562] object masks (room 81): 154 cells, 66 box columns, 0 raised pixels (split), 15 floor colors
+[   7.586] object masks (room 81): 154 cells, 66 box columns, 0 raised pixels (split), 17 floor colors
+[   7.610] object masks (room 81): 154 cells, 66 box columns, 0 raised pixels (split), 17 floor colors
+[   7.956] object masks (room 81): 154 cells, 66 box columns, 0 raised pixels (split), 17 floor colors
+[   7.983] object masks (room 81): 154 cells, 66 box columns, 0 raised pixels (split), 17 floor colors
+[   8.010] object masks (room 81): 154 cells, 66 box columns, 0 raised pixels (split), 15 floor colors
+[   8.036] object masks (room 81): 154 cells, 66 box columns, 0 raised pixels (split), 15 floor colors
+[   8.061] object masks (room 81): 154 cells, 66 box columns, 0 raised pixels (split), 15 floor colors
+[   8.088] object masks (room 81): 154 cells, 66 box columns, 0 raised pixels (split), 15 floor colors
+[   8.163] object masks (room 81): 154 cells, 66 box columns, 0 raised pixels (split), 15 floor colors
+[   8.189] object masks (room 81): 154 cells, 66 box columns, 0 raised pixels (split), 15 floor colors
+[   8.843] object masks (room 81): 154 cells, 66 box columns, 0 raised pixels (split), 15 floor colors
+[   9.775] stats: 300 frames, 3D compose 20.766 ms/frame, sprite groups avg 2.1 max 4, tilt 75.0, camera Third person (yaw 0 pitch 62), curve R=3000, past-screen px/frame 14683 (missing 0), source video memory, far sprites avg 0.5 (draw distance 2x, ok), walls on (wall tiles avg 2675), frame 256x224, module=7 area=0x00
+[  13.033] sprite dump requested (key 6)
+[  13.062] === sprite dump: module=7 sub=0 room=81 area=0x00 indoors=1 tilt=75.0 dist=2x objXValid=1 objYValid=1 bias=0,0 objSize=0 far pieces=6 groups=4
+[  13.062]   oam  58: vis  frame=(120,109) size=16 tile=0x000 pal=7 prio=2 flip=-- owner=link-1 key=0 far=0 captured_px=153
+[  13.062]   oam  59: vis  frame=(120,117) size=16 tile=0x002 pal=7 prio=2 flip=-- owner=link-1 key=0 far=0 captured_px=113
+[  13.062]   oam  63: vis  frame=(125,113) size=16 tile=0x007 pal=5 prio=2 flip=-- owner=link-1 key=0 far=0 captured_px=14
+[  13.062]   oam  80: vis  frame=(139,218) size=16 tile=0x144 pal=4 prio=1 flip=-- owner=slot2 key=3 far=1 captured_px=40
+[  13.062]   oam  81: vis  frame=(143,225) size=16 tile=0x164 pal=4 prio=1 flip=H- owner=slot2 key=3 far=1 captured_px=0
+[  13.062]   oam  82: vis  frame=(135,225) size=16 tile=0x164 pal=4 prio=1 flip=-- owner=slot2 key=3 far=1 captured_px=0
+[  13.062]   oam  83: vis  frame=(136,228) size=8 tile=0x17d pal=4 prio=1 flip=-- owner=slot2 key=3 far=1 captured_px=0
+[  13.062]   oam  84: vis  frame=(136,220) size=8 tile=0x16d pal=4 prio=1 flip=-- owner=slot2 key=3 far=1 captured_px=4
+[  13.062]   oam  85: vis  frame=(151,223) size=8 tile=0x17e pal=4 prio=1 flip=-- owner=slot2 key=3 far=1 captured_px=5
+[  13.062]   oam  86: vis  frame=(151,215) size=8 tile=0x16e pal=4 prio=1 flip=-- owner=slot2 key=3 far=1 captured_px=34
+[  13.062]   oam  88: vis  frame=(139,235) size=16 tile=0x06c pal=4 prio=1 flip=-- owner=slot2 key=3 far=1 captured_px=0
+[  13.062]   oam  89: vis  frame=(109,254) size=16 tile=0x142 pal=4 prio=1 flip=H- owner=slot1 key=2 far=1 captured_px=0
+[  13.062]   oam  90: vis  frame=(122,269) size=8 tile=0x17f pal=4 prio=1 flip=H- owner=slot1 key=2 far=1 captured_px=0
+[  13.062]   oam  91: vis  frame=(130,269) size=8 tile=0x16f pal=4 prio=1 flip=H- owner=slot1 key=2 far=1 captured_px=0
+[  13.062]   oam  92: vis  frame=(109,263) size=16 tile=0x160 pal=4 prio=1 flip=H- owner=slot1 key=2 far=1 captured_px=0
+[  13.063]   oam  93: vis  frame=(109,263) size=16 tile=0x160 pal=4 prio=1 flip=H- owner=slot1 key=2 far=1 captured_px=0
+[  13.063]   oam  94: vis  frame=(121,267) size=8 tile=0x15d pal=4 prio=1 flip=H- owner=slot1 key=2 far=1 captured_px=0
+[  13.063]   oam  95: vis  frame=(121,259) size=8 tile=0x14d pal=4 prio=1 flip=H- owner=slot1 key=2 far=1 captured_px=0
+[  13.063]   far piece 0: slot=0 cam-rel=(134,-16) tile=0x12c pal=0 big=1
+[  13.063]   far piece 1: slot=0 cam-rel=(118,-16) tile=0x12e pal=0 big=1
+[  13.063]   far piece 2: slot=0 cam-rel=(102,-16) tile=0x12c pal=0 big=1
+[  13.063]   far piece 3: slot=0 cam-rel=(134,-16) tile=0x10c pal=0 big=1
+[  13.063]   far piece 4: slot=0 cam-rel=(118,-16) tile=0x10e pal=0 big=1
+[  13.063]   far piece 5: slot=0 cam-rel=(102,-16) tile=0x10c pal=0 big=1
+[  13.063]   group key=160 far=1 box=(102,-16)-(149,-1) pieces=6 -> screen feet=(125,66) scale=1.25
+[  13.063]   group key=0 far=0 box=(120,110)-(136,130) pieces=0 -> screen feet=(128,165) scale=2.33
+[  13.063]   group key=3 far=1 box=(135,215)-(158,250) pieces=8 -> screen feet=(246,721) scale=6.22
+[  13.063]   group key=2 far=1 box=(109,254)-(137,278) pieces=7 -> screen feet=(-37,1851) scale=15.04
+[  15.526] room dump requested (key 8)
+[  15.531] object masks (room 81): 154 cells, 66 box columns, 0 raised pixels (split), 15 floor colors
+[  15.531] === room dump: room 81 (built for 81), layer upper, 103 objects
+[  15.531]   --- around Link: cell (32,29), link (762,2776) z 65535, on upper level, room header bg2 properties 6, main screen 16 sub screen 01 color math 20 add
+[  15.531]   bridge cells (open below): 0
+[  15.531]   two floor levels: yes (BG1 under BG2's holes; 3642 upper cells, upper floor at 24 px; Link's floor 24 px), BG1 only through BG2's holes
+[  15.531]   each cell: BG2 tile/BG1 tile, class letter (capital = from BG1), height in px, collision BG2/BG1, mask (- whole cell, m object with raised pixels, F object flattened by the floor flood); [ ] = Link
+[  15.531]   22  0e7/0ec T52 00/00 F  0ed/0ed .24 00/00 -  0ec/0ec .24 00/00 -  173/0ed .24 00/00 -  0c6/0ec .24 00/00 -  0c6/0ed .24 00/00 -  0c6/0ec .24 00/00 -  0c6/0ed .24 00/00 -  173/0ec .24 00/00 -  0ed/0ed .24 00/00 -  0ec/0ec .24 00/00 -  0e7/0ed T52 00/00 F  0e7/0ec T52 00/00 F 
+[  15.531]   23  0f7/0fc T52 01/00 F  0fd/0fd .24 00/00 -  0fc/0fc .24 00/00 -  173/0fd .24 00/00 -  0c6/0fc .24 00/00 -  0c6/0fd .24 00/00 -  0c6/0fc .24 00/00 -  0c6/0fd .24 00/00 -  173/0fc .24 00/00 -  0fd/0fd .24 00/00 -  0fc/0fc .24 00/00 -  0f7/0fd T52 01/00 F  0f7/0fc T52 01/00 F 
+[  15.531]   24  0e6/0ec T52 01/00 m  0ed/0ed .24 00/00 -  0ec/0ec .24 00/00 -  173/0ed .24 00/00 -  0c6/0ec .24 00/00 -  0c6/0ed .24 00/00 -  0c6/0ec .24 00/00 -  0c6/0ed .24 00/00 -  173/0ec .24 00/00 -  0ed/0ed .24 00/00 -  0ec/0ec .24 00/00 -  0e6/0ed T52 01/00 m  0e6/0ec T52 01/00 m 
+[  15.531]   25  0f6/0fc T52 02/00 m  0fd/0fd .24 00/00 -  0fc/0fc .24 00/00 -  173/0fd .24 00/00 -  0c6/0fc .24 00/00 -  0c6/0fd .24 00/00 -  0c6/0fc .24 00/00 -  0c6/0fd .24 00/00 -  173/0fc .24 00/00 -  0fd/0fd .24 00/00 -  0fc/0fc .24 00/00 -  0f6/0fd T52 02/00 m  0f6/0fc T52 02/00 m 
+[  15.531]   26  0ec/0ec .24 00/00 -  0ed/0ed .24 00/00 -  0ec/0ec .24 00/00 -  173/0ed .24 00/00 -  0c6/0ec .24 00/00 -  0c6/0ed .24 00/00 -  0c6/0ec .24 00/00 -  0c6/0ed .24 00/00 -  173/0ec .24 00/00 -  0ed/0ed .24 00/00 -  0ec/0ec .24 00/00 -  0ed/0ed .24 00/00 -  0ec/0ec .24 00/00 - 
+[  15.531]   27  0fc/0fc .24 00/00 -  0fd/0fd .24 00/00 -  0fc/0fc .24 00/00 -  173/0fd .24 00/00 -  0c6/0fc .24 00/00 -  0c6/0fd .24 00/00 -  0c6/0fc .24 00/00 -  0c6/0fd .24 00/00 -  173/0fc .24 00/00 -  0fd/0fd .24 00/00 -  0fc/0fc .24 00/00 -  0fd/0fd .24 00/00 -  0fc/0fc .24 00/00 - 
+[  15.531]   28  0e7/0ec T52 00/00 F  0ed/0ed .24 00/00 -  0ec/0ec .24 00/00 -  173/0ed .24 00/00 -  0c6/0ec .24 00/00 -  0c6/0ed .24 00/00 -  0c6/0ec .24 00/00 -  0c6/0ed .24 00/00 -  173/0ec .24 00/00 -  0ed/0ed .24 00/00 -  0ec/0ec .24 00/00 -  0e7/0ed T52 00/00 F  0e7/0ec T52 00/00 F 
+[  15.531]   29  0f7/0fc T52 01/00 F  0fd/0fd .24 00/00 -  0fc/0fc .24 00/00 -  173/0fd .24 00/00 -  0c6/0fc .24 00/00 -  0c6/0fd .24 00/00 - [0c6/0fc .24 00/00 -] 0c6/0fd .24 00/00 -  173/0fc .24 00/00 -  0fd/0fd .24 00/00 -  0fc/0fc .24 00/00 -  0f7/0fd T52 01/00 F  0f7/0fc T52 01/00 F 
+[  15.531]   30  0e6/0ec T52 01/00 m  0ed/0ed .24 00/00 -  0ec/0ec .24 00/00 -  173/0ed .24 00/00 -  0c6/0ec .24 00/00 -  0c6/0ed .24 00/00 -  0c6/0ec .24 00/00 -  0c6/0ed .24 00/00 -  173/0ec .24 00/00 -  0ed/0ed .24 00/00 -  0ec/0ec .24 00/00 -  0e6/0ed T52 01/00 m  0e6/0ec T52 01/00 m 
+[  15.531]   31  0f6/0fc T52 02/00 m  0fd/0fd .24 00/00 -  0fc/0fc .24 00/00 -  173/0fd .24 00/00 -  0c6/0fc .24 00/00 -  0c6/0fd .24 00/00 -  0c6/0fc .24 00/00 -  0c6/0fd .24 00/00 -  173/0fc .24 00/00 -  0fd/0fd .24 00/00 -  0fc/0fc .24 00/00 -  0f6/0fd T52 02/00 m  0f6/0fc T52 02/00 m 
+[  15.531]   32  0ec/0ec .24 00/00 -  0ed/0ed .24 00/00 -  0ec/0ec .24 00/00 -  173/0ed .24 00/00 -  0c6/0ec .24 00/00 -  0c6/0ed .24 00/00 -  0c6/0ec .24 00/00 -  0c6/0ed .24 00/00 -  173/0ec .24 00/00 -  0ed/0ed .24 00/00 -  0ec/0ec .24 00/00 -  0ed/0ed .24 00/00 -  0ec/0ec .24 00/00 - 
+[  15.531]   33  0fc/0fc .24 00/00 -  0fd/0fd .24 00/00 -  0fc/0fc .24 00/00 -  173/0fd .24 00/00 -  0c6/0fc .24 00/00 -  0c6/0fd .24 00/00 -  0c6/0fc .24 00/00 -  0c6/0fd .24 00/00 -  173/0fc .24 00/00 -  0fd/0fd .24 00/00 -  0fc/0fc .24 00/00 -  0fd/0fd .24 00/00 -  0fc/0fc .24 00/00 - 
+[  15.531]   34  0e7/0ec T52 00/00 F  0ed/0ed .24 00/00 -  0ec/0ec .24 00/00 -  173/0ed .24 00/00 -  0c6/0ec .24 00/00 -  0c6/0ed .24 00/00 -  0c6/0ec .24 00/00 -  0c6/0ed .24 00/00 -  173/0ec .24 00/00 -  0ed/0ed .24 00/00 -  0ec/0ec .24 00/00 -  0e7/0ed T52 00/00 F  0e7/0ec T52 00/00 F 
+[  15.531]   35  0f7/0fc T52 01/00 F  0fd/0fd .24 00/00 -  0fc/0fc .24 00/00 -  173/0fd .24 00/00 -  0c6/0fc .24 00/00 -  0c6/0fd .24 00/00 -  0c6/0fc .24 00/00 -  0c6/0fd .24 00/00 -  173/0fc .24 00/00 -  0fd/0fd .24 00/00 -  0fc/0fc .24 00/00 -  0f7/0fd T52 01/00 F  0f7/0fc T52 01/00 F 
+[  15.531]   36  0e6/0ec T52 01/00 m  0ed/0ed .24 00/00 -  0ec/0ec .24 00/00 -  173/0ed .24 00/00 -  0c6/0ec .24 00/00 -  0c6/0ed .24 00/00 -  0c6/0ec .24 00/00 -  0c6/0ed .24 00/00 -  173/0ec .24 00/00 -  0ed/0ed .24 00/00 -  0ec/0ec .24 00/00 -  0e6/0ed T52 01/00 m  0e6/0ec T52 01/00 m 
+[  15.531]   objects (tiles: number, class letter, % of seed votes agreeing; ! = from hd3d_tiles.txt):
+[  15.531]   obj   0 pass 0 T1 0x01 at (6,4) -> wall, 48 tiles (0 flat): 091W82 090W82 096W87 097W87 0a3W92 0a2W92
+[  15.531]   obj   1 pass 0 T1 0x02 at (6,58) -> wall, 167 tiles (0 flat): 0acW99 0a3W92 0a2W92 096W87 097W87 091W82 090W82
+[  15.531]   obj   2 pass 0 T1 0x61 at (2,6) -> wall, 0 tiles (0 flat):
+[  15.531]   obj   3 pass 0 T1 0x62 at (58,6) -> wall, 0 tiles (0 flat):
+[  15.531]   obj   4 pass 0 T1 0x00 at (0,0) -> ceiling, 128 tiles (0 flat): 015C99
+[  15.531]   obj   5 pass 0 T1 0x00 at (0,2) -> ceiling, 128 tiles (0 flat): 015C99
+[  15.532]   obj   6 pass 0 T1 0x00 at (0,62) -> ceiling, 128 tiles (0 flat): 015C99
+[  15.532]   obj   7 pass 0 T1 0x60 at (0,0) -> ceiling, 116 tiles (0 flat): 015C99
+[  15.532]   obj   8 pass 0 T1 0x60 at (62,0) -> ceiling, 116 tiles (0 flat): 015C99
+[  15.532]   obj   9 pass 0 T2 0x00 at (2,4) -> floor, 0 tiles (0 flat):
+[  15.532]   obj  10 pass 0 T2 0x01 at (2,58) -> floor, 0 tiles (0 flat):
+[  15.532]   obj  11 pass 0 T2 0x02 at (58,4) -> floor, 0 tiles (0 flat):
+[  15.532]   obj  12 pass 0 T2 0x03 at (58,58) -> floor, 0 tiles (0 flat):
+[  15.532]   obj  13 pass 1 T2 0x04 at (16,36) -> wall, 16 tiles (0 flat): 095W99 098W92 0a4W93 0adW94 096W87 09fW100 0a5W97 0a2W92 0a3W92 0a7W100 0acW99 0afW100
+[  15.532]   obj  14 pass 1 T2 0x00 at (6,36) -> floor, 16 tiles (4 flat): 094.100 091W82 090W82 093W87 09e.100 096W87 097W87 092W87 098W92 0a6.100 0a3W92 099W92   <- object id not classified
+[  15.532]   obj  15 pass 1 T1 0x01 at (10,36) -> wall, 24 tiles (0 flat): 090W82 091W82 096W87 097W87 0a2W92 0a3W92 0acW99
+[  15.532]   obj  16 pass 1 T1 0x61 at (6,40) -> wall, 72 tiles (0 flat): 092W87 098W92 0a4W93 0adW94 093W87 099W92 0a5W97
+[  15.532]   obj  17 pass 1 T2 0x01 at (6,58) -> floor, 10 tiles (4 flat): 092W87 098W92 0a4W93 0ae.87 093W87 099W92 0a6.100 09e.100 094.100   <- object id not classified
+[  15.532]   obj  18 pass 1 T2 0x06 at (44,36) -> wall, 16 tiles (0 flat): 0adW94 0a4W93 098W92 095W99 0a5W97 09fW100 097W87 0a7W100 0a2W92 0a3W92 0afW100 0acW99
+[  15.532]   obj  19 pass 1 T1 0x01 at (48,36) -> wall, 24 tiles (0 flat): 090W82 091W82 096W87 097W87 0a2W92 0a3W92 0acW99
+[  15.532]   obj  20 pass 1 T2 0x02 at (54,36) -> floor, 16 tiles (4 flat): 090W82 091W82 094.100 096W87 097W87 09e.100 093W87 0a2W92 0a6.100 098W92 092W87 0ae.87   <- object id not classified
+[  15.532]   obj  21 pass 1 T1 0x62 at (54,40) -> wall, 72 tiles (0 flat): 0adW94 0a4W93 098W92 092W87 0a5W97 099W92 093W87
+[  15.532]   obj  22 pass 1 T2 0x03 at (54,58) -> floor, 10 tiles (4 flat): 0ae.87 0a4W93 098W92 092W87 0a6.100 099W92 093W87 09e.100 094.100   <- object id not classified
+[  15.532]   obj  23 pass 1 T1 0x22 at (23,38) -> rail, 7 tiles (0 flat): 0e1r97 0e2r99
+[  15.532]   obj  24 pass 1 T1 0xc0 at (58,36) -> ceiling, 64 tiles (0 flat): 015C99
+[  15.532]   obj  25 pass 1 T1 0xc0 at (58,52) -> ceiling, 40 tiles (0 flat): 015C99
+[  15.532]   obj  26 pass 1 T2 0x00 at (20,4) -> floor, 10 tiles (4 flat): 094.100 093W87 09e.100 092W87 098W92 0a6.100 099W92 0a5W97 0ae.87   <- object id not classified
+[  15.532]   obj  27 pass 1 T2 0x04 at (20,8) -> wall, 16 tiles (0 flat): 095W99 098W92 0a4W93 0adW94 096W87 09fW100 0a5W97 0a2W92 0a3W92 0a7W100 0acW99 0afW100
+[  15.532]   obj  28 pass 1 T2 0x00 at (16,8) -> floor, 16 tiles (4 flat): 094.100 091W82 090W82 093W87 09e.100 096W87 097W87 092W87 098W92 0a6.100 0a3W92 099W92   <- object id not classified
+[  15.532]   obj  29 pass 1 T1 0x61 at (16,12) -> wall, 16 tiles (0 flat): 092W87 098W92 0a4W93 0adW94 093W87 099W92 0a5W97
+[  15.532]   obj  30 pass 1 T2 0x02 at (40,4) -> floor, 10 tiles (4 flat): 094.100 09e.100 093W87 0a6.100 098W92 092W87 0ae.87 0a5W97 099W92   <- object id not classified
+[  15.532]   obj  31 pass 1 T2 0x06 at (40,8) -> wall, 16 tiles (0 flat): 0adW94 0a4W93 098W92 095W99 0a5W97 09fW100 097W87 0a7W100 0a2W92 0a3W92 0afW100 0acW99
+[  15.532]   obj  32 pass 1 T2 0x02 at (44,8) -> floor, 16 tiles (4 flat): 090W82 091W82 094.100 096W87 097W87 09e.100 093W87 0a2W92 0a6.100 098W92 092W87 0ae.87   <- object id not classified
+[  15.532]   obj  33 pass 1 T1 0x62 at (44,12) -> wall, 16 tiles (0 flat): 0adW94 0a4W93 098W92 092W87 0a5W97 099W92 093W87
+[  15.532]   obj  34 pass 1 T1 0xdc at (24,7) -> small, 144 tiles (102 flat): 18eo65 0c6.84 18fo51 172o57 19eW43 19fW39
+[  15.532]   obj  35 pass 1 T1 0x70 at (30,18) -> floor, 80 tiles (80 flat): 0c6.84   <- object id not classified
+[  15.532]   obj  36 pass 1 T1 0x71 at (29,18) -> floor, 19 tiles (19 flat): 173.100   <- object id not classified
+[  15.532]   obj  37 pass 1 T1 0x71 at (34,18) -> floor, 19 tiles (19 flat): 173.100   <- object id not classified
+[  15.532]   obj  38 pass 1 T1 0x71 at (29,34) -> floor, 1 tiles (1 flat): 173.100   <- object id not classified
+[  15.532]   obj  39 pass 1 T1 0x71 at (34,34) -> floor, 1 tiles (1 flat): 173.100   <- object id not classified
+[  15.532]   obj  40 pass 1 T1 0x75 at (25,22) -> tall, 24 tiles (0 flat): 0e7T100 0f7T100 0e6T100 0f6T100
+[  15.532]   obj  41 pass 1 T1 0x75 at (37,22) -> tall, 24 tiles (0 flat): 0e7T100 0f7T100 0e6T100 0f6T100
+[  15.532]   obj  42 pass 1 T1 0x65 at (16,14) -> wall, 32 tiles (0 flat): 151W68 161W83 141W75 171W81
+[  15.532]   obj  43 pass 1 T1 0x66 at (44,14) -> wall, 32 tiles (0 flat): 171W81 141W75 161W83 151W68
+[  15.532]   obj  44 pass 1 T1 0x73 at (16,16) -> wall, 48 tiles (0 flat): 17eW51 1aeW59 1afW41 156W84 146W84 166W61
+[  15.532]   obj  45 pass 1 T1 0x74 at (44,16) -> wall, 48 tiles (0 flat): 156W84 1afW41 1aeW59 17eW51 167W84 147W64
+[  15.532]   obj  46 pass 1 T2 0x08 at (24,39) -> wall, 23 tiles (1 flat): 046W98 050W99 051W99 043W62 053W62 047W100 061W100 060W100 054W59 048W100 070W100 044W60
+[  15.532]   obj  47 pass 1 T1 0x03 at (28,39) -> wall, 20 tiles (0 flat): 050W99 051W99 060W100 061W100 070W100 0acW99
+[  15.532]   obj  48 pass 1 T2 0x0a at (36,39) -> wall, 23 tiles (1 flat): 051W99 050W99 046W98 043W62 053W62 061W100 060W100 047W100 070W100 048W100 054W59 0ae.87
+[  15.532]   obj  49 pass 1 T2 0x0c at (24,43) -> wall, 17 tiles (0 flat): 056W100 054W59 071W57 0adW94 061W100 057W100 070W100 058W100 0acW99 0afW100
+[  15.532]   obj  50 pass 1 T1 0x03 at (16,43) -> wall, 39 tiles (0 flat): 050W99 051W99 060W100 061W100 070W100 0acW99
+[  15.532]   obj  51 pass 1 T2 0x08 at (13,43) -> wall, 19 tiles (1 flat): 046W98 050W99 051W99 043W62 053W62 047W100 061W100 054W59 048W100 044W60 071W57 0ae.87
+[  15.532]   obj  52 pass 1 T1 0x63 at (13,47) -> floor, 30 tiles (0 flat): 043W62 053W62 044W60 071W57 0adW94 054W59   <- object id not classified
+[  15.532]   obj  53 pass 1 T1 0x04 at (24,55) -> wall, 60 tiles (0 flat): 050W99 051W99 0acW99 070W100 060W100 061W100
+[  15.532]   obj  54 pass 1 T2 0x0e at (36,43) -> wall, 17 tiles (0 flat): 056W100 0adW94 071W57 054W59 057W100 060W100 058W100 070W100 0afW100 0acW99
+[  15.532]   obj  55 pass 1 T1 0x03 at (40,43) -> wall, 39 tiles (0 flat): 050W99 051W99 060W100 061W100 070W100 0acW99
+[  15.532]   obj  56 pass 1 T2 0x0a at (47,43) -> wall, 19 tiles (1 flat): 050W99 051W99 046W98 043W62 053W62 060W100 047W100 048W100 054W59 0ae.87 071W57 044W60
+[  15.532]   obj  57 pass 1 T1 0x64 at (47,47) -> wall, 30 tiles (0 flat): 043W62 053W62 0adW94 071W57 044W60 054W59
+[  15.532]   obj  58 pass 1 T1 0x34 at (30,38) -> floor, 4 tiles (4 flat): 173.100   <- object id not classified
+[  15.532]   obj  59 pass 1 T1 0x69 at (23,38) -> rail, 4 tiles (0 flat): 0e3r83 0e1r97
+[  15.532]   obj  60 pass 1 T1 0x22 at (12,42) -> rail, 4 tiles (0 flat): 0e1r97 0e2r99
+[  15.532]   obj  61 pass 1 T1 0x69 at (12,42) -> rail, 3 tiles (0 flat): 0e3r83 0e1r97
+[  15.532]   obj  62 pass 1 T1 0x22 at (34,38) -> rail, 7 tiles (0 flat): 0e1r97 0e2r99
+[  15.532]   obj  63 pass 1 T1 0x69 at (40,38) -> rail, 4 tiles (0 flat): 0e3r83 0e1r97
+[  15.532]   obj  64 pass 1 T1 0x22 at (48,42) -> rail, 4 tiles (0 flat): 0e1r97 0e2r99
+[  15.532]   obj  65 pass 1 T1 0x69 at (51,42) -> rail, 3 tiles (0 flat): 0e3r83 0e1r97
+[  15.532]   obj  66 pass 1 T1 0xc0 at (2,4) -> ceiling, 192 tiles (0 flat): 015C99
+[  15.532]   obj  67 pass 1 T1 0xc0 at (12,4) -> ceiling, 24 tiles (0 flat): 015C99
+[  15.532]   obj  68 pass 1 T1 0xc0 at (2,20) -> ceiling, 192 tiles (0 flat): 015C99
+[  15.532]   obj  69 pass 1 T1 0x60 at (14,8) -> ceiling, 56 tiles (0 flat): 015C99
+[  15.532]   obj  70 pass 1 T1 0xc0 at (2,36) -> ceiling, 64 tiles (0 flat): 015C99
+[  15.532]   obj  71 pass 1 T1 0xc0 at (2,52) -> ceiling, 40 tiles (0 flat): 015C99
+[  15.532]   obj  72 pass 1 T1 0xc0 at (44,4) -> ceiling, 32 tiles (0 flat): 015C99
+[  15.533]   obj  73 pass 1 T1 0xc0 at (50,4) -> ceiling, 184 tiles (0 flat): 015C99
+[  15.533]   obj  74 pass 1 T1 0xc0 at (50,20) -> ceiling, 192 tiles (0 flat): 015C99
+[  15.533]   obj  75 pass 1 T1 0x60 at (48,8) -> ceiling, 56 tiles (0 flat): 015C99
+[  15.533]   obj  76 pass 1 T2 0x31 at (30,39) -> floor, 20 tiles (20 flat): 04d.100 04e.100 05d.100 05e.100 06d.100 06e.100 07d.100 07e.100   <- object id not classified
+[  15.533]   obj  77 pass 1 T2 0x24 at (26,11) -> chair, 16 tiles (16 flat): 14a.83 14b.83 15a.83 15b.83 16a.83 16b.83 17a.83 17b.83
+[  15.533]   obj  78 pass 1 T2 0x24 at (34,11) -> chair, 16 tiles (16 flat): 14a.83 14b.83 15a.83 15b.83 16a.83 16b.83 17a.83 17b.83
+[  15.533]   obj  79 pass 2 T1 0x61 at (13,53) -> wall, 8 tiles (0 flat): 092W87 098W92 0a4W93 0adW94 093W87 099W92 0a5W97
+[  15.533]   obj  80 pass 2 T1 0x02 at (16,55) -> wall, 28 tiles (0 flat): 0acW99 0a3W92 0a2W92 097W87 096W87 091W82 090W82
+[  15.533]   obj  81 pass 2 T2 0x01 at (13,55) -> floor, 16 tiles (4 flat): 092W87 098W92 0a4W93 0ae.87 093W87 099W92 0a6.100 0a3W92 09e.100 096W87 097W87 094.100   <- object id not classified
+[  15.533]   obj  82 pass 2 T1 0x02 at (40,55) -> wall, 28 tiles (0 flat): 0acW99 0a2W92 0a3W92 096W87 097W87 090W82 091W82
+[  15.533]   obj  83 pass 2 T2 0x03 at (47,55) -> floor, 16 tiles (4 flat): 0ae.87 0a4W93 098W92 092W87 0a2W92 0a6.100 099W92 093W87 096W87 097W87 09e.100 090W82   <- object id not classified
+[  15.533]   obj  84 pass 2 T1 0x62 at (47,53) -> wall, 8 tiles (0 flat): 0adW94 0a4W93 098W92 092W87 0a5W97 099W92 093W87
+[  15.533]   obj  85 pass 2 T3 0x29 at (30,55) -> floor, 23 tiles (10 flat): 0b5.100 0b6.100 0a2W92 096W87 090W82 0acW99 00dD71 016.100 008D63 1efD84   <- object id not classified
+[  15.533]   obj  86 pass 3 T1 0x60 at (0,9) -> ceiling, 0 tiles (0 flat):
+[  15.533]   obj  87 pass 3 T1 0x60 at (62,9) -> ceiling, 0 tiles (0 flat):
+[  15.533]   obj  88 pass 3 T1 0x69 at (12,50) -> rail, 4 tiles (0 flat): 0e1r97 0e3r83
+[  15.533]   obj  89 pass 3 T1 0x22 at (12,53) -> rail, 11 tiles (0 flat): 0e2r99 0e1r97
+[  15.533]   obj  90 pass 3 T1 0x69 at (23,53) -> rail, 5 tiles (0 flat): 0e3r83 0e1r97
+[  15.533]   obj  91 pass 3 T1 0x69 at (40,53) -> rail, 6 tiles (0 flat): 0e1r97 0e3r83
+[  15.533]   obj  92 pass 3 T1 0x69 at (51,50) -> rail, 4 tiles (0 flat): 0e1r97 0e3r83
+[  15.533]   obj  93 pass 3 T1 0x22 at (40,53) -> rail, 10 tiles (0 flat): 0e2r99
+[  15.533]   obj  94 pass 3 T1 0xc6 at (14,44) -> floor, 128 tiles (128 flat): 1ec.99   <- object id not classified
+[  15.533]   obj  95 pass 3 T1 0xc6 at (25,40) -> floor, 152 tiles (152 flat): 1ec.99   <- object id not classified
+[  15.533]   obj  96 pass 3 T1 0xc6 at (35,40) -> floor, 32 tiles (32 flat): 1ec.99   <- object id not classified
+[  15.533]   obj  97 pass 3 T1 0xc6 at (38,44) -> floor, 88 tiles (88 flat): 1ec.99   <- object id not classified
+[  15.533]   obj  98 pass 3 T1 0xc6 at (14,49) -> floor, 11 tiles (11 flat): 1ec.99   <- object id not classified
+[  15.533]   obj  99 pass 3 T1 0xc6 at (38,49) -> floor, 11 tiles (11 flat): 1ec.99   <- object id not classified
+[  15.533]   obj 100 pass 3 T1 0xc6 at (24,50) -> floor, 38 tiles (38 flat): 1ec.99   <- object id not classified
+[  15.533]   obj 101 pass 3 door 0x00 at (-1,-1) -> door, 12 tiles (0 flat): 088D100 089D100 008D63 1efD84 018D62 078D99
+[  15.533]   obj 102 pass 3 door 0x14 at (-1,-1) -> door, 0 tiles (0 flat):
+[  15.533]   flattened by the floor flood: cell (24,7) tile 18e (small) -> add "18e small full" to hd3d_tiles.txt if it should stand
+[  15.533]   flattened by the floor flood: cell (39,7) tile 18e (small) -> add "18e small full" to hd3d_tiles.txt if it should stand
+[  15.533]   flattened by the floor flood: cell (25,22) tile 0e7 (tall) -> add "0e7 tall full" to hd3d_tiles.txt if it should stand
+[  15.533]   flattened by the floor flood: cell (26,22) tile 0e7 (tall) -> add "0e7 tall full" to hd3d_tiles.txt if it should stand
+[  15.533]   flattened by the floor flood: cell (37,22) tile 0e7 (tall) -> add "0e7 tall full" to hd3d_tiles.txt if it should stand
+[  15.533]   flattened by the floor flood: cell (38,22) tile 0e7 (tall) -> add "0e7 tall full" to hd3d_tiles.txt if it should stand
+[  15.533]   flattened by the floor flood: cell (25,23) tile 0f7 (tall) -> add "0f7 tall full" to hd3d_tiles.txt if it should stand
+[  15.533]   flattened by the floor flood: cell (26,23) tile 0f7 (tall) -> add "0f7 tall full" to hd3d_tiles.txt if it should stand
+[  15.533]   flattened by the floor flood: cell (37,23) tile 0f7 (tall) -> add "0f7 tall full" to hd3d_tiles.txt if it should stand
+[  15.533]   flattened by the floor flood: cell (38,23) tile 0f7 (tall) -> add "0f7 tall full" to hd3d_tiles.txt if it should stand
+[  15.533]   flattened by the floor flood: cell (25,28) tile 0e7 (tall) -> add "0e7 tall full" to hd3d_tiles.txt if it should stand
+[  15.533]   flattened by the floor flood: cell (26,28) tile 0e7 (tall) -> add "0e7 tall full" to hd3d_tiles.txt if it should stand
+[  15.533]   flattened by the floor flood: cell (37,28) tile 0e7 (tall) -> add "0e7 tall full" to hd3d_tiles.txt if it should stand
+[  15.533]   flattened by the floor flood: cell (38,28) tile 0e7 (tall) -> add "0e7 tall full" to hd3d_tiles.txt if it should stand
+[  15.533]   flattened by the floor flood: cell (25,29) tile 0f7 (tall) -> add "0f7 tall full" to hd3d_tiles.txt if it should stand
+[  15.533]   flattened by the floor flood: cell (26,29) tile 0f7 (tall) -> add "0f7 tall full" to hd3d_tiles.txt if it should stand
+[  15.533]   flattened by the floor flood: cell (37,29) tile 0f7 (tall) -> add "0f7 tall full" to hd3d_tiles.txt if it should stand
+[  15.533]   flattened by the floor flood: cell (38,29) tile 0f7 (tall) -> add "0f7 tall full" to hd3d_tiles.txt if it should stand
+[  15.533]   flattened by the floor flood: cell (25,34) tile 0e7 (tall) -> add "0e7 tall full" to hd3d_tiles.txt if it should stand
+[  15.533]   flattened by the floor flood: cell (26,34) tile 0e7 (tall) -> add "0e7 tall full" to hd3d_tiles.txt if it should stand
+[  15.533]   flattened by the floor flood: cell (37,34) tile 0e7 (tall) -> add "0e7 tall full" to hd3d_tiles.txt if it should stand
+[  15.533]   flattened by the floor flood: cell (38,34) tile 0e7 (tall) -> add "0e7 tall full" to hd3d_tiles.txt if it should stand
+[  15.533]   flattened by the floor flood: cell (25,35) tile 0f7 (tall) -> add "0f7 tall full" to hd3d_tiles.txt if it should stand
+[  15.533]   flattened by the floor flood: cell (26,35) tile 0f7 (tall) -> add "0f7 tall full" to hd3d_tiles.txt if it should stand
+[  15.533]   flattened by the floor flood: cell (37,35) tile 0f7 (tall) -> add "0f7 tall full" to hd3d_tiles.txt if it should stand
+[  15.533]   flattened by the floor flood: cell (38,35) tile 0f7 (tall) -> add "0f7 tall full" to hd3d_tiles.txt if it should stand
+[  15.533]   flattened by the floor flood: cell (23,38) tile 0e1 (rail) -> add "0e1 rail full" to hd3d_tiles.txt if it should stand
+[  15.533]   flattened by the floor flood: cell (40,38) tile 0e1 (rail) -> add "0e1 rail full" to hd3d_tiles.txt if it should stand
+[  15.533]   flattened by the floor flood: cell (12,42) tile 0e1 (rail) -> add "0e1 rail full" to hd3d_tiles.txt if it should stand
+[  15.533]   flattened by the floor flood: cell (51,42) tile 0e1 (rail) -> add "0e1 rail full" to hd3d_tiles.txt if it should stand
+[  15.533]   flattened by the floor flood: cell (23,53) tile 0e1 (rail) -> add "0e1 rail full" to hd3d_tiles.txt if it should stand
+[  15.533]   flattened by the floor flood: cell (40,53) tile 0e1 (rail) -> add "0e1 rail full" to hd3d_tiles.txt if it should stand
+[  15.533]   32 object cells flattened by the floor flood
+[  15.533]   class map, then heights (64x64 tiles of 8 px; . floor W wall C ceiling D door r rail f furniture o small b block T tall t torch P big pot h chair; w = wall tile that is walkable for the game; heights in 8 px):
+[  15.533]    0 CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC..CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC | 3333337756777777775677566666666336666666657765777777776577333333
+[  15.533]    1 CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC..CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC | 3333337756777777775677566666666336666666657765777777776577333333
+[  15.533]    2 CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCwwCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC | 3333337756777777775677566666666336666666657765777777776577333333
+[  15.533]    3 CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCwwCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC | 3333337756777777775677566666666336666666657765777777776577333333
+[  15.533]    4 CCCCCCCCCCCCCCCCCCCCWWWWWWWWWWD..DWWWWWWWWWWCCCCCCCCCCCCCCCCCCCC | 3333337756777777775677566666666336666666657765777777776577333333
+[  15.533]    5 CCCCCCCCCCCCCCCCCCCCWWWWWWWWWWD..DWWWWWWWWWWCCCCCCCCCCCCCCCCCCCC | 3333337756777777775677566666666336666666657765777777776577333333
+[  15.533]    6 CCCCCCCCCCCCCCCCCCCCWW.wwwwwwwD..Dwwwwwww.WWCCCCCCCCCCCCCCCCCCCC | 3333337756777777775677366666666336666666637765777777776577333333
+[  15.533]    7 CCCCCCCCCCCCCCCCCCCCWWw.o..............o.wWWCCCCCCCCCCCCCCCCCCCC | 3333337756777777775677334333333333333334337765777777776577333333
+[  15.533]    8 CCCCCCCCCCCCCCCCWWWWWWwwo..............owwWWWWWWCCCCCCCCCCCCCCCC | 3333337756777777775677334333333333333334337765777777776577333333
+[  15.533]    9 CCCCCCCCCCCCCCCCWWWWWWwwo..............owwWWWWWWCCCCCCCCCCCCCCCC | 3333337756777777775677334333333333333334337765777777776577333333
+[  15.533]   10 CCCCCCCCCCCCCCCCWW.wwwwwo..............owwwww.WWCCCCCCCCCCCCCCCC | 3333337756777777773677334333333333333334337763777777776577333333
+[  15.533]   11 CCCCCCCCCCCCCCCCWWw.wwwwo.WWWW....WWWW.owwww.wWWCCCCCCCCCCCCCCCC | 3333337756777777777377334377773333777734337737777777776577333333
+[  15.533]   12 CCCCCCCCCCCCCCCCWWww....o.WWWW....WWWW.o....wwWWCCCCCCCCCCCCCCCC | 3333337756777777777333334377773333777734333337777777776577333333
+[  15.533]   13 CCCCCCCCCCCCCCCCWWww....o.WWWW....WWWW.o....wwWWCCCCCCCCCCCCCCCC | 3333337756777777777333334377773333777734333337777777776577333333
+[  15.533]   14 CCCCCCCCCCCCCCCCWWWw....o.WWWW....WWWW.o....wWWWCCCCCCCCCCCCCCCC | 3333337756777777777333334377773333777734333337777777776577333333
+[  15.533]   15 CCCCCCCCCCCCCCCCWWWw....o..............o....wWWWCCCCCCCCCCCCCCCC | 3333337756777777777333334333333333333334333337777777776577333333
+[  15.533]   16 CCCCCCCCCCCCCCCCWWWw....o....oooooo....o....wWWWCCCCCCCCCCCCCCCC | 3333337756777777777333334333344444433334333337777777776577333333
+[  15.533]   17 CCCCCCCCCCCCCCCCWwww....WWWWWWooooWWWWWW....wwwWCCCCCCCCCCCCCCCC | 3333337756777777777333334444444444444444333337777777776577333333
+[  15.533]   18 CCCCCCCCCCCCCCCCWwww........................wwwWCCCCCCCCCCCCCCCC | 3333337756777777777333333333333333333333333337777777776577333333
+[  15.533]   19 CCCCCCCCCCCCCCCCWWWw........................wWWWCCCCCCCCCCCCCCCC | 3333337756777777777333333333333333333333333337777777776577333333
+[  15.533]   20 CCCCCCCCCCCCCCCCWWWw........................wWWWCCCCCCCCCCCCCCCC | 3333337756777777777333333333333333333333333337777777776577333333
+[  15.533]   21 CCCCCCCCCCCCCCCCWWWw........................wWWWCCCCCCCCCCCCCCCC | 3333337756777777777333333333333333333333333337777777776577333333
+[  15.533]   22 CCCCCCCCCCCCCCCCWWWw.....TT..........TT.....wWWWCCCCCCCCCCCCCCCC | 3333337756777777777333333663333333333663333337777777776577333333
+[  15.533]   23 CCCCCCCCCCCCCCCCWwww.....TT..........TT.....wwwWCCCCCCCCCCCCCCCC | 3333337756777777777333333663333333333663333337777777776577333333
+[  15.533]   24 CCCCCCCCCCCCCCCCWwww.....TT..........TT.....wwwWCCCCCCCCCCCCCCCC | 3333337756777777777333333663333333333663333337777777776577333333
+[  15.533]   25 CCCCCCCCCCCCCCCCWWWw.....TT..........TT.....wWWWCCCCCCCCCCCCCCCC | 3333337756777777777333333663333333333663333337777777776577333333
+[  15.533]   26 CCCCCCCCCCCCCCCCWWWw........................wWWWCCCCCCCCCCCCCCCC | 3333337756777777777333333333333333333333333337777777776577333333
+[  15.533]   27 CCCCCCCCCCCCCCCCWWWw........................wWWWCCCCCCCCCCCCCCCC | 3333337756777777777333333333333333333333333337777777776577333333
+[  15.533]   28 CCCCCCCCCCCCCCCCWWWw.....TT..........TT.....wWWWCCCCCCCCCCCCCCCC | 3333337756777777777333333663333333333663333337777777776577333333
+[  15.533]   29 CCCCCCCCCCCCCCCCWwww.....TT..........TT.....wwwWCCCCCCCCCCCCCCCC | 3333337756777777777333333663333333333663333337777777776577333333
+[  15.533]   30 CCCCCCCCCCCCCCCCWwww.....TT..........TT.....wwwWCCCCCCCCCCCCCCCC | 3333337756777777777333333663333333333663333337777777776577333333
+[  15.533]   31 CCCCCCCCCCCCCCCCWWWw.....TT..........TT.....wWWWCCCCCCCCCCCCCCCC | 3333337756777777777333333663333333333663333337777777776577333333
+[  15.533]   32 CCCCCCCCCCCCCCCCWWWw........................wWWWCCCCCCCCCCCCCCCC | 3333337756777777777333333333333333333333333337777777776577333333
+[  15.533]   33 CCCCCCCCCCCCCCCCWWWw........................wWWWCCCCCCCCCCCCCCCC | 3333337756777777777333333333333333333333333337777777776577333333
+[  15.533]   34 CCCCCCCCCCCCCCCCWWww.....TT..........TT.....wwWWCCCCCCCCCCCCCCCC | 3333337756777777777333333663333333333663333337777777776577333333
+[  15.533]   35 CCCCCCCCCCCCCCCCWWww.....TT..........TT.....wwWWCCCCCCCCCCCCCCCC | 3333337756777777777333333663333333333663333337777777776577333333
+[  15.533]   36 CCCCCCWWWWWWWWWWWWww.....TT..........TT.....wwWWWWWWWWWWWWCCCCCC | 3333337756777777777333333663333333333663333337777777776577333333
+[  15.533]   37 CCCCCCWWWWWWWWWWWWww.....TT..........TT.....wwWWWWWWWWWWWWCCCCCC | 3333337756777777777333333663333333333663333337777777776577333333
+[  15.533]   38 CCCCCCWW.wwwwwwwwwww...rrrrrrr....rrrrrrr...wwwwwwwwwww.WWCCCCCC | 3333337736777777777333344444443333444444433337777777776377333333
+[  15.533]   39 CCCCCCWWw.wwwwwwwwww...r................r...wwwwwwwwww.wWWCCCCCC | 3333337733777777777333343333333333333333433337777777773377333333
+[  15.533]   40 CCCCCCWWww.............r.WWWWWW..WWWWWW.r.............wwWWCCCCCC | 3333337733333333333333343333335335333333433333333333333377333333
+[  15.533]   41 CCCCCCWWww.............r.WwwwwW..WwwwwW.r.............wwWWCCCCCC | 3333337733333333333333343333333333333333433333333333333377333333
+[  15.533]   42 CCCCCCWWww..rrrr.......r.Ww.wwW..Www.wW.r.......rrrr..wwWWCCCCCC | 333333773333444433333334333.333..333.333433333334444333377333333
+[  15.533]   43 CCCCCCWWww..r............Www........wwW............r..wwWWCCCCCC | 333333773333433333333333333..........333333333333334333377333333
+[  15.534]   44 CCCCCCWWww..r.WWWWWWWWWWWWww........wwWWWWWWWWWWWW.r..wwWWCCCCCC | 333333773333433333333333333..........333333333333334333377333333
+[  15.534]   45 CCCCCCWWww..r.Wwwwwwwwwwwwww........wwwwwwwwwwwwwW.r..wwWWCCCCCC | 333333773333433333333333333..........333333333333334333377333333
+[  15.534]   46 CCCCCCWWww....Ww.wwwwwwwwwww........wwwwwwwwwww.wW....wwWWCCCCCC | 3333337733333333.3333333333..........3333333333.3333333377333333
+[  15.534]   47 CCCCCCWWww....Www..............................wwW....wwWWCCCCCC | 3333337733333333................................3333333377333333
+[  15.534]   48 CCCCCCWWww....Www..............................wwW....wwWWCCCCCC | 3333337733333333................................3333333377333333
+[  15.534]   49 CCCCCCWWww....Www..............................wwW....wwWWCCCCCC | 3333337733333333................................3333333377333333
+[  15.534]   50 CCCCCCWWww..r.Www..............................wwW.r..wwWWCCCCCC | 3333337733334333................................3334333377333333
+[  15.534]   51 CCCCCCWWww..r.Www..............................wwW.r..wwWWCCCCCC | 3333337733334333................................3334333377333333
+[  15.534]   52 CCCCCCWWww..r.Www..............................wwW.r..wwWWCCCCCC | 3333337733334333................................3334333377333333
+[  15.534]   53 CCCCCCWWww..rrrrrrrrrrrr................rrrrrrrrrrrr..wwWWCCCCCC | 333333773333444444444444................444444444444333377333333
+[  15.534]   54 CCCCCCWWww.............r................r.............wwWWCCCCCC | 333333773333333333333334................433333333333333377333333
+[  15.534]   55 CCCCCCWWww.............rwwwwwwwwwwwwwwwwr.............wwWWCCCCCC | 3333337733333333333333343333333..3333333433333333333333377333333
+[  15.534]   56 CCCCCCWWww.............rwwwwwwD..Dwwwwwwr.............wwWWCCCCCC | 3333337733333333333333343333333..3333333433333333333333377333333
+[  15.534]   57 CCCCCCWWww.............rWWWWWWDwwDWWWWWWr.............wwWWCCCCCC | 3333337733333333333333343333333..3333333433333333333333377333333
+[  15.534]   58 CCCCCCWWw.wwwwwwwwwwwwwr.......WW.......rwwwwwwwwwwwww.wWWCCCCCC | 3333337733555555555555543333333773333333455555555555553377333333
+[  15.534]   59 CCCCCCWW.wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww.WWCCCCCC | 3333337735555555555555555555555775555555555555555555555377333333
+[  15.534]   60 CCCCCCWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWCCCCCC | 3333337755555555555555555555555775555555555555555555555577333333
+[  15.534]   61 CCCCCCWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWCCCCCC | 3333337755555555555555555555555775555555555555555555555577333333
+[  15.534]   62 CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC | 3333337755555555555555555555555775555555555555555555555577333333
+[  15.534]   63 CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC | 3333337755555555555555555555555775555555555555555555555577333333
+[  15.534]   collision types (hex per tile):
+[  15.534]    0 01010101010101010101010101010101010101010101010101010101010101808001010101010101010101010101010101010101010101010101010101010101
+[  15.534]    1 01010101010101010101010101010101010101010101010101010101010101808001010101010101010101010101010101010101010101010101010101010101
+[  15.534]    2 01010101010101010101010101010101010101010101010101010101010101a0a001010101010101010101010101010101010101010101010101010101010101
+[  15.534]    3 01010101010101010101010101010101010101010101010101010101010101a0a001010101010101010101010101010101010101010101010101010101010101
+[  15.534]    4 01010101010101010101010101010101010101010101010101010101010101808001010101010101010101010101010101010101010101010101010101010101
+[  15.534]    5 01010101010101010101010101010101010101010101010101010101010101808001010101010101010101010101010101010101010101010101010101010101
+[  15.534]    6 01010101010101010101010101010101010101010101040404040404040402808002040404040404040401010101010101010101010101010101010101010101
+[  15.534]    7 01010101010101010101010101010101010101010101040002000000000000000000000000000002000401010101010101010101010101010101010101010101
+[  15.534]    8 01010101010101010101010101010101010101010101040002000000000000000000000000000002000401010101010101010101010101010101010101010101
+[  15.534]    9 01010101010101010101010101010101010101010101040002000000000000000000000000000002000401010101010101010101010101010101010101010101
+[  15.534]   10 01010101010101010101010101010101010104040404040002000000000000000000000000000002000404040404010101010101010101010101010101010101
+[  15.534]   11 01010101010101010101010101010101010104000000000002000201010200000000020101020002000000000004010101010101010101010101010101010101
+[  15.534]   12 01010101010101010101010101010101010104000000000002000201010200000000020101020002000000000004010101010101010101010101010101010101
+[  15.534]   13 01010101010101010101010101010101010104000000000002000202020200000000020202020002000000000004010101010101010101010101010101010101
+[  15.534]   14 01010101010101010101010101010101020102000000000002000202020200000000020202020002000000000002010201010101010101010101010101010101
+[  15.534]   15 01010101010101010101010101010101020102000000000002000000000000000000000000000002000000000002010201010101010101010101010101010101
+[  15.534]   16 01010101010101010101010101010101010101000000000002000000000222222222020000000002000000000001010101010101010101010101010101010101
+[  15.534]   17 01010101010101010101010101010101016e6e00000000000202020202022222222202020202020200000000006f6f0101010101010101010101010101010101
+[  15.534]   18 01010101010101010101010101010101016e6e00000000000000000000000000000000000000000000000000006f6f0101010101010101010101010101010101
+[  15.534]   19 01010101010101010101010101010101010101000000000000000000000000000000000000000000000000000001010101010101010101010101010101010101
+[  15.534]   20 01010101010101010101010101010101020102000000000000000000000000000000000000000000000000000002010201010101010101010101010101010101
+[  15.534]   21 01010101010101010101010101010101020102000000000000000000000000000000000000000000000000000002010201010101010101010101010101010101
+[  15.534]   22 01010101010101010101010101010101010101000000000000000000000000000000000000000000000000000001010101010101010101010101010101010101
+[  15.534]   23 01010101010101010101010101010101016e6e00000000000001010000000000000000000001010000000000006f6f0101010101010101010101010101010101
+[  15.534]   24 01010101010101010101010101010101016e6e00000000000001010000000000000000000001010000000000006f6f0101010101010101010101010101010101
+[  15.534]   25 01010101010101010101010101010101010101000000000000020200000000000000000000020200000000000001010101010101010101010101010101010101
+[  15.534]   26 01010101010101010101010101010101020102000000000000000000000000000000000000000000000000000002010201010101010101010101010101010101
+[  15.534]   27 01010101010101010101010101010101020102000000000000000000000000000000000000000000000000000002010201010101010101010101010101010101
+[  15.534]   28 01010101010101010101010101010101010101000000000000000000000000000000000000000000000000000001010101010101010101010101010101010101
+[  15.534]   29 01010101010101010101010101010101016e6e00000000000001010000000000000000000001010000000000006f6f0101010101010101010101010101010101
+[  15.534]   30 01010101010101010101010101010101016e6e00000000000001010000000000000000000001010000000000006f6f0101010101010101010101010101010101
+[  15.534]   31 01010101010101010101010101010101010101000000000000020200000000000000000000020200000000000001010101010101010101010101010101010101
+[  15.534]   32 01010101010101010101010101010101020102000000000000000000000000000000000000000000000000000002010201010101010101010101010101010101
+[  15.534]   33 01010101010101010101010101010101020102000000000000000000000000000000000000000000000000000002010201010101010101010101010101010101
+[  15.534]   34 01010101010101010101010101010101010104000000000000000000000000000000000000000000000000000004010101010101010101010101010101010101
+[  15.534]   35 01010101010101010101010101010101010104000000000000010100000000000000000000010100000000000004010101010101010101010101010101010101
+[  15.534]   36 01010101010101010101010101010101010104000000000000010100000000000000000000010100000000000004010101010101010101010101010101010101
+[  15.534]   37 01010101010101010101010101010101010104000000000000020200000000000000000000020200000000000004010101010101010101010101010101010101
+[  15.534]   38 01010101010101010404040404040404040404000000000202020202020200000000020202020202020000000004040404040404040404040101010101010101
+[  15.534]   39 01010101010101010400000000000000000000000000000201282828282802000002282828282801020000000000000000000000000000040101010101010101
+[  15.534]   40 0101010101010101040000000000000000000000000000022a0101010101011e1e0101010101012a020000000000000000000000000000040101010101010101
+[  15.534]   41 0101010101010101040000000000000000000000000000022a0104040404011e1e0104040404012a020000000000000000000000000000040101010101010101
+[  15.534]   42 0101010101010101040000000202020200000000000000022a01040000000200000200000004012a020000000000000002020202000000040101010101010101
+[  15.534]   43 01010101010101010400000002012828282828282828282801010400000000000000000000040101282828282828282828280102000000040101010101010101
+[  15.534]   44 010101010101010104000000022a0101010101010101010101010400000000000000000000040101010101010101010101012a02000000040101010101010101
+[  15.534]   45 010101010101010104000000022a0104040404040404040404040400000000000000000000040404040404040404040404012a02000000040101010101010101
+[  15.534]   46 010101010101010104000000002a0104000000000000000000000000000000000000000000000000000000000000000004012a00000000040101010101010101
+[  15.534]   47 010101010101010104000000002a0104000000000000000000000000000000000000000000000000000000000000000004012a00000000040101010101010101
+[  15.534]   48 010101010101010104000000002a0104000000000000000000000000000000000000000000000000000000000000000004012a00000000040101010101010101
+[  15.534]   49 010101010101010104000000002a0104000000000000000000000000000000000000000000000000000000000000000004012a00000000040101010101010101
+[  15.534]   50 010101010101010104000000022a0104000000000000000000000000000000000000000000000000000000000000000004012a02000000040101010101010101
+[  15.534]   51 010101010101010104000000022a0104000000000000000000000000000000000000000000000000000000000000000004012a02000000040101010101010101
+[  15.534]   52 010101010101010104000000022a0104000000000000000000000000000000000000000000000000000000000000000004012a02000000040101010101010101
+[  15.534]   53 01010101010101010400000002020202020202020202020200000000000000000000000000000000020202020202020202020202000000040101010101010101
+[  15.534]   54 01010101010101010400000000000000000000000000000200000000000000000000000000000000020000000000000000000000000000040101010101010101
+[  15.534]   55 01010101010101010400000000000000000000000000000200000000000000000000000000000000020000000000000000000000000000040101010101010101
+[  15.534]   56 01010101010101010400000000000000000000000000000204040404040402000002040404040404020000000000000000000000000000040101010101010101
+[  15.535]   57 01010101010101010400000000000000000000000000000201010101010101343401010101010101020000000000000000000000000000040101010101010101
+[  15.535]   58 01010101010101010400000000000000000000000000000228282828282801010101282828282828020000000000000000000000000000040101010101010101
+[  15.535]   59 01010101010101010404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040101010101010101
+[  15.535]   60 01010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101
+[  15.535]   61 01010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101
+[  15.535]   62 01010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101
+[  15.535]   63 01010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101
+[  15.535]   BG2 tile numbers, each followed by its class letter (from hd3d_tiles.txt or the seed, ? = never seen):
+[  15.535]    0 015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C
+[  15.535]    1 015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C
+[  15.535]    2 015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C
+[  15.535]    3 015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C
+[  15.535]    4 015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C094.091W090W091W090W091W090W091W090W091W088D089D089D088D090W091W090W091W090W091W090W091W090W094.015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C
+[  15.535]    5 015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C093W09e.096W097W096W097W096W097W096W097W008D1efD1efD008D096W097W096W097W096W097W096W097W09e.093W015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C
+[  15.535]    6 015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C092W098W0a6.0a3W0a2W0a3W0a2W0a3W0a2W0a3W018D078D078D018D0a2W0a3W0a2W0a3W0a2W0a3W0a2W0a6.098W092W015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C
+[  15.535]    7 015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C093W099W0a5W0ae.18eo0c6.0c6.0c6.0c6.0c6.0c6.0c6.0c6.0c6.0c6.0c6.0c6.0c6.0c6.18eo0ae.0a5W099W093W015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C
+[  15.535]    8 015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C094.091W090W091W095W098W0a4W0adW18eo0c6.0c6.0c6.0c6.0c6.0c6.0c6.0c6.0c6.0c6.0c6.0c6.0c6.0c6.18eo0adW0a4W098W095W090W091W090W094.015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C
+[  15.535]    9 015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C093W09e.096W097W096W09fW0a5W0adW18eo0c6.0c6.0c6.0c6.0c6.0c6.0c6.0c6.0c6.0c6.0c6.0c6.0c6.0c6.18eo0adW0a5W09fW097W096W097W09e.093W015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C
+[  15.535]   10 015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C092W098W0a6.0a3W0a2W0a3W0a7W0adW18eo0c6.0c6.0c6.0c6.0c6.0c6.0c6.0c6.0c6.0c6.0c6.0c6.0c6.0c6.18eo0adW0a7W0a2W0a3W0a2W0a6.098W092W015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C
+[  15.535]   11 015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C093W099W0a5W0ae.0acW0acW0acW0afW18eo0c6.14a.14b.14b.14a.0c6.0c6.0c6.0c6.14a.14b.14b.14a.0c6.18eo0afW0acW0acW0acW0ae.0a5W099W093W015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C
+[  15.535]   12 015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C092W098W0a4W0adW0ec.0ed.0ec.0ed.18eo0c6.15a.15b.15b.15a.0c6.0c6.0c6.0c6.15a.15b.15b.15a.0c6.18eo0ec.0ed.0ec.0ed.0adW0a4W098W092W015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C
+[  15.535]   13 015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C093W099W0a5W0adW0fc.0fd.0fc.0fd.18eo0c6.16a.16b.16b.16a.0c6.0c6.0c6.0c6.16a.16b.16b.16a.0c6.18eo0fc.0fd.0fc.0fd.0adW0a5W099W093W015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C
+[  15.535]   14 015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C151W161W141W171W0ec.0ed.0ec.0ed.18eo0c6.17a.17b.17b.17a.0c6.0c6.0c6.0c6.17a.17b.17b.17a.0c6.18eo0ec.0ed.0ec.0ed.171W141W161W151W015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C
+[  15.535]   15 015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C151W161W141W171W0fc.0fd.0fc.0fd.18eo0c6.0c6.0c6.0c6.0c6.0c6.0c6.0c6.0c6.0c6.0c6.0c6.0c6.0c6.18eo0fc.0fd.0fc.0fd.171W141W161W151W015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C
+[  15.535]   16 015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C17eW1aeW1afW156W0ec.0ed.0ec.0ed.18eo0c6.0c6.0c6.0c6.18fo172o172o172o172o18fo0c6.0c6.0c6.0c6.18eo0ec.0ed.0ec.0ed.156W1afW1aeW17eW015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C
+[  15.535]   17 015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C17eW146W166W156W0fc.0fd.0fc.0fd.19eW19fW19fW19fW19fW19eW172o172o172o172o19eW19fW19fW19fW19fW19eW0fc.0fd.0fc.0fd.156W167W147W17eW015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C
+[  15.535]   18 015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C17eW146W166W156W0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.173.0c6.0c6.0c6.0c6.173.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.156W167W147W17eW015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C
+[  15.535]   19 015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C17eW1aeW1afW156W0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.173.0c6.0c6.0c6.0c6.173.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.156W1afW1aeW17eW015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C
+[  15.535]   20 015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C151W161W141W171W0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.173.0c6.0c6.0c6.0c6.173.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.171W141W161W151W015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C
+[  15.535]   21 015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C151W161W141W171W0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.173.0c6.0c6.0c6.0c6.173.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.171W141W161W151W015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C
+[  15.535]   22 015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C17eW1aeW1afW156W0ec.0ed.0ec.0ed.0ec.0e7T0e7T0ed.0ec.173.0c6.0c6.0c6.0c6.173.0ed.0ec.0e7T0e7T0ed.0ec.0ed.0ec.0ed.156W1afW1aeW17eW015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C
+[  15.535]   23 015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C17eW146W166W156W0fc.0fd.0fc.0fd.0fc.0f7T0f7T0fd.0fc.173.0c6.0c6.0c6.0c6.173.0fd.0fc.0f7T0f7T0fd.0fc.0fd.0fc.0fd.156W167W147W17eW015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C
+[  15.535]   24 015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C17eW146W166W156W0ec.0ed.0ec.0ed.0ec.0e6T0e6T0ed.0ec.173.0c6.0c6.0c6.0c6.173.0ed.0ec.0e6T0e6T0ed.0ec.0ed.0ec.0ed.156W167W147W17eW015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C
+[  15.535]   25 015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C17eW1aeW1afW156W0fc.0fd.0fc.0fd.0fc.0f6T0f6T0fd.0fc.173.0c6.0c6.0c6.0c6.173.0fd.0fc.0f6T0f6T0fd.0fc.0fd.0fc.0fd.156W1afW1aeW17eW015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C
+[  15.535]   26 015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C151W161W141W171W0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.173.0c6.0c6.0c6.0c6.173.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.171W141W161W151W015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C
+[  15.535]   27 015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C151W161W141W171W0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.173.0c6.0c6.0c6.0c6.173.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.171W141W161W151W015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C
+[  15.535]   28 015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C17eW1aeW1afW156W0ec.0ed.0ec.0ed.0ec.0e7T0e7T0ed.0ec.173.0c6.0c6.0c6.0c6.173.0ed.0ec.0e7T0e7T0ed.0ec.0ed.0ec.0ed.156W1afW1aeW17eW015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C
+[  15.535]   29 015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C17eW146W166W156W0fc.0fd.0fc.0fd.0fc.0f7T0f7T0fd.0fc.173.0c6.0c6.0c6.0c6.173.0fd.0fc.0f7T0f7T0fd.0fc.0fd.0fc.0fd.156W167W147W17eW015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C
+[  15.535]   30 015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C17eW146W166W156W0ec.0ed.0ec.0ed.0ec.0e6T0e6T0ed.0ec.173.0c6.0c6.0c6.0c6.173.0ed.0ec.0e6T0e6T0ed.0ec.0ed.0ec.0ed.156W167W147W17eW015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C
+[  15.535]   31 015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C17eW1aeW1afW156W0fc.0fd.0fc.0fd.0fc.0f6T0f6T0fd.0fc.173.0c6.0c6.0c6.0c6.173.0fd.0fc.0f6T0f6T0fd.0fc.0fd.0fc.0fd.156W1afW1aeW17eW015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C
+[  15.535]   32 015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C151W161W141W171W0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.173.0c6.0c6.0c6.0c6.173.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.171W141W161W151W015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C
+[  15.535]   33 015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C151W161W141W171W0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.173.0c6.0c6.0c6.0c6.173.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.171W141W161W151W015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C
+[  15.535]   34 015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C092W098W0a4W0adW0ec.0ed.0ec.0ed.0ec.0e7T0e7T0ed.0ec.173.0c6.0c6.0c6.0c6.173.0ed.0ec.0e7T0e7T0ed.0ec.0ed.0ec.0ed.0adW0a4W098W092W015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C
+[  15.535]   35 015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C093W099W0a5W0adW0fc.0fd.0fc.0fd.0fc.0f7T0f7T0fd.0fc.173.0c6.0c6.0c6.0c6.173.0fd.0fc.0f7T0f7T0fd.0fc.0fd.0fc.0fd.0adW0a5W099W093W015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C
+[  15.535]   36 015C015C015C015C015C015C094.091W090W091W090W091W090W091W090W091W095W098W0a4W0adW0ec.0ed.0ec.0ed.0ec.0e6T0e6T0ed.0ec.173.0c6.0c6.0c6.0c6.173.0ed.0ec.0e6T0e6T0ed.0ec.0ed.0ec.0ed.0adW0a4W098W095W090W091W090W091W090W091W090W091W090W094.015C015C015C015C015C015C
+[  15.535]   37 015C015C015C015C015C015C093W09e.096W097W096W097W096W097W096W097W096W09fW0a5W0adW0fc.0fd.0fc.0fd.0fc.0f6T0f6T0fd.0fc.173.0c6.0c6.0c6.0c6.173.0fd.0fc.0f6T0f6T0fd.0fc.0fd.0fc.0fd.0adW0a5W09fW097W096W097W096W097W096W097W096W097W09e.093W015C015C015C015C015C015C
+[  15.535]   38 015C015C015C015C015C015C092W098W0a6.0a3W0a2W0a3W0a2W0a3W0a2W0a3W0a2W0a3W0a7W0adW0ec.0ed.0ec.0e1r0e2r0e2r0e2r0e2r0e2r0e1r173.173.173.173.0e1r0e2r0e2r0e2r0e2r0e2r0e1r0ed.0ec.0ed.0adW0a7W0a2W0a3W0a2W0a3W0a2W0a3W0a2W0a3W0a2W0a6.098W092W015C015C015C015C015C015C
+[  15.535]   39 015C015C015C015C015C015C093W099W0a5W0ae.0acW0acW0acW0acW0acW0acW0acW0acW0acW0afW0fc.0fd.0fc.0e3r046W050W051W050W050W051W04d.04e.04e.04d.050W051W051W050W051W046W0e3r0fd.0fc.0fd.0afW0acW0acW0acW0acW0acW0acW0acW0acW0acW0ae.0a5W099W093W015C015C015C015C015C015C
+[  15.536]   40 015C015C015C015C015C015C092W098W0a4W0adW0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0e3r043W1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.043W0e3r0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0adW0a4W098W092W015C015C015C015C015C015C
+[  15.536]   41 015C015C015C015C015C015C093W099W0a5W0adW0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0e3r053W1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.053W0e3r0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0adW0a5W099W093W015C015C015C015C015C015C
+[  15.536]   42 015C015C015C015C015C015C092W098W0a4W0adW0ec.0ed.0e1r0e2r0e2r0e1r0ec.0ed.0ec.0ed.0ec.0ed.0ec.0e1r043W1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.043W0e1r0ed.0ec.0ed.0ec.0ed.0ec.0ed.0e1r0e2r0e2r0e1r0ec.0ed.0adW0a4W098W092W015C015C015C015C015C015C
+[  15.536]   43 015C015C015C015C015C015C093W099W0a5W0adW0fc.0fd.0e3r046W050W051W050W051W050W051W050W051W050W051W056W1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.056W050W051W050W051W050W051W050W051W050W051W046W0e3r0fc.0fd.0adW0a5W099W093W015C015C015C015C015C015C
+[  15.536]   44 015C015C015C015C015C015C092W098W0a4W0adW0ec.0ed.0e3r043W1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.043W0e3r0ec.0ed.0adW0a4W098W092W015C015C015C015C015C015C
+[  15.536]   45 015C015C015C015C015C015C093W099W0a5W0adW0fc.0fd.0e1r053W1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.053W0e1r0fc.0fd.0adW0a5W099W093W015C015C015C015C015C015C
+[  15.536]   46 015C015C015C015C015C015C092W098W0a4W0adW0ec.0ed.0ec.043W1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.043W0ed.0ec.0ed.0adW0a4W098W092W015C015C015C015C015C015C
+[  15.536]   47 015C015C015C015C015C015C093W099W0a5W0adW0fc.0fd.0fc.043W1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.043W0fd.0fc.0fd.0adW0a5W099W093W015C015C015C015C015C015C
+[  15.536]   48 015C015C015C015C015C015C092W098W0a4W0adW0ec.0ed.0ec.053W1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.053W0ed.0ec.0ed.0adW0a4W098W092W015C015C015C015C015C015C
+[  15.536]   49 015C015C015C015C015C015C093W099W0a5W0adW0fc.0fd.0fc.043W1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.043W0fd.0fc.0fd.0adW0a5W099W093W015C015C015C015C015C015C
+[  15.536]   50 015C015C015C015C015C015C092W098W0a4W0adW0ec.0ed.0e1r053W1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.053W0e1r0ec.0ed.0adW0a4W098W092W015C015C015C015C015C015C
+[  15.536]   51 015C015C015C015C015C015C093W099W0a5W0adW0fc.0fd.0e3r043W1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.043W0e3r0fc.0fd.0adW0a5W099W093W015C015C015C015C015C015C
+[  15.536]   52 015C015C015C015C015C015C092W098W0a4W0adW0ec.0ed.0e3r053W1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.053W0e3r0ec.0ed.0adW0a4W098W092W015C015C015C015C015C015C
+[  15.536]   53 015C015C015C015C015C015C093W099W0a5W0adW0fc.0fd.0e1r0e2r0e2r0e2r0e2r0e2r0e2r0e2r0e2r0e2r0e2r0e1r1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.0e1r0e2r0e2r0e2r0e2r0e2r0e2r0e2r0e2r0e2r0e2r0e1r0fc.0fd.0adW0a5W099W093W015C015C015C015C015C015C
+[  15.536]   54 015C015C015C015C015C015C092W098W0a4W0adW0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0e3r1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.0e3r0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0adW0a4W098W092W015C015C015C015C015C015C
+[  15.536]   55 015C015C015C015C015C015C093W099W0a5W0adW0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0e3r1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.0e3r0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0adW0a5W099W093W015C015C015C015C015C015C
+[  15.536]   56 015C015C015C015C015C015C092W098W0a4W0adW0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0e3r1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.0e3r0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0adW0a4W098W092W015C015C015C015C015C015C
+[  15.536]   57 015C015C015C015C015C015C093W099W0a5W0adW0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0e3r1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.1ec.0e3r0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0adW0a5W099W093W015C015C015C015C015C015C
+[  15.536]   58 015C015C015C015C015C015C092W098W0a4W0ae.0acW0acW0acW0acW0acW0acW0acW0acW0acW0acW0acW0acW0acW0e1r050W051W050W051W050W051W0b5.0b6.0b6.0b5.050W051W050W051W050W051W0e1r0acW0acW0acW0acW0acW0acW0acW0acW0acW0acW0acW0acW0acW0ae.0a4W098W092W015C015C015C015C015C015C
+[  15.536]   59 015C015C015C015C015C015C093W099W0a6.0a3W0a2W0a3W0a2W0a3W0a2W0a3W0a2W0a3W0a2W0a3W0a2W0a3W0a2W0a3W0a2W0a3W0a2W0a3W0a2W0a3W0a2W0a3W0a2W0a3W0a2W0a3W0a2W0a3W0a2W0a3W0a2W0a3W0a2W0a3W0a2W0a3W0a2W0a3W0a2W0a3W0a2W0a3W0a2W0a3W0a2W0a6.099W093W015C015C015C015C015C015C
+[  15.536]   60 015C015C015C015C015C015C092W09e.096W097W096W097W096W097W096W097W096W097W096W097W096W097W096W097W096W097W096W097W096W097W096W097W096W097W096W097W096W097W096W097W096W097W096W097W096W097W096W097W096W097W096W097W096W097W096W097W09e.092W015C015C015C015C015C015C
+[  15.536]   61 015C015C015C015C015C015C094.091W090W091W090W091W090W091W090W091W090W091W090W091W090W091W090W091W090W091W090W091W090W091W090W091W090W091W090W091W090W091W090W091W090W091W090W091W090W091W090W091W090W091W090W091W090W091W090W091W090W094.015C015C015C015C015C015C
+[  15.536]   62 015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C
+[  15.536]   63 015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C015C
+[  15.536]   BG1 tile numbers, each followed by its class letter (from hd3d_tiles.txt or the seed, ? = never seen):
+[  15.536]    0 0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.
+[  15.536]    1 0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.
+[  15.536]    2 0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.
+[  15.536]    3 0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.
+[  15.536]    4 0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.
+[  15.536]    5 0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.
+[  15.536]    6 0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.
+[  15.536]    7 0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.
+[  15.536]    8 0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.
+[  15.536]    9 0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.
+[  15.536]   10 0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.
+[  15.536]   11 0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.
+[  15.536]   12 0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.
+[  15.536]   13 0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.
+[  15.536]   14 0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.
+[  15.536]   15 0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.
+[  15.536]   16 0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.
+[  15.536]   17 0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.
+[  15.536]   18 0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.
+[  15.536]   19 0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.
+[  15.537]   20 0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.
+[  15.537]   21 0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.
+[  15.537]   22 0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.
+[  15.537]   23 0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.
+[  15.537]   24 0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.
+[  15.537]   25 0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.
+[  15.537]   26 0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.
+[  15.537]   27 0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.
+[  15.537]   28 0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.
+[  15.537]   29 0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.
+[  15.537]   30 0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.
+[  15.537]   31 0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.
+[  15.537]   32 0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.
+[  15.537]   33 0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.
+[  15.537]   34 0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.
+[  15.537]   35 0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.
+[  15.537]   36 0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.
+[  15.537]   37 0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.
+[  15.537]   38 0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.
+[  15.537]   39 0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.046W050W051W050W050W051W04d.04e.04e.04d.050W051W051W050W051W046W0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.
+[  15.537]   40 0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.043W047W061W060W060W061W05d.05e.05e.05d.060W061W061W060W047W043W0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.
+[  15.537]   41 0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.053W054W048W070W070W070W06d.06e.06e.06d.070W070W070W048W054W053W0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.
+[  15.537]   42 0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.043W044W071W0ae.0acW0acW07d.07e.07e.07d.0acW0acW0ae.071W044W043W0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.
+[  15.537]   43 0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.046W050W051W050W051W050W051W050W051W050W051W056W054W071W0adW0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0adW071W054W056W050W051W050W051W050W051W050W051W050W051W046W0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.
+[  15.537]   44 0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.043W047W061W060W061W060W061W060W061W060W061W061W057W071W0adW0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0adW071W057W060W060W061W060W061W060W061W060W061W060W047W043W0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.
+[  15.537]   45 0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.053W054W048W070W070W070W070W070W070W070W070W070W070W058W0adW0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0adW058W070W070W070W070W070W070W070W070W070W070W048W054W053W0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.
+[  15.537]   46 0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.043W044W071W0ae.0acW0acW0acW0acW0acW0acW0acW0acW0acW0acW0afW0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0afW0acW0acW0acW0acW0acW0acW0acW0acW0acW0acW0ae.071W044W043W0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.
+[  15.537]   47 0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.043W044W071W0adW0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0adW071W044W043W0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.
+[  15.537]   48 0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.053W054W071W0adW0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0adW071W054W053W0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.
+[  15.537]   49 0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.043W044W071W0adW0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0adW071W044W043W0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.
+[  15.537]   50 0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.053W054W071W0adW0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0adW071W054W053W0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.
+[  15.537]   51 0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.043W044W071W0adW0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0adW071W044W043W0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.
+[  15.537]   52 0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.053W054W071W0adW0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0adW071W054W053W0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.
+[  15.537]   53 0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.092W098W0a4W0adW0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0adW0a4W098W092W0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.
+[  15.537]   54 0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.093W099W0a5W0adW0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0adW0a5W099W093W0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.
+[  15.537]   55 0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.092W098W0a4W0ae.0acW0acW0acW0acW0acW0acW0acW0acW0acW0acW0acW0acW0acW0acW0acW0acW0acW0acW0acW0acW0acW0acW0acW0acW0acW0acW0acW0acW0acW0acW0ae.0a4W098W092W0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.
+[  15.537]   56 0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.093W099W0a6.0a3W0a3W0a2W0a3W0a2W0a3W0a2W0a3W070W070W070W070W070W070W00dD016.016.00dD070W070W070W070W070W070W0a2W0a3W0a2W0a3W0a2W0a3W0a2W0a2W0a6.099W093W0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.
+[  15.537]   57 0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.092W09e.096W097W097W096W097W096W097W096W097W060W061W060W061W060W061W008D1efD1efD008D060W061W060W061W060W061W096W097W096W097W096W097W096W096W097W09e.092W0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.
+[  15.537]   58 0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.094.091W090W091W091W090W091W090W091W090W091W050W051W050W051W050W051W0b5.0b6.0b6.0b5.050W051W050W051W050W051W090W091W090W091W090W091W090W090W091W090W094.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.
+[  15.537]   59 0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.
+[  15.537]   60 0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.
+[  15.537]   61 0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.
+[  15.537]   62 0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.0ec.0ed.
+[  15.537]   63 0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.0fc.0fd.
+[  16.459] object masks (room 81): 154 cells, 66 box columns, 0 raised pixels (split), 15 floor colors
+[  18.764] stats: 300 frames, 3D compose 27.363 ms/frame, sprite groups avg 4.0 max 4, tilt 75.0, camera Third person (yaw 0 pitch 62), curve R=3000, past-screen px/frame 13976 (missing 0), source video memory, far sprites avg 2.7 (draw distance 2x, ok), walls on (wall tiles avg 2738), frame 256x224, module=7 area=0x00
+[  28.074] stats: 300 frames, 3D compose 28.383 ms/frame, sprite groups avg 4.0 max 4, tilt 75.0, camera Third person (yaw 0 pitch 62), curve R=3000, past-screen px/frame 14804 (missing 0), source video memory, far sprites avg 3.0 (draw distance 2x, ok), walls on (wall tiles avg 2738), frame 256x224, module=7 area=0x00
+[  37.366] stats: 300 frames, 3D compose 28.311 ms/frame, sprite groups avg 4.0 max 4, tilt 75.0, camera Third person (yaw 0 pitch 62), curve R=3000, past-screen px/frame 14804 (missing 0), source video memory, far sprites avg 3.0 (draw distance 2x, ok), walls on (wall tiles avg 2738), frame 256x224, module=7 area=0x00
+[  46.608] stats: 300 frames, 3D compose 28.251 ms/frame, sprite groups avg 4.0 max 4, tilt 75.0, camera Third person (yaw 0 pitch 62), curve R=3000, past-screen px/frame 14804 (missing 0), source video memory, far sprites avg 3.0 (draw distance 2x, ok), walls on (wall tiles avg 2738), frame 256x224, module=7 area=0x00
+[  56.142] stats: 300 frames, 3D compose 29.248 ms/frame, sprite groups avg 4.0 max 4, tilt 75.0, camera Third person (yaw 88 pitch 66), curve R=3000, past-screen px/frame 13066 (missing 0), source video memory, far sprites avg 3.0 (draw distance 2x, ok), walls on (wall tiles avg 2738), frame 256x224, module=7 area=0x00
+[  65.662] stats: 300 frames, 3D compose 29.200 ms/frame, sprite groups avg 4.0 max 4, tilt 75.0, camera Third person (yaw -24 pitch 61), curve R=3000, past-screen px/frame 11182 (missing 0), source video memory, far sprites avg 3.0 (draw distance 2x, ok), walls on (wall tiles avg 2738), frame 256x224, module=7 area=0x00
+[  73.967] stats: 300 frames, 3D compose 25.179 ms/frame, sprite groups avg 4.0 max 4, tilt 75.0, camera Third person (yaw -24 pitch 61), curve R=3000, past-screen px/frame 11889 (missing 0), source video memory, far sprites avg 3.0 (draw distance 2x, ok), walls on (wall tiles avg 2738), frame 256x224, module=7 area=0x00
+[  82.294] stats: 300 frames, 3D compose 25.224 ms/frame, sprite groups avg 4.0 max 4, tilt 75.0, camera Third person (yaw -24 pitch 61), curve R=3000, past-screen px/frame 11889 (missing 0), source video memory, far sprites avg 3.0 (draw distance 2x, ok), walls on (wall tiles avg 2738), frame 256x224, module=7 area=0x00
+[  93.155] stats: 300 frames, 3D compose 33.591 ms/frame, sprite groups avg 3.6 max 4, tilt 75.0, camera Third person (yaw -160 pitch 66), curve R=3000, past-screen px/frame 11204 (missing 0), source video memory, far sprites avg 2.6 (draw distance 2x, ok), walls on (wall tiles avg 2738), frame 256x224, module=7 area=0x00
+[ 106.555] stats: 300 frames, 3D compose 42.064 ms/frame, sprite groups avg 3.0 max 3, tilt 75.0, camera Third person (yaw -160 pitch 66), curve R=3000, past-screen px/frame 12402 (missing 0), source video memory, far sprites avg 2.0 (draw distance 2x, ok), walls on (wall tiles avg 2738), frame 256x224, module=7 area=0x00
+[ 120.014] stats: 300 frames, 3D compose 42.255 ms/frame, sprite groups avg 3.0 max 3, tilt 75.0, camera Third person (yaw -160 pitch 66), curve R=3000, past-screen px/frame 12402 (missing 0), source video memory, far sprites avg 2.0 (draw distance 2x, ok), walls on (wall tiles avg 2738), frame 256x224, module=7 area=0x00
+[ 133.473] stats: 300 frames, 3D compose 42.237 ms/frame, sprite groups avg 3.0 max 3, tilt 75.0, camera Third person (yaw -160 pitch 66), curve R=3000, past-screen px/frame 12402 (missing 0), source video memory, far sprites avg 2.0 (draw distance 2x, ok), walls on (wall tiles avg 2738), frame 256x224, module=7 area=0x00
+[ 146.910] stats: 300 frames, 3D compose 42.161 ms/frame, sprite groups avg 3.0 max 3, tilt 75.0, camera Third person (yaw -160 pitch 66), curve R=3000, past-screen px/frame 12402 (missing 0), source video memory, far sprites avg 2.0 (draw distance 2x, ok), walls on (wall tiles avg 2738), frame 256x224, module=7 area=0x00
+[ 153.883] room 96 built: 94 objects (walls 36, ceiling 9, doors 6, rails 10, furniture 0, small 2, blocks 1, tall 0, torches 2)
+[ 153.883] room 96: objects read again (it was not built since launch)
+[ 153.886] object masks (room 96): 125 cells, 50 box columns, 0 raised pixels (split), 19 floor colors
+[ 155.598] object masks (room 96): 125 cells, 50 box columns, 0 raised pixels (split), 19 floor colors
+[ 159.699] stats: 300 frames, 3D compose 37.730 ms/frame, sprite groups avg 2.7 max 4, tilt 75.0, camera Third person (yaw -102 pitch 56), curve R=3000, past-screen px/frame 10069 (missing 0), source video memory, far sprites avg 1.5 (draw distance 2x, ok), walls on (wall tiles avg 2403), frame 256x224, module=7 area=0x00
+[ 166.783] stats: 300 frames, 3D compose 21.150 ms/frame, sprite groups avg 1.8 max 3, tilt 75.0, camera Third person (yaw 163 pitch 57), curve R=3000, past-screen px/frame 17732 (missing 0), source video memory, far sprites avg 0.0 (draw distance 2x, ok), walls on (wall tiles avg 2090), frame 256x224, module=7 area=0x00
+[ 173.912] stats: 300 frames, 3D compose 20.697 ms/frame, sprite groups avg 1.0 max 1, tilt 75.0, camera Third person (yaw 17 pitch 36), curve R=3000, past-screen px/frame 8160 (missing 0), source video memory, far sprites avg 0.0 (draw distance 2x, ok), walls on (wall tiles avg 2090), frame 256x224, module=7 area=0x00
+[ 181.359] stats: 300 frames, 3D compose 21.948 ms/frame, sprite groups avg 1.0 max 1, tilt 75.0, camera Third person (yaw -1 pitch 71), curve R=3000, past-screen px/frame 8377 (missing 0), source video memory, far sprites avg 0.0 (draw distance 2x, ok), walls on (wall tiles avg 2090), frame 256x224, module=7 area=0x00
+[ 187.806] room 97 built: 123 objects (walls 41, ceiling 11, doors 7, rails 8, furniture 0, small 0, blocks 0, tall 7, torches 8)
+[ 187.810] object masks (room 97): 188 cells, 46 box columns, 1064 raised pixels (split), 15 floor colors
+[ 187.853] object masks (room 97): 188 cells, 56 box columns, 1048 raised pixels (split), 15 floor colors
+[ 187.901] object masks (room 97): 188 cells, 62 box columns, 496 raised pixels (split), 14 floor colors
+[ 187.947] object masks (room 97): 212 cells, 74 box columns, 256 raised pixels (split), 14 floor colors
+[ 188.001] object masks (room 97): 212 cells, 74 box columns, 256 raised pixels (split), 14 floor colors
+[ 188.055] object masks (room 97): 212 cells, 76 box columns, 192 raised pixels (split), 13 floor colors
+[ 188.117] object masks (room 97): 212 cells, 80 box columns, 64 raised pixels (split), 14 floor colors
+[ 188.168] object masks (room 97): 212 cells, 82 box columns, 0 raised pixels (split), 14 floor colors
+[ 188.221] object masks (room 97): 212 cells, 82 box columns, 0 raised pixels (split), 14 floor colors
+[ 188.275] object masks (room 97): 212 cells, 82 box columns, 0 raised pixels (split), 14 floor colors
+[ 188.327] object masks (room 97): 212 cells, 82 box columns, 0 raised pixels (split), 12 floor colors
+[ 189.482] object masks (room 97): 212 cells, 82 box columns, 0 raised pixels (split), 12 floor colors
+[ 192.304] stats: 300 frames, 3D compose 33.640 ms/frame, sprite groups avg 1.0 max 1, tilt 75.0, camera Third person (yaw -53 pitch 67), curve R=3000, past-screen px/frame 7956 (missing 0), source video memory, far sprites avg 0.0 (draw distance 2x, ok), walls on (wall tiles avg 2295), frame 256x224, module=7 area=0x00
+[ 204.813] stats: 300 frames, 3D compose 38.255 ms/frame, sprite groups avg 1.0 max 1, tilt 75.0, camera Third person (yaw -141 pitch 69), curve R=3000, past-screen px/frame 9738 (missing 0), source video memory, far sprites avg 0.0 (draw distance 2x, ok), walls on (wall tiles avg 2628), frame 256x224, module=7 area=0x00
+[ 216.693] stats: 300 frames, 3D compose 35.901 ms/frame, sprite groups avg 1.0 max 1, tilt 75.0, camera Third person (yaw 6 pitch 77), curve R=3000, past-screen px/frame 8650 (missing 0), source video memory, far sprites avg 0.0 (draw distance 2x, ok), walls on (wall tiles avg 2628), frame 256x224, module=7 area=0x00
+[ 227.972] stats: 300 frames, 3D compose 33.851 ms/frame, sprite groups avg 1.0 max 1, tilt 75.0, camera Third person (yaw 6 pitch 77), curve R=3000, past-screen px/frame 6742 (missing 0), source video memory, far sprites avg 0.0 (draw distance 2x, ok), walls on (wall tiles avg 2628), frame 256x224, module=7 area=0x00
