@@ -1398,16 +1398,18 @@ static int g_fog_shade[3], g_fog_mid[3], g_fog_light[3];
 // densita' calcolata ogni kFogCell pixel e poi interpolata
 enum { kFogCell = 4, kFogMaxW = 160, kFogMaxH = 72 };
 static float g_fog_alpha[kFogMaxH][kFogMaxW];
+// quanto si schiariscono in piu' le nuvole chiare nel Bosco d'Ossa
+static const float kFogDarkWorldLight = 1.8f;
 
 // La nebbia del bosco (del gioco) e' sullo schermo
 static bool ForestFogScene(Ppu *ppu) {
   if (player_is_indoors || ppu->mode == 7)
     return false;
-  // 0x9d: Bosco Perduto prima della Spada Suprema (dopo e' 0x9e, le chiome);
-  // nella Foresta Maledetta (0x40) e' la stessa nebbia, che resta del gioco.
-  // 0x97: bosco della Spada Suprema
+  // 0x9d: Bosco Perduto prima della Spada Suprema (dopo e' 0x9e, le chiome)
+  // e Bosco d'Ossa (0x40, stessa nebbia con i colori del Mondo delle Tenebre,
+  // presi dallo strato come nel Bosco Perduto). 0x97: bosco della Spada Suprema
   uint8 oi = BYTE(overlay_index);
-  if (!(oi == 0x9d && !(overworld_screen_index & 0x40)) && oi != 0x97)
+  if (oi != 0x9d && oi != 0x97)
     return false;
   // come OverlayBegin (hd_world.c): lo strato e' davvero sommato a meta'
   return (ppu->screenEnabled[1] & 1) && !(ppu->screenEnabled[0] & 1) && ppu->addSubscreen &&
@@ -1542,10 +1544,13 @@ void HdFx_Fog(uint8 *pixels, int pitch, int width, int height, int bias_x, int b
   }
   // colori della nebbia a 8 bit, con la luminosita' del gioco: densita' 0 =
   // medio, verso 1 il chiaro, verso -1 lo scuro
+  // nel Bosco d'Ossa (Mondo delle Tenebre) il chiaro dello strato e' poco
+  // distante dal medio: le nuvole chiare si fanno un po' piu' evidenti
   float mid[3], up[3], down[3];
+  float up_k = (overworld_screen_index & 0x40) ? kFogDarkWorldLight : 1.0f;
   for (int c = 0; c < 3; c++) {
     mid[c] = g_fog_mid[c] * 8.25f * bri / 15;
-    up[c] = g_fog_light[c] * 8.25f * bri / 15 - mid[c];
+    up[c] = (g_fog_light[c] * 8.25f * bri / 15 - mid[c]) * up_k;
     down[c] = mid[c] - g_fog_shade[c] * 8.25f * bri / 15;
   }
   for (int y = 0; y < height; y++) {
@@ -1559,7 +1564,10 @@ void HdFx_Fog(uint8 *pixels, int pitch, int width, int height, int bias_x, int b
       int gx = x / kFogCell;
       if (gx + 1 >= gw)
         break;
-      if (IsHud(row[x]))
+      // solo dove la PPU somma lo strato: non l'HUD ne' gli sprite con le
+      // palette 0-3 (layer 6), che nell'originale restano fuori dalla nebbia
+      uint32 l = row[x] >> 24;
+      if (l == 2 || l == 6 || (l < 6 && !(g_fog_saved_math >> l & 1)))
         continue;
       float fx = (float)(x - gx * kFogCell) * (1.0f / kFogCell);
       float top = a0[gx] + (a0[gx + 1] - a0[gx]) * fx, bot = a1[gx] + (a1[gx + 1] - a1[gx]) * fx;
