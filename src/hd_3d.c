@@ -690,7 +690,7 @@ static void Cam_Setup(Cam *cm, int w, int h) {
 }
 
 // Third person: behind Link at (lx, ly) on the ground (frame coordinates)
-static void Cam_SetupThird(Cam *cm, int w, int h, float lx, float ly) {
+static void Cam_SetupThird(Cam *cm, int w, int h, float lx, float ly, float lz) {
   float th = g_pitch3 * (3.14159265f / 180.0f);
   float hx = sinf(g_yaw), hy = -cosf(g_yaw);
   cm->F = kCamDist;
@@ -700,7 +700,7 @@ static void Cam_SetupThird(Cam *cm, int w, int h, float lx, float ly) {
   cm->tx = lx, cm->ty = ly;
   // aim a little ahead of Link and at his chest, so he stands in the lower
   // half of the screen with the way ahead open
-  float ax = lx + hx * kThirdAhead, ay = ly + hy * kThirdAhead, az = kThirdAimZ;
+  float ax = lx + hx * kThirdAhead, ay = ly + hy * kThirdAhead, az = kThirdAimZ + lz;
   cm->ox = ax - cm->fx * kThirdDist, cm->oy = ay - cm->fy * kThirdDist, cm->oz = az - cm->fz * kThirdDist;
 }
 
@@ -943,6 +943,15 @@ static uint8 g_praise[512 * 512];// object cells: height of this pixel, 0 = floo
 static uint8 g_pdown[512 * 512]; // object cells: rows from this pixel down to its column's front (face base)
 static uint8 g_pcol[512 * 512];  // object cells: cgram index shown (scratch for BuildPixelMasks)
 static uint32 g_mask_hash;       // tiles the masks were built for
+// Two floor levels (see BuildHeightMap): the floor height of each cell, the
+// room's upper level height and the tallest surface (where rays start)
+static uint8 g_hfloor[64 * 64];
+static uint8 g_lower[64 * 64];   // 1 = BG2 has a hole there: the cell shows BG1
+static uint8 g_upper[64 * 64];   // 1 = on the upper floor
+static bool g_two_levels;
+static int g_level_h, g_hmax = kWallMax;
+static int g_org_x, g_org_y;     // ground origin of the last 3D frame (room pixel of frame pixel 0, 0)
+static float g_aim_floor;        // third person: floor height under Link, eased
 static bool g_depth_valid;
 static int g_stat_wall_cells;
 
@@ -963,13 +972,14 @@ enum {
   kCls_Block,      // blocks, pegs, big chests
   kCls_Tall,       // statues, columns
   kCls_Torch,
+  kCls_Pot,        // big pots (4x4)
   kCls_Count,
 };
-static const char kClsLetter[kCls_Count] = { '.', 'W', 'C', 'D', 'r', 'f', 'o', 'b', 'T', 't' };
+static const char kClsLetter[kCls_Count] = { '.', 'W', 'C', 'D', 'r', 'f', 'o', 'b', 'T', 't', 'P' };
 static const char *const kClsName[kCls_Count] = {
-  "floor", "wall", "ceiling", "door", "rail", "furniture", "small", "block", "tall", "torch",
+  "floor", "wall", "ceiling", "door", "rail", "furniture", "small", "block", "tall", "torch", "bigpot",
 };
-static const uint8 kClsHeight[kCls_Count] = { 0, kWallMax, kWallMax, kWallMax, 8, 12, 10, 16, 28, 14 };
+static const uint8 kClsHeight[kCls_Count] = { 0, kWallMax, kWallMax, kWallMax, 8, 12, 10, 16, 28, 14, 20 };
 
 // Object ids and names from the comments in dungeon.c (LoadType1ObjectSubtype1/2/3)
 static int ObjectClass(int code) {
@@ -1005,6 +1015,8 @@ static int ObjectClass(int code) {
       return kCls_Furniture;
     if (id == 0x20)
       return kCls_Torch;
+    if (id == 0x1c)
+      return kCls_Pot;   // drawn like the 4x4 wall corners, collision 0x27
     return kCls_Floor;
   case kHd3d_ObjSubtype3:
     if (id <= 0x02 || id == 0x0d || id == 0x17 || id == 0x18 || id == 0x69 || id == 0x6a || id == 0x6e || id == 0x6f)
@@ -1261,13 +1273,15 @@ void Hd3d_RequestRoomDump(void) {
     LoadTileOverrides();
 }
 
-// Tallest class of the cell's two layers: by tile number (hd3d_tiles.txt,
-// then the seed), else by the object that drew it (objects = that info is
-// for this room)
-static int CellClass(int cell, bool objects, uint8 *layer) {
+// Tallest class of the cell's two layers (or of layer `only`: 0 = BG2,
+// 1 = BG1, -1 = both): by tile number (hd3d_tiles.txt, then the seed), else
+// by the object that drew it (objects = that info is for this room)
+static int CellClass(int cell, bool objects, uint8 *layer, int only) {
   int best = kCls_Floor;
-  *layer = 0;
+  *layer = only > 0 ? 1 : 0;
   for (int l = 0; l < 2; l++) {
+    if (only >= 0 && l != only)
+      continue;
     int t = (l ? dung_bg1 : dung_bg2)[cell] & 0x3ff;
     int k = g_tile_override[t] ? g_tile_override[t] : g_tile_cls[t];
     int o = g_tile_obj[l][cell];
@@ -1305,6 +1319,8 @@ static char TileClassLetter(int t, int *pct) {
 // both layers' tile numbers, the class, the height, both collision tables
 // (the game keeps one per layer: bridges, stairs and the floor under them
 // differ there) and what the object mask did
+static bool Bg2Only(Ppu *ppu);
+
 static void RoomDumpAroundLink(const uint8 *cls) {
   int lx = ((link_x_coord + 8) >> 3) & 63, ly = ((link_y_coord + 20) >> 3) & 63;
   Ppu *ppu = g_zenv.ppu;
@@ -1312,6 +1328,12 @@ static void RoomDumpAroundLink(const uint8 *cls) {
            "main screen %02x sub screen %02x color math %02x %s", lx, ly, link_x_coord, link_y_coord, link_z_coord,
            link_is_on_lower_level ? "lower" : "upper", dung_hdr_bg2_properties, ppu->screenEnabled[0],
            ppu->screenEnabled[1], ppu->mathEnabled, ppu->subtractColor ? "subtract" : "add");
+  int holes = 0, upper = 0;
+  for (int i = 0; i < 64 * 64; i++)
+    holes += g_lower[i], upper += g_upper[i];
+  Hd3d_Log("  two floor levels: %s (%s; %d upper cells, upper floor at %d px; Link's floor %d px), %s",
+           g_two_levels ? "yes" : "no", holes ? "BG1 under BG2's holes" : "one layer, ledges", upper, g_level_h,
+           g_hfloor[ly * 64 + lx], Bg2Only(ppu) ? "BG1 only through BG2's holes" : "BG1 on the main screen");
   Hd3d_Log("  each cell: BG2 tile/BG1 tile, class letter (capital = from BG1), height in px, collision BG2/BG1, "
            "mask (- whole cell, m object with raised pixels, F object flattened by the floor flood); [ ] = Link");
   for (int y = ly - 7; y <= ly + 7; y++) {
@@ -1401,7 +1423,7 @@ static void RoomDump(const uint8 *attr, const uint8 *cls) {
   }
   Hd3d_Log("  %d object cells flattened by the floor flood", flat_cells);
   Hd3d_Log("  class map, then heights (64x64 tiles of 8 px; . floor W wall C ceiling D door r rail f furniture "
-           "o small b block T tall t torch; w = wall tile that is walkable for the game; heights in 8 px):");
+           "o small b block T tall t torch P big pot; w = wall tile that is walkable for the game; heights in 8 px):");
   char line[3 * 64 + 8];
   for (int y = 0; y < 64; y++) {
     int n = 0;
@@ -1444,11 +1466,16 @@ static void RoomDump(const uint8 *attr, const uint8 *cls) {
   }
 }
 
-// cgram index of room pixel (wx, wy) as shown: BG1 over BG2
+// cgram index of room pixel (wx, wy) as shown: BG1 over BG2, or in rooms
+// with BG1 on the sub screen only, BG1 through BG2's see-through pixels
 static int RoomPixel(Ppu *ppu, int wx, int wy) {
   int c = ((wy >> 3) & 63) * 64 + ((wx >> 3) & 63);
   int col = wx & 7, row = wy & 7;
-  int p = (ppu->screenEnabled[0] & 1) ? TileWordPixel(ppu, 0, dung_bg1[c], col, row) : 0;
+  if (!(ppu->screenEnabled[0] & 1)) {
+    int p = TileWordPixel(ppu, 1, dung_bg2[c], col, row);
+    return p || !(ppu->screenEnabled[1] & 1) ? p : TileWordPixel(ppu, 0, dung_bg1[c], col, row);
+  }
+  int p = TileWordPixel(ppu, 0, dung_bg1[c], col, row);
   return p ? p : TileWordPixel(ppu, 1, dung_bg2[c], col, row);
 }
 
@@ -1471,7 +1498,7 @@ static bool IsMaskedClass(int c) {
 static void BuildPixelMasks(Ppu *ppu, const uint8 *cls) {
   uint32 hash = 2166136261u;
   for (int i = 0; i < 64 * 64; i++)
-    hash = (hash ^ dung_bg2[i] ^ (uint32)dung_bg1[i] << 16 ^ (uint32)g_hmap[i] << 8) * 16777619u;
+    hash = (hash ^ dung_bg2[i] ^ (uint32)dung_bg1[i] << 16 ^ (uint32)g_hmap[i] << 8 ^ (uint32)g_hfloor[i] << 24) * 16777619u;
   hash ^= ppu->screenEnabled[0] & 1;
   // built when the room's tiles change, and again half a second later: the
   // room's graphics may still be loading on the first frames (video memory
@@ -1486,17 +1513,25 @@ static void BuildPixelMasks(Ppu *ppu, const uint8 *cls) {
   int partial = 0;
   for (int c = 0; c < 64 * 64; c++) {
     int t = (g_hlayer[c] ? dung_bg1 : dung_bg2)[c] & 0x3ff;
-    if (g_hmap[c] && IsMaskedClass(cls[c]) && !g_tile_full[t])
+    if (g_hmap[c] > g_hfloor[c] && IsMaskedClass(cls[c]) && !g_tile_full[t])
       g_partial[c] = 1, partial++;
   }
   if (!partial)
     return;
-  // floor colors: at least 0.5% of the flat floor's pixels
+  // floor colors: at least 0.5% of the floor's pixels. Only the floor
+  // patterns count (tiles repeated over at least 12 flat cells), not the
+  // flat things that are drawn once or twice (unknown objects, stairs,
+  // doors): their colors made the flood eat the columns
+  static uint16 uses[0x400];
+  memset(uses, 0, sizeof(uses));
+  for (int c = 0; c < 64 * 64; c++)
+    if (g_hmap[c] == g_hfloor[c])
+      uses[(g_hlayer[c] ? dung_bg1 : dung_bg2)[c] & 0x3ff]++;
   static uint32 count[128];
   memset(count, 0, sizeof(count));
   uint32 total = 0;
   for (int c = 0; c < 64 * 64; c++) {
-    if (g_hmap[c])
+    if (g_hmap[c] != g_hfloor[c] || uses[(g_hlayer[c] ? dung_bg1 : dung_bg2)[c] & 0x3ff] < 12)
       continue;
     int wx = (c & 63) * 8, wy = (c >> 6) * 8;
     for (int k = 0; k < 64; k++)
@@ -1515,7 +1550,7 @@ static void BuildPixelMasks(Ppu *ppu, const uint8 *cls) {
     int wx = (c & 63) * 8, wy = (c >> 6) * 8;
     for (int k = 0; k < 64; k++) {
       int x = wx + (k & 7), y = wy + (k >> 3), i = y * 512 + x;
-      g_praise[i] = g_hmap[c];
+      g_praise[i] = (uint8)(g_hmap[c] - g_hfloor[c]);   // above its floor
       g_pcol[i] = (uint8)RoomPixel(ppu, x, y);
     }
   }
@@ -1532,7 +1567,7 @@ static void BuildPixelMasks(Ppu *ppu, const uint8 *cls) {
       for (int d = 0; d < 4; d++) {
         int nx = (x + kDx[d]) & 511, ny = (y + kDy[d]) & 511;
         int nc = (ny >> 3) * 64 + (nx >> 3);
-        if (!g_partial[nc] && !g_hmap[nc]) {
+        if (!g_partial[nc] && g_hmap[nc] == g_hfloor[nc]) {
           g_praise[i] = 0, queue[qn++] = (uint32)i;
           break;
         }
@@ -1582,22 +1617,129 @@ static void BuildPixelMasks(Ppu *ppu, const uint8 *cls) {
            colors);
 }
 
+// Two floor levels, drawn two ways:
+// - on two layers: the upper floor on BG2, the only layer on the main
+//   screen, the lower one on BG1, seen through BG2's see-through tiles
+//   (those cells have collision 0x1c in the BG2 table, their own collision
+//   is in BG1's). A cell is lower where BG2 has a hole;
+// - on one layer (the castle lobby): the upper floor ends in a ledge
+//   (collision 0x28, the lip you jump down from) above a cliff drawn as a
+//   north wall. The upper floor is what is reached from the cells north of
+//   the ledges without crossing a wall, a ledge or stairs.
+// Either way the cliffs (lower walls just south of the upper floor) set the
+// height: the upper floor is raised by the commonest cliff height and the
+// cliffs are made exactly that tall. Stairs between the two are a ramp.
+//
+// When BG1 is not on the main screen it only shows through BG2's holes, so
+// elsewhere only BG2 counts (BG1 there is hidden: walls under the floor).
+static bool Bg2Only(Ppu *ppu) {
+  return !(ppu->screenEnabled[0] & 1);
+}
+
+static void FindHoles(Ppu *ppu) {
+  memset(g_lower, 0, sizeof(g_lower));
+  if (!Bg2Only(ppu) || !(ppu->screenEnabled[1] & 1))
+    return;
+  for (int i = 0; i < 64 * 64; i++)
+    g_lower[i] = dung_bg2_attr_table[i] == 0x1c;
+}
+
+static bool IsStairsAttr(uint8 a) {
+  return a >= 0x1d && a <= 0x1f;
+}
+
+static bool IsLedgeAttr(uint8 a) {
+  return a >= 0x28 && a <= 0x2b;
+}
+
+static void FindUpper(const uint8 *attr, const uint8 *cls) {
+  memset(g_upper, 0, sizeof(g_upper));
+  int holes = 0;
+  for (int i = 0; i < 64 * 64; i++)
+    holes += g_lower[i];
+  if (holes) {
+    for (int i = 0; i < 64 * 64; i++)
+      g_upper[i] = !g_lower[i];
+    g_two_levels = true;
+    return;
+  }
+  // one layer: flood from the cells north of the ledges
+  static uint16 queue[64 * 64];
+  int qn = 0, walkable = 0;
+  #define BARRIER(i) (IsWallClass(cls[i]) || IsWallAttr(attr[i]) || IsLedgeAttr(attr[i]) || IsStairsAttr(attr[i]))
+  for (int i = 0; i < 64 * 64; i++) {
+    walkable += !BARRIER(i);
+    if (attr[i] == 0x28 && i >= 64 && !BARRIER(i - 64) && !g_upper[i - 64])
+      g_upper[i - 64] = 1, queue[qn++] = (uint16)(i - 64);
+  }
+  for (int q = 0; q < qn; q++) {
+    int x = queue[q] & 63, y = queue[q] >> 6;
+    static const int kDx[4] = { 1, -1, 0, 0 }, kDy[4] = { 0, 0, 1, -1 };
+    for (int d = 0; d < 4; d++) {
+      int nx = x + kDx[d], ny = y + kDy[d];
+      if (nx < 0 || nx > 63 || ny < 0 || ny > 63)
+        continue;
+      int n = ny * 64 + nx;
+      if (!g_upper[n] && !BARRIER(n))
+        g_upper[n] = 1, queue[qn++] = (uint16)n;
+    }
+  }
+  #undef BARRIER
+  // the flood leaked around the ledges (the "upper" floor is most of the
+  // room) or found nothing worth raising: one level
+  if (qn < 8 || qn * 10 > walkable * 7) {
+    memset(g_upper, 0, sizeof(g_upper));
+    qn = 0;
+  }
+  g_two_levels = qn > 0;
+}
+
+static int LevelHeight(const uint8 *cls) {
+  int hist[9] = { 0 };
+  for (int cx = 0; cx < 64; cx++) {
+    for (int cy = 1; cy < 64; cy++) {
+      int c = cy * 64 + cx;
+      if (g_upper[c] || !g_upper[c - 64] || !IsWallClass(cls[c]) || cls[c] == kCls_Ceiling)
+        continue;
+      int len = 0;
+      while (cy < 64 && !g_upper[cy * 64 + cx] && IsWallClass(cls[cy * 64 + cx]))
+        len++, cy++;
+      hist[len > 8 ? 8 : len]++;
+    }
+  }
+  int best = 3;
+  for (int k = 2; k <= 6; k++)
+    if (hist[k] > hist[best]) best = k;
+  return best * 8;
+}
+
 static void BuildHeightMap(void) {
   // the table of the layer Link is on, as the game's tile detection reads it
-  const uint8 *attr = dung_bg2_attr_table + (link_is_on_lower_level ? 0x1000 : 0);
+  const uint8 *link_attr = dung_bg2_attr_table + (link_is_on_lower_level ? 0x1000 : 0);
   if (!g_tiles_ready)
     SeedTileClasses();
-  if (g_room_id != dungeon_room_index)
+  if (g_room_id != dungeon_room_index && main_module_index == 7 && submodule_index == 0)
     CaptureRoomObjects();
   bool objects = g_room_id == dungeon_room_index && g_n_room_objs > 0;
+  Ppu *ppu = g_zenv.ppu;
+  FindHoles(ppu);
+  bool bg2_only = Bg2Only(ppu);
+  // each cell's collision and class: of the layer it shows when BG1 is
+  // only seen through BG2's holes, else of Link's layer and both layers
+  uint8 attr[64 * 64];
+  for (int i = 0; i < 64 * 64; i++)
+    attr[i] = !bg2_only ? link_attr[i] : g_lower[i] ? dung_bg1_attr_table[i] : dung_bg2_attr_table[i];
   uint8 cls[64 * 64];
   int cells = 0;
   for (int i = 0; i < 64 * 64; i++) {
-    cls[i] = (uint8)CellClass(i, objects, &g_hlayer[i]);
+    cls[i] = (uint8)CellClass(i, objects, &g_hlayer[i], !bg2_only ? -1 : g_lower[i] ? 1 : 0);
     // decorations drawn on a wall (shelves, the pot rack, bars...) are wall
     if (cls[i] == kCls_Floor && IsWallAttr(attr[i]))
       cls[i] = kCls_Wall;
   }
+  FindUpper(attr, cls);
+  bool two = g_two_levels;
+  g_level_h = two ? LevelHeight(cls) : 0;
   // Wall tiles: the wall objects' tiles. Only the top rows of a north wall
   // are solid for the game; its painted face below them is walkable, but it
   // is part of the wall and stands up with it. A run of wall tiles with no
@@ -1621,7 +1763,7 @@ static void BuildHeightMap(void) {
       if (wall[c]) {
         int y0 = cy;
         bool any_solid = false;
-        while (cy < 64 && wall[cy * 64 + cx])
+        while (cy < 64 && wall[cy * 64 + cx] && g_upper[cy * 64 + cx] == g_upper[c])
           any_solid |= IsWallAttr(attr[cy * 64 + cx]), cy++;
         if (!any_solid)
           continue;   // a doorway: walkable all the way
@@ -1629,7 +1771,9 @@ static void BuildHeightMap(void) {
         bool floor_s = cy < 64 && !solid[cy * 64 + cx];
         int hgt = (cy - y0) * 8;
         bool fold = true;
-        if (floor_n && !floor_s) {
+        if (two && !g_upper[c] && y0 > 0 && g_upper[(y0 - 1) * 64 + cx]) {
+          hgt = g_level_h;                 // the cliff up to the upper floor
+        } else if (floor_n && !floor_s) {
           hgt = 16, fold = false;          // south wall: we look at its top
         } else if (!floor_s) {
           if (hgt > 32) hgt = 32;          // side walls (run to the next wall)
@@ -1644,7 +1788,7 @@ static void BuildHeightMap(void) {
       if (k != kCls_Floor && !IsWallClass(k)) {
         // an object: as tall as its class (or its depth, if smaller)
         int y0 = cy;
-        while (cy < 64 && cls[cy * 64 + cx] == k)
+        while (cy < 64 && cls[cy * 64 + cx] == k && g_upper[cy * 64 + cx] == g_upper[c])
           cy++;
         int hgt = (cy - y0) * 8;
         if (hgt > kClsHeight[k]) hgt = kClsHeight[k];
@@ -1677,8 +1821,40 @@ static void BuildHeightMap(void) {
       cells += cy - y0;
     }
   }
+  // the upper floor and everything on it; stairs down from it are a ramp
+  uint8 floor_h[64 * 64];
+  for (int i = 0; i < 64 * 64; i++)
+    floor_h[i] = two && g_upper[i] ? (uint8)g_level_h : 0;
+  if (two) {
+    for (int cx = 0; cx < 64; cx++) {
+      for (int cy = 1; cy < 64; cy++) {
+        int c = cy * 64 + cx;
+        if (g_upper[c] || !g_upper[c - 64] || !IsStairsAttr(attr[c]))
+          continue;
+        int y0 = cy, n = 0;
+        while (cy < 64 && IsStairsAttr(attr[cy * 64 + cx]))
+          n++, cy++;
+        for (int k = 0; k < n; k++) {
+          int r = (y0 + k) * 64 + cx;
+          floor_h[r] = (uint8)(g_level_h * (n - k) / (n + 1));
+          g_hmap[r] = 0;   // a step, not a wall
+        }
+      }
+    }
+  }
+  g_hmax = 0;
+  for (int i = 0; i < 64 * 64; i++) {
+    int f = floor_h[i];
+    g_hfloor[i] = (uint8)f;
+    if (f) {
+      if (!g_hmap[i])
+        g_hfold[i] = 0;   // flat upper floor: its art is under it
+      g_hmap[i] = (uint8)(g_hmap[i] + f > 255 ? 255 : g_hmap[i] + f);
+    }
+    if (g_hmap[i] > g_hmax) g_hmax = g_hmap[i];
+  }
   g_stat_wall_cells += cells;
-  BuildPixelMasks(g_zenv.ppu, cls);
+  BuildPixelMasks(ppu, cls);
   if (g_room_dump_request) {
     g_room_dump_request = false;
     if (!objects)
@@ -1752,6 +1928,7 @@ static inline bool HitBox(const Cam *cm, const float *d, float t0, float t1, flo
 // the object pixels of cell (cx, cy) between t0 and t1
 static bool CastPixels(const Cam *cm, const float *d, float px0, float py0, float t0, float t1, int cx, int cy,
                        int entered, WallHit *hit) {
+  int floor_h = g_hfloor[(cy & 63) * 64 + (cx & 63)];
   float x = px0 + t0 * d[0], y = py0 + t0 * d[1];
   int x0 = cx * 8, y0 = cy * 8;
   int ix = (int)floorf(x), iy = (int)floorf(y);
@@ -1767,7 +1944,8 @@ static bool CastPixels(const Cam *cm, const float *d, float px0, float py0, floa
     float te = nx < ny ? nx : ny;
     if (te > t1) te = t1;
     int i = (iy & 511) * 512 + (ix & 511);
-    if (g_praise[i] && HitBox(cm, d, t, te, g_praise[i], entered, hit)) {
+    int H = floor_h + g_praise[i];
+    if (H && HitBox(cm, d, t, te, (float)H, entered, hit)) {
       hit->pix = i;
       return true;
     }
@@ -1788,7 +1966,7 @@ static bool CastPixels(const Cam *cm, const float *d, float px0, float py0, floa
 static bool CastWalls(const Cam *cm, const Ground *gr, const float *d, float t_end, WallHit *hit) {
   if (d[2] >= 0)
     return false;
-  float t = cm->oz > kWallMax ? (kWallMax - cm->oz) / d[2] : 0.0f;
+  float t = cm->oz > g_hmax ? (g_hmax - cm->oz) / d[2] : 0.0f;
   if (t >= t_end)
     return false;
   // room pixel coordinates along the ray: (px0, py0) + t * d
@@ -1842,11 +2020,22 @@ static bool ShadeWall(const Ground *gr, const WallHit *h, uint32 *out, float *fu
   case kFace_North: iy += 0.5f; break;
   }
   int c = h->cell;
-  float H = h->pix >= 0 ? g_praise[h->pix] : g_hmap[c];
-  float z = h->z < 0 ? 0 : h->z > H ? H : h->z;
+  // heights above the cell's own floor (the upper level is raised whole)
+  float f = g_hfloor[c];
+  bool floor_pix = h->pix >= 0 && !g_praise[h->pix];
+  float H = floor_pix ? 0 : h->pix >= 0 ? g_praise[h->pix] : g_hmap[c] - f;
+  float z = h->z - f;
+  z = z < 0 ? 0 : z > H ? H : z;
   float au = ix, av = iy;
   int shade = 256;
-  if (h->pix >= 0) {
+  if (floor_pix || H <= 0) {
+    // the raised floor itself: its art under it, the edge rows down its sides
+    switch (h->face) {
+    case kFace_Top: break;
+    case kFace_South: av = iy - fmodf(f - h->z > 0 ? f - h->z : 0, 8.0f), shade = 200; break;
+    default: shade = 160; break;
+    }
+  } else if (h->pix >= 0) {
     // object pixel: its column's face stands at its front, g_pdown rows south
     float base = floorf(iy) + g_pdown[h->pix] + 1.0f;
     switch (h->face) {
@@ -1872,7 +2061,7 @@ static bool ShadeWall(const Ground *gr, const WallHit *h, uint32 *out, float *fu
     // flat top (south wall, ceiling): its south rows repeat down the face
     switch (h->face) {
     case kFace_Top: break;
-    case kFace_South: av = iy - fmodf(H - z, 8.0f), shade = 200; break;
+    case kFace_South: av = iy - fmodf(f + H - h->z > 0 ? f + H - h->z : 0, 8.0f), shade = 200; break;
     default: shade = 160; break;
     }
   }
@@ -1923,6 +2112,14 @@ static void DrawTerrain(uint32 *out, int pitch_px, const Cam *cm, const Ground *
       dst[x] = px;
     }
   }
+}
+
+// floor height under frame point (u, v) in the last 3D frame with walls
+static float FloorUnder(float u, float v) {
+  if (!g_depth_valid || !g_two_levels)
+    return 0.0f;
+  int wx = g_org_x + (int)floorf(u), wy = g_org_y + (int)floorf(v);
+  return g_hfloor[((wy >> 3) & 63) * 64 + ((wx >> 3) & 63)];
 }
 
 typedef struct Group {
@@ -2243,7 +2440,7 @@ static int DrawSprites(uint32 *out, int pitch_px, const Cam *cm, Ppu *ppu) {
     GroupAnchor(g, ppu);
     g->key = g->key << 8 | i;
     float sx, sy, sc;
-    g->depth = Cam_ToScreen(cm, g->ax, g->ay, &sx, &sy, &sc) ? cm->F / sc : -1.0f;
+    g->depth = Cam_ToScreenH(cm, g->ax, g->ay, FloorUnder(g->ax, g->ay), &sx, &sy, &sc) ? cm->F / sc : -1.0f;
   }
   qsort(groups, n, sizeof(Group), CompareGroups);
 
@@ -2252,7 +2449,7 @@ static int DrawSprites(uint32 *out, int pitch_px, const Cam *cm, Ppu *ppu) {
     int id = (g->key & 0xff) + 1;
     float ax = g->ax, ay = g->ay;   // feet
     float sx, sy, sc;
-    if (!Cam_ToScreen(cm, ax, ay, &sx, &sy, &sc)) {
+    if (!Cam_ToScreenH(cm, ax, ay, FloorUnder(ax, ay), &sx, &sy, &sc)) {
       if (dump)
         Hd3d_Log("  group key=%d far=%d box=(%d,%d)-(%d,%d): NOT DRAWN (behind the camera)", g->key >> 8, g->far,
                  g->x0, g->y0, g->x1, g->y1);
@@ -2333,6 +2530,7 @@ void Hd3d_EndFrame(uint8 *pixels, int pitch, int width, int height) {
 
   Ground gr;
   Ground_Setup(&gr, g_zenv.ppu, width);
+  g_org_x = gr.org_x, g_org_y = gr.org_y;
   Cam cm;
   if (g_view3d_cam == kHd3d_CamThird) {
     // Link's feet in frame coordinates, placed the way his sprite is (OAM
@@ -2343,7 +2541,9 @@ void Hd3d_EndFrame(uint8 *pixels, int pitch, int width, int height) {
     Ppu *ppu = g_zenv.ppu;
     float lx = (int16)(link_x_coord - BG2HOFS_copy2) - ppu->objBiasX + ppu->extraLeftRight + 8.0f;
     float ly = (int16)(link_y_coord - BG2VOFS_copy2) - ppu->objBiasY + 20.0f;
-    Cam_SetupThird(&cm, width, height, lx, ly);
+    // aim at the floor he stands on (eased when he changes level)
+    g_aim_floor += (FloorUnder(lx, ly + 4.0f) - g_aim_floor) * 0.15f;
+    Cam_SetupThird(&cm, width, height, lx, ly, g_aim_floor);
   } else {
     Cam_Setup(&cm, width, height);
   }
