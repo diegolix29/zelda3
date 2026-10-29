@@ -2619,16 +2619,18 @@ static void GroupAnchor(Group *g, Ppu *ppu) {
 // the front to the back, top = drawing rows shown on the top (the rest stand
 // up on the front, at one row per pixel). on_wall: painted on a north
 // wall's face in 2D, so it sticks out `depth` pixels from that face, at the
-// height the wall's art puts it (a cutout stood inside the wall, hidden)
-static const struct { uint8 type, depth, top, on_wall; } kSolidSprites[] = {
-  { 0xee, 8, 4, 0 },     // movable mantle (Hyrule Castle throne room)
-  { 0x1c, 12, 6, 0 },    // movable statue
-  { 0x38, 12, 6, 0 },    // eye statue
-  { 0x57, 12, 6, 0 },    // desert palace statue
-  { 0x8a, 12, 6, 0 },    // spike block
-  { 0xf2, 12, 6, 0 },    // medallion tablet
-  { 0x04, 3, 0, 1 },     // pull switches on a north wall (pulled down)
-  { 0x06, 3, 0, 1 },
+// height the wall's art puts it (a cutout stood inside the wall, hidden).
+// e: only that sprite_E (a sprite type shared by several things), 0xff = any
+static const struct { uint8 type, e, depth, top, on_wall; } kSolidSprites[] = {
+  { 0xee, 0xff, 8, 4, 0 },     // movable mantle (Hyrule Castle throne room)
+  { 0x73, 2, 8, 4, 0 },        // sanctuary mantle (0x73 is also the uncle and the priest)
+  { 0x1c, 0xff, 12, 6, 0 },    // movable statue
+  { 0x38, 0xff, 12, 6, 0 },    // eye statue
+  { 0x57, 0xff, 12, 6, 0 },    // desert palace statue
+  { 0x8a, 0xff, 12, 6, 0 },    // spike block
+  { 0xf2, 0xff, 12, 6, 0 },    // medallion tablet
+  { 0x04, 0xff, 3, 0, 1 },     // pull switches on a north wall (pulled down)
+  { 0x06, 0xff, 3, 0, 1 },
 };
 
 // on_wall sprites: the face of the folded wall the drawing is painted on,
@@ -2653,7 +2655,7 @@ static int SolidSprite(int key) {
   if (slot < 0 || !sprite_state[slot])
     return -1;
   for (int i = 0; i < (int)(sizeof(kSolidSprites) / sizeof(kSolidSprites[0])); i++)
-    if (kSolidSprites[i].type == sprite_type[slot])
+    if (kSolidSprites[i].type == sprite_type[slot] && (kSolidSprites[i].e == 0xff || kSolidSprites[i].e == sprite_E[slot]))
       return i;
   return -1;
 }
