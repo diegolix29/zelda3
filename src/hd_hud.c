@@ -15,8 +15,11 @@
 #include "features.h"
 #include "config.h"
 #include "hud.h"
+#include "assets.h"
 #include "snes/ppu.h"
 #include "player.h"
+#include "messaging.h"
+#include "util.h"
 
 const uint16 *Hud_GetItemIconTiles(int item);
 const uint16 *Hud_GetSwordIconTiles(void);
@@ -758,4 +761,367 @@ void HdHud_Draw(uint8 *pixels, int pitch, int width, int height, int scale) {
     TimerText(frames, band), DrawBand(&cv, W / 2, top, band);
   else if (FloorText(band))
     DrawBand(&cv, W / 2, top, band);
+}
+
+// ---------------------------------------------------------------------------
+// Testo moderno dei dialoghi (opzione ModernText): al posto del riquadro
+// originale una fascia scura trasparente come quella del contatore, con
+// caratteri chiari e dritti dello stesso stile (hd_text_font.h, disegnati da
+// zero con tools/zelda3-script/hud_art/testo.js). Il gioco scrive il messaggio
+// come sempre (scorrimento, scelte): qui a ogni fotogramma si ricostruiscono
+// dalla RAM le tre righe gia' scritte e si ridisegnano col carattere nuovo,
+// andando a capo dove va a capo il gioco. La telepatia (messaggio senza
+// riquadro) resta senza fascia. I tasti A B X Y sono cerchi colorati con la
+// lettera ritagliata, la faccia di Link e' la testa del suo sprite; solo i cuori (mai usati
+// nei dialoghi italiani) si disegnano dal font del gioco.
+
+#include "hd_text_font.h"
+
+enum {
+  kMtLines = 3, kMtSlots = 64, kMtSpace = 89,
+  kMtPitch = 12, kMtPadX = 10, kMtPadY = 6, kMtRadius = 5,
+  kMtBoxW = 24, kMtBoxH = 8,  // riquadro originale in caselle
+};
+static uint8 g_mt_chars[kMtLines][kMtSlots], g_mt_len[kMtLines];
+static bool g_mt_border = true;
+// Comparsa morbida: ogni carattere ha il suo numero d'ordine (g_mt_seq) e
+// compare quando g_mt_reveal lo raggiunge, sfumando in kMtFadeFrames
+// fotogrammi; g_mt_reveal avanza di kMtRevealStep caratteri per fotogramma
+// senza superare quelli gia' scritti dal gioco (g_mt_written)
+// (velocita' presa dal video di riferimento, 11:12-11:18: circa 75 lettere al
+// secondo, ognuna si accende in 3 fotogrammi)
+static const float kMtRevealStep = 1.25f, kMtFadeFrames = 3;
+static int g_mt_seq[kMtLines][kMtSlots], g_mt_written;
+// posizione di ogni carattere nella riga, fissata quando il gioco lo scrive:
+// una scelta riscrive solo il cursore e gli spazi davanti, le parole restano
+static uint8 g_mt_x[kMtLines][kMtSlots];
+static float g_mt_reveal;
+// caselle del riquadro originale nascoste mentre disegna la PPU; quelle
+// lasciate (icona dell'oggetto da scegliere) restano visibili anche nella fascia
+static uint16 g_mt_saved[kMtBoxH][kMtBoxW];
+static uint32 g_mt_kept[kMtBoxH];
+static bool g_mt_hidden;
+
+// Il carattere nuovo esiste per l'alfabeto inglese e per l'italiano
+static bool ModernTextAlphabet(void) {
+  const char *l = g_config.language;
+  return !l || !*l || StringEqualsNoCase(l, "us") || StringEqualsNoCase(l, "it") ||
+         StringEqualsNoCase(l, "redux");
+}
+
+bool HdText_ModernActive(void) {
+  return g_config.modern_text && main_module_index == 14 && submodule_index == 2 && ModernTextAlphabet();
+}
+
+static void MtClearLine(int line) {
+  memset(g_mt_chars[line], kMtSpace, kMtSlots);
+  memset(g_mt_seq[line], 0, sizeof(g_mt_seq[line]));
+  memset(g_mt_x[line], 0, kMtSlots);
+  g_mt_len[line] = 0;
+}
+
+static int MtAdvance(int c);
+
+static void MtChar(int line, int slot, int c) {
+  if ((unsigned)line >= kMtLines || (unsigned)slot >= kMtSlots)
+    return;
+  // come VWF_RenderSingle: subito dopo il carattere scritto prima
+  g_mt_x[line][slot] = slot ? IntMin(g_mt_x[line][slot - 1] + MtAdvance(g_mt_chars[line][slot - 1]), 255) : 0;
+  g_mt_chars[line][slot] = c;
+  g_mt_seq[line][slot] = g_mt_written++;
+  if (slot >= g_mt_len[line])
+    g_mt_len[line] = slot + 1;
+}
+
+static void MtLinesUp(void) {
+  for (int i = 0; i < kMtLines - 1; i++) {
+    memcpy(g_mt_chars[i], g_mt_chars[i + 1], kMtSlots);
+    memcpy(g_mt_seq[i], g_mt_seq[i + 1], sizeof(g_mt_seq[i]));
+    memcpy(g_mt_x[i], g_mt_x[i + 1], kMtSlots);
+    g_mt_len[i] = g_mt_len[i + 1];
+  }
+  MtClearLine(kMtLines - 1);
+}
+
+// Righe rimaste sotto una scelta: il gioco carica un messaggio con le sole
+// righe della scelta e lo scrive sopra la domanda, che resta. Stanno nella RAM
+// libera (finiscono nei salvataggi rapidi): 3 righe di kMtSlots caratteri, le
+// lunghezze e le posizioni dei caratteri
+#define mt_base_chars ((uint8 *)(g_ram + 0x1F600))
+#define mt_base_len ((uint8 *)(g_ram + 0x1F6C0))
+#define mt_base_x ((uint8 *)(g_ram + 0x1F700))
+
+// Le tre righe ricostruite da cio' che il gioco ha gia' scritto (dalla RAM:
+// valgono anche dopo un salvataggio rapido o una ricarica dei testi). Le scelte
+// riscrivono il messaggio nello stesso ordine: le lettere non ricompaiono
+static void MtRebuild(void) {
+  for (int i = 0; i < kMtLines; i++) {
+    MtClearLine(i);
+    g_mt_len[i] = IntMin(mt_base_len[i], kMtSlots);
+    memcpy(g_mt_chars[i], mt_base_chars + i * kMtSlots, g_mt_len[i]);
+    memcpy(g_mt_x[i], mt_base_x + i * kMtSlots, g_mt_len[i]);
+    for (int j = 0; j < g_mt_len[i]; j++)
+      g_mt_seq[i][j] = -1;  // gia' comparse
+  }
+  g_mt_written = 0;
+  Text_ReplayMessage(MtChar, MtLinesUp);
+  // le lettere gia' uscite in alto con lo scorrimento non contano: dopo un
+  // salvataggio rapido a meta' messaggio la comparsa parte dalla prima visibile
+  int first = g_mt_written;
+  for (int i = 0; i < kMtLines; i++)
+    for (int j = 0; j < g_mt_len[i]; j++)
+      if (g_mt_seq[i][j] >= 0)
+        first = IntMin(first, g_mt_seq[i][j]);
+  g_mt_reveal = fmaxf(g_mt_reveal, (float)first);
+}
+
+void HdText_NewMessage(void) {
+  g_mt_reveal = 0;
+  memset(mt_base_len, 0, kMtLines);
+}
+
+void HdText_KeepLines(void) {
+  MtRebuild();
+  for (int i = 0; i < kMtLines; i++) {
+    memcpy(mt_base_chars + i * kMtSlots, g_mt_chars[i], kMtSlots);
+    memcpy(mt_base_x + i * kMtSlots, g_mt_x[i], kMtSlots);
+    mt_base_len[i] = g_mt_len[i];
+  }
+  // la scelta riscrive le sue righe da capo: niente comparsa per quelle
+  g_mt_reveal = 1e6f;
+}
+
+// Una volta per fotogramma del gioco mentre scrive il messaggio
+void HdText_Tick(void) {
+  MtRebuild();
+  g_mt_reveal = fminf(g_mt_reveal + kMtRevealStep, (float)g_mt_written + kMtRevealStep * kMtFadeFrames);
+}
+
+bool HdText_Revealing(void) {
+  if (!HdText_ModernActive())
+    return false;
+  MtRebuild();
+  return g_mt_reveal < g_mt_written + kMtRevealStep * kMtFadeFrames;
+}
+
+void HdText_RevealAll(void) {
+  g_mt_reveal = g_mt_written + kMtRevealStep * kMtFadeFrames;
+}
+
+static bool IsDialogBoxTile(int t) {
+  // riempimento, cornice (0xf3 angoli, 0xf4 lati sopra e sotto, 0xc8 lati) e
+  // le 126 caselle del testo
+  return t == 0x7f || t == 0xf3 || t == 0xf4 || t == 0xc8 || (t >= 0x180 && t < 0x180 + 126);
+}
+
+void HdText_BeforeRender(Ppu *ppu) {
+  g_mt_hidden = false;
+  if (!HdText_ModernActive())
+    return;
+  // con il riquadro l'angolo in alto a sinistra e' la casella 0xf3; la
+  // telepatia (comando Window) non lo disegna
+  g_mt_border = (ppu->vram[text_msgbox_topleft & 0x7fff] & 0x3ff) == 0xf3;
+  // una casella vuota dello strato 3 da mettere al posto del riquadro
+  int blank = -1;
+  for (int t = 0; t < 1024 && blank < 0; t++) {
+    const uint16 *p = &ppu->vram[(ppu->bgLayer[2].tileAdr + t * 8) & 0x7fff];
+    if (!(p[0] | p[1] | p[2] | p[3] | p[4] | p[5] | p[6] | p[7]))
+      blank = t;
+  }
+  if (blank < 0)
+    return;
+  for (int r = 0; r < kMtBoxH; r++) {
+    g_mt_kept[r] = 0;
+    for (int c = 0; c < kMtBoxW; c++) {
+      uint16 *v = &ppu->vram[(text_msgbox_topleft + r * 32 + c) & 0x7fff];
+      g_mt_saved[r][c] = *v;
+      if (IsDialogBoxTile(*v & 0x3ff))
+        *v = (*v & ~0x3ff) | blank;
+      else if (r > 0 && r < kMtBoxH - 1 && c > 0 && c < kMtBoxW - 1)
+        g_mt_kept[r] |= 1u << c;
+    }
+  }
+  g_mt_hidden = true;
+}
+
+void HdText_AfterRender(Ppu *ppu) {
+  if (!g_mt_hidden)
+    return;
+  for (int r = 0; r < kMtBoxH; r++)
+    for (int c = 0; c < kMtBoxW; c++)
+      ppu->vram[(text_msgbox_topleft + r * 32 + c) & 0x7fff] = g_mt_saved[r][c];
+  g_mt_hidden = false;
+}
+
+// Larghezza dei simboli presi dal font del gioco (gia' con lo spazio dopo)
+static int GameGlyphWidth(int c) {
+  MemBlk widths = FindIndexInMemblk(g_zenv.dialogue_font_blk, 1);
+  return (unsigned)c < widths.size ? IntMin(widths.ptr[c], 8) : 0;
+}
+
+static int MtAdvance(int c) {
+  if (c == 74)
+    return 8;  // le due meta' della faccia di Link sono attaccate
+  if ((unsigned)c < kModernTextGlyphs && kModernTextWidth[c])
+    return kModernTextWidth[c] + 1;
+  return GameGlyphWidth(c);
+}
+
+// Simbolo del font del gioco (16 righe, 2 bit per pixel) con i colori della
+// palette del testo
+static void DrawGameGlyph(Canvas *cv, int x, int y, int c, int clip0, int clip1, int alpha) {
+  const uint8 *font = FindIndexInMemblk(g_zenv.dialogue_font_blk, 0).ptr;
+  int w = GameGlyphWidth(c), pal = text_tilemap_cur >> 10 & 7;
+  int tile = (c & 0x70) * 2 + (c & 0xf);
+  for (int r = 0; r < 16; r++) {
+    if (y + r < clip0 || y + r >= clip1)
+      continue;
+    const uint8 *p = font + (tile + (r < 8 ? 0 : 16)) * 16 + (r & 7) * 2;
+    for (int i = 0; i < w; i++) {
+      int v = (p[0] >> (7 - i) & 1) | (p[1] >> (7 - i) & 1) << 1;
+      if (v)
+        BandPx(cv, x + i, y + r, Bgr15ToRgb(g_zenv.ppu->cgram[pal * 4 + v]), alpha >= 256 ? -1 : alpha);
+    }
+  }
+}
+
+// Una riga del messaggio: ombra scura e poi caratteri chiari, solo le righe
+// di pixel fra clip0 e clip1 (scorrimento)
+static void DrawModernLine(Canvas *cv, int x, int y, int line, int clip0, int clip1) {
+  for (int pass = 0; pass < 2; pass++) {
+    for (int i = 0; i < g_mt_len[line]; i++) {
+      int c = g_mt_chars[line][i], px = x + g_mt_x[line][i];
+      int w = (unsigned)c < kModernTextGlyphs ? kModernTextWidth[c] : 0;
+      // comparsa morbida: 0 = ancora nascosto, 256 = pieno
+      float t = (g_mt_reveal - g_mt_seq[line][i]) / (kMtRevealStep * kMtFadeFrames);
+      int alpha = g_mt_seq[line][i] < 0 || t >= 1 ? 256 : t <= 0 ? 0 : (int)(t * 256);
+      if (!w) {
+        // simbolo del gioco, centrato in altezza sulla riga
+        if (pass == 1 && alpha)
+          DrawGameGlyph(cv, px, y - 4, c, clip0, clip1, alpha);
+        continue;
+      }
+      if (!alpha)
+        continue;
+      if (c == 74 || c == 75) {
+        // faccia di Link: la testa dello sprite di Link vista di fronte
+        // (caselle 2-3 e 18-19 di kLinkGraphics, anche con Link biondo o
+        // personalizzato) con la sua palette; sporge sopra la riga
+        // come il simbolo originale, anche sul margine della fascia
+        if (pass == 0)
+          continue;
+        const uint16 *pal = &g_zenv.ppu->cgram[0xf0];  // palette di Link (sprite 7)
+        for (int r = 0; r < 16; r++) {
+          int yy = y - 6 + r;
+          if (yy < clip0 - 2 || yy >= clip1)
+            continue;
+          const uint8 *t = kLinkGraphics + (2 + (c - 74) + (r >> 3) * 16) * 32 + (r & 7) * 2;
+          for (int b = 0; b < 8; b++) {
+            int v = (t[0] >> (7 - b) & 1) | (t[1] >> (7 - b) & 1) << 1 |
+                    (t[16] >> (7 - b) & 1) << 2 | (t[17] >> (7 - b) & 1) << 3;
+            if (v)
+              BandPx(cv, px + b, yy, Bgr15ToRgb(pal[v]), alpha >= 256 ? -1 : alpha);
+          }
+        }
+        continue;
+      }
+      const uint16 *g = kModernTextFont[c];
+      // tasti A B X Y: colori SNES come i tasti dell'HUD (tasti.js)
+      static const uint32 kButtonColor[4] = { 0xff4545, 0xfae037, 0x2a6ad8, 0x46bf40 };
+      uint32 ink = c >= 91 && c <= 94 ? kButtonColor[c - 91] : 0;
+      for (int r = 0; r < kModernTextRows; r++) {
+        int yy = y + r + (pass == 0);
+        if (yy < clip0 || yy >= clip1)
+          continue;
+        for (int b = 0; b < w; b++) {
+          if (!(g[r] >> (w - 1 - b) & 1))
+            continue;
+          if (pass == 0)
+            BandPx(cv, px + b + 1, yy, 0x000000, 150 * alpha >> 8);
+          else
+            BandPx(cv, px + b, yy, ink ? ink : r <= 1 ? 0xffffff : 0xeef2e4, alpha >= 256 ? -1 : alpha);
+        }
+      }
+    }
+  }
+}
+
+void HdText_Draw(uint8 *pixels, int pitch, int width, int height, int scale) {
+  // messaging_module 0: il dialogo e' appena cominciato e il messaggio non e'
+  // ancora caricato (nel buffer c'e' ancora quello di prima)
+  if (!HdText_ModernActive() || messaging_module == 0)
+    return;
+  Canvas cv = { pixels, pitch, width / scale, height / scale, scale };
+  MtRebuild();
+  int bri = g_hud_bri;
+  g_hud_bri = 15;
+  // riquadro originale (come HdText_GetRect): la fascia sta al centro in
+  // orizzontale e a filo del suo bordo esterno (sotto o sopra, come il gioco)
+  Ppu *ppu = g_zenv.ppu;
+  int off = (text_msgbox_topleft - 0x6000) & 0x3ff;
+  int bx = (cv.width - 256) / 2 + (off & 31) * 8 - (ppu->bgLayer[2].hScroll & 0xff);
+  int by = (off >> 5) * 8 - (ppu->bgLayer[2].vScroll & 0xff);
+  // grandezza fissa per tutti i messaggi, come il riquadro originale: larga
+  // quanto la riga piu' lunga del gioco (ricalcolata se cambia la lingua), alta
+  // tre righe; il testo a sinistra, con le righe usate al centro in altezza
+  static const uint8 *width_for;
+  static int max_w;
+  if (width_for != g_zenv.dialogue_blk.ptr)
+    width_for = g_zenv.dialogue_blk.ptr, max_w = Text_MaxLineWidth(MtAdvance);
+  // righe con del testo: quelle vuote in cima (cartelli che cominciano dalla
+  // seconda riga) non contano, cosi' il testo resta centrato come nel gioco;
+  // nelle scelte le righe della domanda restano dove sono
+  int lines, first;
+  Text_MeasureMessage(MtAdvance, &lines, &first);
+  if (mt_base_len[0] | mt_base_len[1] | mt_base_len[2])
+    first = 0;
+  int w = IntMax(max_w - 1, 40) + 2 * kMtPadX, h = kMtLines * kMtPitch - 3 + 2 * kMtPadY;
+  int x = bx + kMtBoxW * 4 - w / 2;
+  int y = (off >> 5) >= 16 ? by + kMtBoxH * 8 - 2 - h : by + 2;
+  // senza fascia (telepatia) la prima riga sta dove comincia il testo originale
+  if (!g_mt_border)
+    x = bx + 9 - kMtPadX, y = by + 9 - kMtPadY;
+  if (g_mt_border) {
+    // rettangolo con gli angoli tondi, scuro e trasparente come la fascia del
+    // contatore (senza bordo)
+    int in[66] = { 0 };  // rientro di ogni riga (angoli), con una riga vuota sopra e sotto
+    for (int yy = 0; yy < h; yy++) {
+      int d = yy < kMtRadius ? kMtRadius - yy : yy >= h - kMtRadius ? yy - (h - 1 - kMtRadius) : 0;
+      float dy = d - 0.5f;
+      in[yy + 1] = d ? (int)(kMtRadius - sqrtf(kMtRadius * kMtRadius - dy * dy) + 0.5f) : 0;
+    }
+    in[0] = in[h + 1] = w;
+    for (int yy = 0; yy < h; yy++) {
+      int a = in[yy + 1];
+      for (int xx = a; xx < w - a; xx++) {
+        int sx = x + xx, sy = y + yy;
+        // icona dell'oggetto da scegliere: resta com'e'
+        int cc = (sx - bx) >> 3, cr = (sy - by) >> 3;
+        if (sx >= bx && sy >= by && cr < kMtBoxH && cc < kMtBoxW && (g_mt_kept[cr] >> cc & 1))
+          continue;
+        BandPx(&cv, sx, sy, 0x101a14, 170);
+      }
+    }
+  }
+  // righe: durante lo scorrimento salgono insieme al testo del gioco
+  int ty = y + (g_mt_border ? (h - ((lines - first) * kMtPitch - 3)) / 2 - first * kMtPitch : kMtPadY) - (byte_7E1CDF & 0xf) * kMtPitch / 16;
+  int clip0 = g_mt_border ? y + 2 : y, clip1 = g_mt_border ? y + h - 2 : y + h;
+  for (int i = 0; i < kMtLines; i++)
+    DrawModernLine(&cv, x + kMtPadX, ty + i * kMtPitch, i, clip0, clip1);
+  // triangolo bianco in basso al centro, sul bordo: il messaggio aspetta un
+  // tasto (compare quando il testo e' tutto visibile, e va su e giu')
+  if (Text_WaitingForKey() && !HdText_Revealing()) {
+    static const uint8 kTri[4] = { 0x7f, 0x3e, 0x1c, 0x08 };
+    int tx = x + w / 2 - 3, tyy = y + h - 3 + (frame_counter >> 4 & 1);
+    for (int pass = 0; pass < 2; pass++)
+      for (int r = 0; r < 4; r++)
+        for (int c = 0; c < 7; c++)
+          if (kTri[r] >> (6 - c) & 1) {
+            if (pass == 0)
+              BandPx(&cv, tx + c + 1, tyy + r + 1, 0x000000, 150);
+            else
+              BandPx(&cv, tx + c, tyy + r, r == 0 ? 0xffffff : 0xeef2e4, -1);
+          }
+  }
+  g_hud_bri = bri;
 }

@@ -18,6 +18,7 @@
 #include "nmi.h"
 #include "assets.h"
 #include "hd_menu.h"
+#include "hd_hud.h"
 #include "config.h"
 
 static void WorldMap_AddSprite(int spr, uint8 big, uint8 flags, uint8 ch, uint16 x, uint16 y);
@@ -2760,6 +2761,7 @@ void Text_Initialize_initModuleStateLoop() {  // 8ec493
   text_tilemap_cur = 0x3980;
   Text_LoadCharacterBuffer();
   memset(messaging_buf, 0, 0x7e0);
+  HdText_NewMessage();  // testo moderno: la comparsa riparte
   nmi_subroutine_index = 2;
   nmi_disable_core_updates = 2;
 }
@@ -2874,6 +2876,110 @@ uint32 Text_DecodeCmd(uint8 a, const uint8 *src) {
       return TEXTCMD_MK(26, kTextCmd_IsLetter, 0);
     }
   }
+}
+
+// Testo moderno (hd_hud.c): larghezza della riga piu' lunga del messaggio
+// caricato (adv = avanzamento di ogni carattere) e righe usate
+// Testo moderno: il messaggio e' fermo in attesa di un tasto (per andare
+// avanti o per chiudersi)
+bool Text_WaitingForKey(void) {
+  if (text_render_state != 3)
+    return false;
+  int k = TEXTCMD_CMD(Text_DecodeCmd(messaging_text_buffer[dialogue_msg_read_pos],
+                                     &messaging_text_buffer[dialogue_msg_read_pos + 1]));
+  return (k == kTextCmd_Waitkey || k == kTextCmd_EndMessage) && text_wait_countdown2 == 0;
+}
+
+// Testo moderno: ripete cio' che il gioco ha gia' scritto del messaggio (fino
+// a dialogue_msg_read_pos) come lo scrive VWF_RenderSingle: per ogni lettera
+// riga (0-2) e posto, e le righe che salgono dopo ogni scorrimento finito.
+// Tutto viene dalla RAM, quindi vale anche dopo un salvataggio rapido.
+void Text_ReplayMessage(void (*on_char)(int line, int slot, int c), void (*on_lines_up)(void)) {
+  int line = 0, slot = 0;
+  for (int pos = 0; pos < dialogue_msg_read_pos && pos < 0x7f0;) {
+    uint32 cmd = Text_DecodeCmd(messaging_text_buffer[pos], &messaging_text_buffer[pos + 1]);
+    int k = TEXTCMD_CMD(cmd);
+    if (k == kTextCmd_EndMessage)
+      break;
+    if (k == kTextCmd_IsLetter) {
+      on_char(line, slot++, TEXTCMD_PARAM(cmd));
+    } else if (k == kTextCmd_1 || k == kTextCmd_2 || k == kTextCmd_3) {
+      line = k - kTextCmd_1, slot = 0;
+    } else if (k == kTextCmd_Scroll) {
+      on_lines_up();
+      line = 2, slot = 0;
+    }
+    pos += 1 + TEXTCMD_MULTIBYTE(cmd);
+  }
+}
+
+// Testo moderno: larghezza delle righe di un pezzo di messaggio non ancora
+// espanso (come Text_LoadCharacterBuffer); *w = riga in corso, ritorna la
+// piu' lunga finita. Il nome del giocatore conta 6 lettere larghe come la A
+static int MeasureRawText(const uint8 *src, const uint8 *end, MemBlk dictionary, int (*adv)(int c), int *w) {
+  int best = 0;
+  while (src < end) {
+    uint8 c = *src++;
+    if (c >= kTextDictBase) {
+      MemBlk blk = FindIndexInMemblk(dictionary, c - kTextDictBase);
+      best = IntMax(best, MeasureRawText(blk.ptr, blk.ptr + blk.size, dictionary, adv, w));
+      continue;
+    }
+    uint32 cmd = Text_DecodeCmd(c, src);
+    int k = TEXTCMD_CMD(cmd);
+    if (k == kTextCmd_IsLetter)
+      *w += adv(TEXTCMD_PARAM(cmd));
+    else if (k == kTextCmd_Name)
+      *w += 6 * adv(0);
+    else if (k == kTextCmd_Number)
+      *w += adv(0x34);
+    else if (k == kTextCmd_1 || k == kTextCmd_2 || k == kTextCmd_3 || k == kTextCmd_Scroll)
+      best = IntMax(best, *w), *w = 0;
+    src += TEXTCMD_MULTIBYTE(cmd);
+  }
+  return best;
+}
+
+// Testo moderno: la riga piu' lunga di tutti i messaggi del gioco
+int Text_MaxLineWidth(int (*adv)(int c)) {
+  MemBlk dictionary = FindIndexInMemblk(g_zenv.dialogue_blk, 0);
+  MemBlk dialogue = FindIndexInMemblk(g_zenv.dialogue_blk, 1);
+  int best = 0;
+  for (int i = 0; i < 4096; i++) {
+    MemBlk m = FindIndexInMemblk(dialogue, i);
+    if (!m.ptr)
+      break;
+    int w = 0;
+    best = IntMax(best, MeasureRawText(m.ptr, m.ptr + m.size, dictionary, adv, &w));
+    best = IntMax(best, w);
+  }
+  return best;
+}
+
+int Text_MeasureMessage(int (*adv)(int c), int *lines, int *first) {
+  int w = 0, best = 0, used = 1, line = 0;
+  *first = 2;
+  for (int pos = 0; pos < 0x7f0;) {
+    uint32 cmd = Text_DecodeCmd(messaging_text_buffer[pos], &messaging_text_buffer[pos + 1]);
+    int k = TEXTCMD_CMD(cmd);
+    if (k == kTextCmd_EndMessage)
+      break;
+    if (k == kTextCmd_IsLetter) {
+      w += adv(TEXTCMD_PARAM(cmd));
+      if (TEXTCMD_PARAM(cmd) != 89)  // lettera che non e' uno spazio
+        *first = IntMin(*first, line);
+    } else if (k == kTextCmd_1 || k == kTextCmd_2 || k == kTextCmd_3 || k == kTextCmd_Scroll) {
+      best = IntMax(best, w), w = 0;
+      used = IntMax(used, k == kTextCmd_Scroll ? 3 : k - kTextCmd_1 + 1);
+      line = k == kTextCmd_Scroll ? 2 : k - kTextCmd_1;
+      if (k == kTextCmd_Scroll)
+        *first = 0;
+    }
+    pos += 1 + TEXTCMD_MULTIBYTE(cmd);
+  }
+  *lines = used;
+  *first = IntMin(*first, used - 1);
+  return IntMax(best, w);
 }
 
 bool Dialogue_HasMessage(int i) {
@@ -3011,10 +3117,28 @@ static bool Text_WantFast() {
 }
 
 void RenderText_Draw_MessageCharacters() {  // 8ec984
-  bool fast = Text_WantFast();
+  // testo moderno: il gioco scrive subito tutte le lettere e la comparsa
+  // (1,25 lettere per fotogramma, hd_hud.c) da' il ritmo
+  bool modern = HdText_ModernActive();
+  bool fast = Text_WantFast() || modern;
+  if (modern)
+    HdText_Tick();
 RESTART:;
   uint32 cmd = Text_DecodeCmd(messaging_text_buffer[dialogue_msg_read_pos],
       &messaging_text_buffer[dialogue_msg_read_pos + 1]);
+
+  // testo moderno: scorrimento, scelte e attese del tasto aspettano che le
+  // lettere siano comparse; un tasto premuto intanto le mostra tutte
+  int k = TEXTCMD_CMD(cmd);
+  if (modern && HdText_Revealing() && k != kTextCmd_IsLetter && k != kTextCmd_Wait &&
+      k != kTextCmd_ScrollSpd && k != kTextCmd_Sound && k != kTextCmd_Speed && k != kTextCmd_1 &&
+      k != kTextCmd_2 && k != kTextCmd_3) {
+    if (filtered_joypad_H | filtered_joypad_L)
+      HdText_RevealAll();
+    nmi_subroutine_index = 2;
+    nmi_disable_core_updates = 2;
+    return;
+  }
 
   switch (TEXTCMD_CMD(cmd)) {
   case kTextCmd_IsLetter:
@@ -3138,6 +3262,7 @@ void RenderText_Draw_Finish() {  // 8eca35
   messaging_module = 0;
   submodule_index = 0;
   main_module_index = saved_module_for_menu;
+  HdText_NewMessage();  // testo moderno: la comparsa riparte
 }
 
 void VWF_RenderSingle(int c) {  // 8ecab8
@@ -3224,6 +3349,7 @@ void RenderText_Draw_Choose2LowOr3() {  // 8ecd1a
     choice_in_multiselect_box = t;
     sound_effect_2 = 32;
     dialogue_message_index = t + 1;
+    HdText_KeepLines();  // testo moderno: la domanda resta sopra la scelta
     Text_LoadCharacterBuffer();
     Text_InitVwfState();
   }
@@ -3296,6 +3422,7 @@ void RenderText_Draw_Choose2HiOr3() {  // 8ece83
     choice_in_multiselect_box = t;
     sound_effect_2 = 32;
     dialogue_message_index = t + 11;
+    HdText_KeepLines();  // testo moderno: la domanda resta sopra la scelta
     Text_LoadCharacterBuffer();
     Text_InitVwfState();
   }
@@ -3318,6 +3445,7 @@ void RenderText_Draw_Choose3() {  // 8ecef7
     choice_in_multiselect_box = choice;
     sound_effect_2 = 32;
     dialogue_message_index = choice + 6;
+    HdText_KeepLines();  // testo moderno: la domanda resta sopra la scelta
     Text_LoadCharacterBuffer();
     Text_InitVwfState();
   }
@@ -3338,6 +3466,7 @@ void RenderText_Draw_Choose1Or2() {  // 8ecf72
     choice_in_multiselect_box = t;
     sound_effect_2 = 32;
     dialogue_message_index = t + 9;
+    HdText_KeepLines();  // testo moderno: la domanda resta sopra la scelta
     Text_LoadCharacterBuffer();
     Text_InitVwfState();
   }

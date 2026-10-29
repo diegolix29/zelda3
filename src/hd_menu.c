@@ -407,6 +407,7 @@ static const char *Tr(const char *it) {
     { "Mappa del mondo in HD", "HD world map" },
     { "Mostra FPS", "Show FPS" },
     { "Testo nitido nei dialoghi", "Sharp dialogue text" },
+    { "Testo moderno", "Modern text" },
     { "Fluidit\xc3\xa0 oltre i 60 Hz", "Smoothness above 60 Hz" },
     { "Illuminazione dinamica", "Dynamic lighting" },
     { "Effetto calore e fiamme", "Heat and flames effect" },
@@ -521,6 +522,7 @@ static void SaveSettings() {
     AddIni(v, &n, "[Graphics]", "FxWhirlpoolGlow", "%d", g_config.fx_whirlpool);
   }
   AddIni(v, &n, "[Graphics]", "HdText", "%d", g_config.hd_text);
+  AddIni(v, &n, "[Graphics]", "ModernText", "%d", g_config.modern_text);
   AddIni(v, &n, "[Graphics]", "OfficialArtwork", "%d", g_config.official_artwork);
   AddIni(v, &n, "[Graphics]", "BlondLink", "%d", g_config.blond_link);
   AddIni(v, &n, "[Graphics]", "DimFlashes", "%d", (g_config.features0 & kFeatures0_DimFlashes) != 0);
@@ -627,6 +629,7 @@ static void BuildItems() {
     AddItem(2, "Mappa del mondo in HD", buf);
     AddItem(3, "Mostra FPS", YesNo(Host_GetDisplayPerf()));
     AddItem(4, "Testo nitido nei dialoghi", YesNo(g_config.hd_text));
+    AddItem(22, "Testo moderno", YesNo(g_config.modern_text));
     AddItem(5, "Fluidit\xc3\xa0 oltre i 60 Hz", YesNo(g_config.high_refresh));
     AddItem(6, "Illuminazione dinamica", YesNo(g_config.dynamic_light));
     AddItem(7, "Effetto calore e fiamme", YesNo(g_config.fx_heat));
@@ -719,8 +722,12 @@ static void Activate(int id, int dir) {
         Host_SetPpuRenderFlags(Host_GetPpuRenderFlags() ^ kPpuRenderFlags_4x4Mode7);
     } else if (id == 3) {
       Host_SetDisplayPerf(!Host_GetDisplayPerf());
-    } else if (id == 4) {
-      g_config.hd_text = !g_config.hd_text;
+    } else if (id == 4 || id == 22) {
+      // testo nitido e testo moderno: accenderne uno spegne l'altro
+      bool *opt = id == 4 ? &g_config.hd_text : &g_config.modern_text;
+      *opt = !*opt;
+      if (*opt)
+        *(id == 4 ? &g_config.modern_text : &g_config.hd_text) = false;
     } else if (id == 5) {
       g_config.high_refresh = !g_config.high_refresh;
     } else if (id == 6) {
@@ -1516,6 +1523,7 @@ static void DrawDungeonEntryName(Canvas *cv) {
 
 void HdMenu_Draw(uint8 *pixels, int pitch, int width, int height, int scale) {
   Canvas cv = { pixels, pitch, width / scale, height / scale, scale };
+  HdText_Draw(pixels, pitch, width, height, scale);
   if (!g_menu_open) {
     if (!g_font_data)
       Font_Load();
@@ -1590,7 +1598,8 @@ void HdMenu_Draw(uint8 *pixels, int pitch, int width, int height, int scale) {
 // Testo nitido
 
 bool HdText_GetRect(int frame_w, int frame_h, int *x, int *y, int *w, int *h) {
-  if (!g_config.hd_text || main_module_index != 14 || submodule_index != 2)
+  // con il testo moderno il riquadro originale non c'e'
+  if (!g_config.hd_text || main_module_index != 14 || submodule_index != 2 || HdText_ModernActive())
     return false;
   int off = (text_msgbox_topleft - 0x6000) & 0x3ff;
   int col = off & 31, row = off >> 5;

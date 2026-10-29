@@ -436,6 +436,8 @@ static bool HandleIniConfig(int section, const char *key, char *value) {
       return ParseBool(value, &g_config.high_refresh);
     } else if (StringEqualsNoCase(key, "HdText")) {
       return ParseBool(value, &g_config.hd_text);
+    } else if (StringEqualsNoCase(key, "ModernText")) {
+      return ParseBool(value, &g_config.modern_text);
     } else if (StringEqualsNoCase(key, "SmoothCamera")) {
       g_config.smooth_camera = (uint8)strtol(value, (char**)NULL, 10);
       return true;
@@ -647,6 +649,9 @@ static bool ParseOneConfigFile(const char *filename, int depth) {
 // - con l'MSU la frequenza e' quella dei suoi file: 48000 per gli opuz,
 //   44100 per i pcm.
 static void ApplyConfigRules(void) {
+  // testo nitido e testo moderno sono alternativi: vince il moderno
+  if (g_config.modern_text)
+    g_config.hd_text = false;
   // opzioni divise: un ini di prima le accende come l'opzione da cui vengono
   if (!g_blond_link_seen)
     g_config.blond_link = g_config.official_artwork;

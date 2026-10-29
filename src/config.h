@@ -72,6 +72,7 @@ typedef struct Config {
   // Migliorie HD
   uint8 smooth_camera;      // 0 = spenta, 1-3 = intensita'
   bool hd_text;
+  bool modern_text;         // dialoghi con la fascia trasparente e il carattere del contatore
   bool high_refresh;
   bool dynamic_light;
   // Effetti visivi aggiuntivi

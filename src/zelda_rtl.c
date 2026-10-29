@@ -651,6 +651,7 @@ void ZeldaDrawPpuFrame(uint8 *pixel_buffer, size_t pitch, uint32 render_flags) {
   RoomSeamPatch(g_zenv.ppu, 256 + 2 * g_zenv.ppu->extraLeftRight, height);
   HdLight_BeforeRender(g_zenv.ppu);
   HdHud_BeforeRender(g_zenv.ppu);
+  HdText_BeforeRender(g_zenv.ppu);
   HdFx_IrisBeforeRender(g_zenv.ppu);
   HdFx_ShadowsBeforeRender(g_zenv.ppu, 256 + 2 * g_zenv.ppu->extraLeftRight, height);
   HdFx_IceBeforeRender(g_zenv.ppu);
@@ -690,6 +691,7 @@ void ZeldaDrawPpuFrame(uint8 *pixel_buffer, size_t pitch, uint32 render_flags) {
   HdFx_FadeAfterRender(g_zenv.ppu);
   if (g_zenv.ppu->bg3MaxDigits)
     g_zenv.ppu->cgram[0x10] = cg10;
+  HdText_AfterRender(g_zenv.ppu);
   HdLight_AfterRender(g_zenv.ppu);
   HdFx_IrisAfterRender(g_zenv.ppu);
   HdFx_ShadowsAfterRender(g_zenv.ppu);
