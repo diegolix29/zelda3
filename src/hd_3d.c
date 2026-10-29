@@ -947,6 +947,9 @@ static uint8 g_pcol[512 * 512];  // object cells: cgram index shown (scratch for
 // box's depth; 0 = not a box pixel
 static uint8 g_pspan[512 * 512];
 static uint8 g_pfoot[512 * 512];
+// floor drawn over the rest of a box object's drawing: the floor this many
+// 16 pixel steps to the side (0 = none)
+static int8 g_pcover[512 * 512];
 static uint32 g_mask_hash;       // tiles the masks were built for
 // Two floor levels (see BuildHeightMap): the floor height of each cell, the
 // room's upper level height and the tallest surface (where rays start)
@@ -1521,6 +1524,7 @@ static void BuildPixelMasks(Ppu *ppu, const uint8 *cls, const uint8 *attr) {
     return;
 
   memset(g_partial, 0, sizeof(g_partial));
+  memset(g_pcover, 0, sizeof(g_pcover));
   int partial = 0;
   for (int c = 0; c < 64 * 64; c++) {
     int t = (g_hlayer[c] ? dung_bg1 : dung_bg2)[c] & 0x3ff;
@@ -1594,12 +1598,16 @@ static void BuildPixelMasks(Ppu *ppu, const uint8 *cls, const uint8 *attr) {
         g_praise[ni] = 0, queue[qn++] = (uint32)ni;
     }
   }
-  // Objects with solid collision stand up as a box over their collision
-  // tiles (the whole tiles: a column is as wide as it blocks Link). The
+  // Objects with solid collision stand up as a box at the front of their
+  // collision tiles, as deep as the object is wide (a pot 32x32, a column
+  // 16x16): the collision runs further north than the object is deep. The
   // drawing above the box's front is its art: the lower part stands up as
-  // the face, the rest lies on the top (see ShadeWall). Pixels of the run
-  // outside the box (the drawing above it, a shadow below it) are floor.
-  int boxes = 0;
+  // the face, the rest lies on the top (see ShadeWall). The rest of the
+  // drawing (above the box, a shadow below it) would lie flat on the floor
+  // as a copy: it is covered with the floor beside the object (g_pcover).
+  typedef struct BoxRun { uint8 cx, y0, y1, f1, k; } BoxRun;   // cells y0..y1-1, collision ends at f1
+  static BoxRun runs[64 * 32];
+  int nruns = 0;
   for (int cx = 0; cx < 64; cx++) {
     int cy = 0;
     while (cy < 64) {
@@ -1611,36 +1619,61 @@ static void BuildPixelMasks(Ppu *ppu, const uint8 *cls, const uint8 *attr) {
       int y0 = cy, k = cls[c];
       while (cy < 64 && g_partial[cy * 64 + cx] && cls[cy * 64 + cx] == k)
         cy++;
-      int f0 = -1, f1 = -1;
+      int f1 = -1;
       for (int y = y0; y < cy; y++)
-        if (IsFootAttr(attr[y * 64 + cx])) {
-          if (f0 < 0) f0 = y;
+        if (IsFootAttr(attr[y * 64 + cx]))
           f1 = y;
+      if (f1 >= 0 && nruns < 64 * 32)
+        runs[nruns++] = (BoxRun){ (uint8)cx, (uint8)y0, (uint8)cy, (uint8)f1, (uint8)k };
+    }
+  }
+  for (int n = 0; n < nruns; n++) {
+    const BoxRun *b = &runs[n];
+    // width: the neighbouring box columns with the same front and class
+    int w = 1;
+    for (int dir = -1; dir <= 1; dir += 2) {
+      for (int cx = b->cx + dir; cx >= 0 && cx < 64; cx += dir) {
+        bool found = false;
+        for (int m = 0; m < nruns && !found; m++)
+          found = runs[m].cx == cx && runs[m].f1 == b->f1 && runs[m].k == b->k;
+        if (!found) break;
+        w++;
+      }
+    }
+    int front = (b->f1 + 1) * 8, depth = w * 8;
+    int foot_top = front - depth;
+    if (foot_top < b->y0 * 8) foot_top = b->y0 * 8, depth = front - foot_top;
+    for (int px = b->cx * 8; px < b->cx * 8 + 8; px++) {
+      // the drawing's top in this pixel column: its first object pixel
+      int top = foot_top;
+      for (int r = b->y0 * 8; r < front; r++)
+        if (g_praise[r * 512 + px]) {
+          top = r;
+          break;
         }
-      if (f0 < 0)
-        continue;
-      boxes++;
-      int front = (f1 + 1) * 8, foot_top = f0 * 8;
-      for (int px = cx * 8; px < cx * 8 + 8; px++) {
-        // the drawing's top in this pixel column: its first object pixel
-        int top = foot_top;
-        for (int r = y0 * 8; r < front; r++)
-          if (g_praise[r * 512 + px]) {
-            top = r;
-            break;
+      int span = front - top;
+      for (int r = b->y0 * 8; r < b->y1 * 8; r++) {
+        int i = r * 512 + px, rc = (r >> 3) * 64 + b->cx;
+        bool in = r >= foot_top && r < front;
+        g_praise[i] = in ? (uint8)(g_hmap[rc] - g_hfloor[rc]) : 0;
+        g_pdown[i] = in ? (uint8)(front - 1 - r) : 0;
+        g_pspan[i] = in ? (uint8)(span > 255 ? 255 : span) : 0;
+        g_pfoot[i] = in ? (uint8)(depth > 255 ? 255 : depth) : 0;
+        if (in)
+          continue;
+        // cover: the floor 16, 32... pixels to the side (floor patterns
+        // repeat every 16), on whichever side reaches plain floor first
+        for (int k = 1; k <= 6 && !g_pcover[i]; k++) {
+          for (int dir = -1; dir <= 1 && !g_pcover[i]; dir += 2) {
+            int sx = (px + dir * 16 * k) & 511, sc = (r >> 3) * 64 + (sx >> 3);
+            if (!g_partial[sc] && g_hmap[sc] == g_hfloor[sc])
+              g_pcover[i] = (int8)(dir * k);
           }
-        int span = front - top, depth = front - foot_top;
-        for (int r = y0 * 8; r < cy * 8; r++) {
-          int i = r * 512 + px, rc = (r >> 3) * 64 + cx;
-          bool in = r >= foot_top && r < front;
-          g_praise[i] = in ? (uint8)(g_hmap[rc] - g_hfloor[rc]) : 0;
-          g_pdown[i] = in ? (uint8)(front - 1 - r) : 0;
-          g_pspan[i] = in ? (uint8)(span > 255 ? 255 : span) : 0;
-          g_pfoot[i] = in ? (uint8)(depth > 255 ? 255 : depth) : 0;
         }
       }
     }
   }
+  int boxes = nruns;
   // the others: 3/4 split of each column of object pixels
   int raised = 0;
   for (int x = 0; x < 512; x++) {
@@ -2105,12 +2138,15 @@ static bool ShadeWall(const Ground *gr, const WallHit *h, uint32 *out, float *fu
     if (fa > S) fa = S;
     float ta = S - fa;
     float face_v = base - 0.5f - z * fa / H;
+    // the sides and the back wear the front art too, wrapped around the
+    // box: going back along a side walks across the front from that edge
+    float d = g_pdown[h->pix] + 0.5f;
     switch (h->face) {
-    case kFace_Top: av = base - fa - (g_pdown[h->pix] + 0.5f) * ta / D; break;
+    case kFace_Top: av = base - fa - d * ta / D; break;
     case kFace_South: av = face_v; break;
-    case kFace_East: av = face_v, shade = 196; break;
-    case kFace_West: av = face_v, shade = 176; break;
-    case kFace_North: av = base - S + 0.5f, shade = 150; break;
+    case kFace_East: au = ix - d, av = face_v, shade = 212; break;
+    case kFace_West: au = ix + d, av = face_v, shade = 196; break;
+    case kFace_North: av = face_v, shade = 180; break;
     }
   } else if (h->pix >= 0) {
     // object pixel: its column's face stands at its front, g_pdown rows south
@@ -2167,6 +2203,10 @@ static void DrawTerrain(uint32 *out, int pitch_px, const Cam *cm, const Ground *
         depth = hit.t * cm->F;
         ok = ShadeWall(gr, &hit, &px, &u, &v);
       } else if (ground) {
+        int wx = gr->org_x + (int)floorf(u), wy = gr->org_y + (int)floorf(v);
+        int pi = (wy & 511) * 512 + (wx & 511);
+        if (g_partial[((wy >> 3) & 63) * 64 + ((wx >> 3) & 63)] && g_pcover[pi])
+          u += g_pcover[pi] * 16;
         ok = SampleSurface(gr, u, v, &px);
       } else {
         dst[x] = Sky_Color(sk, cm, x + 0.5f, y + 0.5f, x, y);
