@@ -2530,6 +2530,7 @@ typedef struct Group {
   bool far;            // drawn from the OAM table (pieces outside the SNES screen)
   uint8 solid_depth;   // furniture sprites: a box this deep (DrawSolidSprite), 0 = a cutout
   uint8 solid_top;     // and the drawing rows on its top
+  float solid_vf, solid_fl;   // its front (ground v) and bottom (height)
   int n_ents;
   uint16 ents[24];     // entries of a far group (0-127 OAM, then far pieces), first wins
 } Group;
@@ -2616,15 +2617,36 @@ static void GroupAnchor(Group *g, Ppu *ppu) {
 // Furniture sprites (the throne room's mantle, statues, blocks): solid boxes
 // fixed in the room, not cutouts turned to the camera. depth = pixels from
 // the front to the back, top = drawing rows shown on the top (the rest stand
-// up on the front, at one row per pixel)
-static const struct { uint8 type, depth, top; } kSolidSprites[] = {
-  { 0xee, 8, 4 },     // movable mantle (Hyrule Castle throne room)
-  { 0x1c, 12, 6 },    // movable statue
-  { 0x38, 12, 6 },    // eye statue
-  { 0x57, 12, 6 },    // desert palace statue
-  { 0x8a, 12, 6 },    // spike block
-  { 0xf2, 12, 6 },    // medallion tablet
+// up on the front, at one row per pixel). on_wall: painted on a north
+// wall's face in 2D, so it sticks out `depth` pixels from that face, at the
+// height the wall's art puts it (a cutout stood inside the wall, hidden)
+static const struct { uint8 type, depth, top, on_wall; } kSolidSprites[] = {
+  { 0xee, 8, 4, 0 },     // movable mantle (Hyrule Castle throne room)
+  { 0x1c, 12, 6, 0 },    // movable statue
+  { 0x38, 12, 6, 0 },    // eye statue
+  { 0x57, 12, 6, 0 },    // desert palace statue
+  { 0x8a, 12, 6, 0 },    // spike block
+  { 0xf2, 12, 6, 0 },    // medallion tablet
+  { 0x04, 3, 0, 1 },     // pull switches on a north wall (pulled down)
+  { 0x06, 3, 0, 1 },
 };
+
+// on_wall sprites: the face of the folded wall the drawing is painted on,
+// near column u around row v (frame coordinates): its frame v and floor
+static bool WallFaceAt(float u, float v, float *face_v, float *face_floor) {
+  if (!g_depth_valid)
+    return false;
+  int wx = g_org_x + (int)floorf(u), wy = g_org_y + (int)floorf(v);
+  for (int k = 0; k < 3; k++, wy -= 8) {
+    int row = wy >> 3, c = (row & 63) * 64 + ((wx >> 3) & 63);
+    if (!g_hfold[c] || g_hmap[c] <= g_hfloor[c] || g_partial[c])
+      continue;
+    *face_v = (float)((row - (row & 63) + g_hbase[c]) * 8 - g_org_y);
+    *face_floor = g_hfloor[c];
+    return true;
+  }
+  return false;
+}
 
 static int SolidSprite(int key) {
   int slot = key >= 1 && key <= 16 ? key - 1 : key >= 160 && key < 176 ? key - 160 : -1;
@@ -2716,19 +2738,17 @@ static bool SolidPixel(Ppu *ppu, const Group *g, const int *efx, const int *efy,
   return false;
 }
 
-// A furniture sprite as a box standing on the floor: its front on the
-// drawing's bottom row, `depth` pixels deep, as tall as the drawing minus
-// the rows on its top. The front shows the drawing upright, the top its top
+// A furniture sprite as a box: its front at solid_vf, `depth` pixels deep,
+// its bottom at solid_fl, as tall as the drawing minus the rows on its top. The front shows the drawing upright, the top its top
 // rows, the back the front mirrored, the sides the drawing's edge columns.
 // Drawn by splatting points of the faces that look at the camera (a box's
 // visible faces never cover each other), behind the walls by their depth.
 static void DrawSolidSprite(uint32 *out, int pitch_px, const Cam *cm, Ppu *ppu, const Group *g, const int *efx,
                             const int *efy, const int *esz, const int *ecf) {
   int w = g_w, h = g_h;
-  float X0 = (float)g->x0, X1 = (float)(g->x1 + 1), Yf = (float)(g->y1 + 1), D = g->solid_depth, Yb = Yf - D;
+  float X0 = (float)g->x0, X1 = (float)(g->x1 + 1), Yf = g->solid_vf, D = g->solid_depth, Yb = Yf - D;
   int span = g->y1 - g->y0 + 1, top = g->solid_top < span ? g->solid_top : span - 1;
-  float H = (float)(span - top);
-  float fl = FloorUnder((X0 + X1) * 0.5f, Yf, GroupLower(g->key >> 8));
+  float H = (float)(span - top), fl = g->solid_fl;
   // samples per drawing pixel: two per screen pixel at the nearest corner
   float scmax = 0.0f;
   for (int k = 0; k < 8; k++) {
@@ -2768,7 +2788,7 @@ static void DrawSolidSprite(uint32 *out, int pitch_px, const Cam *cm, Ppu *ppu, 
         int col, row;
         if (f == 0) {
           u = X0 + a, v = Yf - b, z = H;
-          col = g->x0 + (int)a, row = g->y0 + top - 1 - (int)(b * top / D);
+          col = g->x0 + (int)a, row = top ? g->y0 + top - 1 - (int)(b * top / D) : g->y0;
         } else {
           z = b, row = g->y1 - (int)b;
           int r = row - g->y0;
@@ -2978,10 +2998,20 @@ static int DrawSprites(uint32 *out, int pitch_px, const Cam *cm, Ppu *ppu) {
           g->y0 = IntMin(g->y0, efy[k]), g->y1 = IntMax(g->y1, efy[k] + esz[k] - 1);
         }
         g->solid_depth = kSolidSprites[s].depth, g->solid_top = kSolidSprites[s].top;
-        g->ax = (g->x0 + g->x1 + 1) * 0.5f, g->ay = (float)(g->y1 + 1);
+        float cx = (g->x0 + g->x1 + 1) * 0.5f, face, ff;
+        g->solid_vf = (float)(g->y1 + 1);
+        g->solid_fl = FloorUnder(cx, g->solid_vf, GroupLower(g->key));
+        bool on_wall = kSolidSprites[s].on_wall && WallFaceAt(cx, (g->y0 + g->y1) * 0.5f, &face, &ff);
+        if (on_wall) {
+          // the wall shows drawing row r at height face - r above its floor
+          g->solid_vf = face + g->solid_depth;
+          g->solid_fl = ff + face - (g->y1 + 1);
+        }
+        g->ax = cx, g->ay = g->solid_vf;
         if (dump)
-          Hd3d_Log("  group key=%d: furniture sprite 0x%02x, a box %dx%d, %d deep", g->key, kSolidSprites[s].type,
-                   g->x1 - g->x0 + 1, g->y1 - g->y0 + 1 - g->solid_top, g->solid_depth);
+          Hd3d_Log("  group key=%d: furniture sprite 0x%02x, a box %dx%d, %d deep, front v=%.0f bottom z=%.0f%s", g->key,
+                   kSolidSprites[s].type, g->x1 - g->x0 + 1, g->y1 - g->y0 + 1 - g->solid_top, g->solid_depth,
+                   g->solid_vf, g->solid_fl, on_wall ? " (on a wall)" : kSolidSprites[s].on_wall ? " (no wall found)" : "");
       }
     }
     g->key = g->key << 8 | i;
