@@ -945,10 +945,11 @@ static void DrawGround(uint32 *out, int pitch_px, const Cam *cm, const Ground *g
 
 enum { kWallMax = 48 };          // tallest wall, pixels
 static uint8 g_hmap[64 * 64];    // height per 8x8 tile of the room
-static uint8 g_hfold[64 * 64];   // 1 = the surface shows the art z pixels north (fold-up)
+static uint8 g_hfold[64 * 64];   // 1 = the surface shows the art z pixels north (fold-up), 2 = south (a deep south wall)
 static uint8 g_hbase[64 * 64];   // fold-up: tile row just south of the run (where its face stands)
 static uint8 g_hfoldx[64 * 64];  // east/west walls: 1 = the face looks east (art to its west), 2 = west
 static uint8 g_hbasex[64 * 64];  // and the tile column where that face stands
+static uint8 g_hartw[64 * 64];   // sideways and south folds: pixels of art squeezed onto the face
 static uint8 g_hlayer[64 * 64];  // layer that gave the cell its class (0 = BG2, 1 = BG1)
 static uint8 g_partial[64 * 64]; // 1 = an object cell: only the pixels in g_praise stand up
 static uint8 g_praise[512 * 512];// object cells: height of this pixel, 0 = floor drawn in the tile
@@ -1979,6 +1980,7 @@ static void BuildHeightMap(void) {
 
   memset(g_hmap, 0, sizeof(g_hmap));
   memset(g_hfold, 0, sizeof(g_hfold));
+  memset(g_hartw, 0, sizeof(g_hartw));
   memset(g_hbase, 0, sizeof(g_hbase));
   for (int cx = 0; cx < 64; cx++) {
     int cy = 0;
@@ -2004,7 +2006,7 @@ static void BuildHeightMap(void) {
         bool floor_n = y0 > 0 && !solid[(y0 - 1) * 64 + cx];
         bool floor_s = cy < 64 && !solid[cy * 64 + cx];
         int hgt = (cy - y0) * 8;
-        bool fold = true;
+        int fold = 1, base = cy;
         if (two && !g_upper[c] && y0 > 0 && g_upper[(y0 - 1) * 64 + cx]) {
           hgt = g_level_h;                 // the cliff up to the upper floor
         } else if (holes && !g_upper[c] && touches_upper) {
@@ -2016,6 +2018,13 @@ static void BuildHeightMap(void) {
           hgt = 32, fold = false;
           for (int y = y0; y < cy; y++)
             side[y * 64 + cx] = 1;
+        } else if (floor_n && !floor_s && cy - y0 >= 6) {
+          // a deep south wall (around a south door): it stands as tall as the
+          // side walls, its art folded onto its north face (the rows by the
+          // floor at its foot)
+          hgt = 32, fold = 2, base = y0;
+          for (int y = y0; y < cy; y++)
+            g_hartw[y * 64 + cx] = (uint8)IntMin((cy - y0) * 8, 64);
         } else if (floor_n && !floor_s) {
           hgt = 16, fold = false;          // south wall: we look at its top
         } else if (!floor_s) {
@@ -2023,7 +2032,7 @@ static void BuildHeightMap(void) {
         }
         if (hgt > kWallMax) hgt = kWallMax;
         for (int y = y0; y < cy; y++)
-          g_hmap[y * 64 + cx] = (uint8)hgt, g_hfold[y * 64 + cx] = fold, g_hbase[y * 64 + cx] = (uint8)cy;
+          g_hmap[y * 64 + cx] = (uint8)hgt, g_hfold[y * 64 + cx] = (uint8)fold, g_hbase[y * 64 + cx] = (uint8)base;
         cells += cy - y0;
         continue;
       }
@@ -2068,8 +2077,13 @@ static void BuildHeightMap(void) {
         continue;
       if (floor_e && floor_w)
         floor_e = x0 + cx < 64;   // a free-standing wall: its face looks toward the room's middle
+      // all of the run's art (up to twice the height) goes on the face, so
+      // the top shows what lies beyond the wall (the dark ceiling), as a
+      // north wall's top does
+      int artw = IntMax(IntMin((cx - x0) * 8, 2 * g_hmap[cy * 64 + x0]), g_hmap[cy * 64 + x0]);
       for (int x = x0; x < cx; x++)
-        g_hfoldx[cy * 64 + x] = floor_e ? 1 : 2, g_hbasex[cy * 64 + x] = (uint8)(floor_e ? cx : x0);
+        g_hfoldx[cy * 64 + x] = floor_e ? 1 : 2, g_hbasex[cy * 64 + x] = (uint8)(floor_e ? cx : x0),
+        g_hartw[cy * 64 + x] = (uint8)artw;
     }
   }
   // ceilings: flat and dark, as high as the wall next to them (south first)
@@ -2406,6 +2420,20 @@ static bool ShadeWall(const Ground *gr, const WallHit *h, uint32 *out, float *fu
     case kFace_West: av = base - 0.5f - z, shade = 176; break;
     case kFace_North: av = base - 0.5f - z, shade = 150; break;
     }
+  } else if (g_hfold[c] == 2) {
+    // deep south wall: the face looks north from base (its north edge), the
+    // art runs south of it, squeezed by g_hartw / H; the top shows what lies
+    // beyond (as a north wall's top)
+    int row = (int)floorf(iy * 0.125f);
+    float base = (float)((row - (row & 63) + g_hbase[c]) * 8);
+    float face_v = base + 0.5f + z * g_hartw[c] / (H > 0 ? H : 1.0f);
+    switch (h->face) {
+    case kFace_Top: av = iy + g_hartw[c]; break;
+    case kFace_North: av = face_v, shade = 224; break;
+    case kFace_South: av = face_v, shade = 150; break;
+    case kFace_East: av = face_v, shade = 196; break;
+    case kFace_West: av = face_v, shade = 176; break;
+    }
   } else if (g_hfold[c]) {
     int row = (int)floorf(iy * 0.125f);
     float base = (float)((row - (row & 63) + g_hbase[c]) * 8);
@@ -2424,13 +2452,16 @@ static bool ShadeWall(const Ground *gr, const WallHit *h, uint32 *out, float *fu
     int col = (int)floorf(ix * 0.125f);
     float base = (float)((col - (col & 63) + g_hbasex[c]) * 8);
     bool east = g_hfoldx[c] == 1;   // the face looks east, the art lies to its west
-    float face_u = east ? base - 0.5f - z : base + 0.5f + z;
+    float a = g_hartw[c], dz = 0.5f + z * a / (H > 0 ? H : 1.0f);
+    float face_u = east ? base - dz : base + dz;
+    // the run's ends: the face art 3 tiles into the run (its own end row is
+    // often the dark base trim)
     switch (h->face) {
-    case kFace_Top: au = east ? ix - H : ix + H; break;
+    case kFace_Top: au = east ? ix - a : ix + a; break;
     case kFace_East: au = face_u, shade = east ? 224 : 150; break;
     case kFace_West: au = face_u, shade = east ? 150 : 224; break;
-    case kFace_South: au = face_u, shade = 200; break;
-    case kFace_North: au = face_u, shade = 176; break;
+    case kFace_South: au = face_u, av = iy - 24.0f, shade = 200; break;
+    case kFace_North: au = face_u, av = iy + 24.0f, shade = 176; break;
     }
   } else {
     // flat top (south wall, ceiling): its south rows repeat down the face
@@ -2731,7 +2762,7 @@ static bool WallFaceAt(float u, float v, float *face_v, float *face_floor) {
   int wx = g_org_x + (int)floorf(u), wy = g_org_y + (int)floorf(v);
   for (int k = 0; k < 3; k++, wy -= 8) {
     int row = wy >> 3, c = (row & 63) * 64 + ((wx >> 3) & 63);
-    if (!g_hfold[c] || g_hmap[c] <= g_hfloor[c] || g_partial[c])
+    if (g_hfold[c] != 1 || g_hmap[c] <= g_hfloor[c] || g_partial[c])
       continue;
     *face_v = (float)((row - (row & 63) + g_hbase[c]) * 8 - g_org_y);
     *face_floor = g_hfloor[c];
