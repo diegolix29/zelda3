@@ -2039,9 +2039,15 @@ static void BuildHeightMap(void) {
       int x0 = cx;
       while (cx < 64 && side[cy * 64 + cx] && g_hmap[cy * 64 + cx] == g_hmap[cy * 64 + x0])
         cx++;
-      bool floor_e = cx < 64 && !solid[cy * 64 + cx], floor_w = x0 > 0 && !solid[cy * 64 + x0 - 1];
-      if (floor_e == floor_w)
-        continue;   // floor on both sides (a free-standing wall) or none
+      // open: flat and not ceiling (walkable wall tiles of a doorway stay
+      // flat but are still wall class)
+      #define OPEN(n) (!g_hmap[n] && !ceil[n])
+      bool floor_e = cx < 64 && OPEN(cy * 64 + cx), floor_w = x0 > 0 && OPEN(cy * 64 + x0 - 1);
+      #undef OPEN
+      if (!floor_e && !floor_w)
+        continue;
+      if (floor_e && floor_w)
+        floor_e = x0 + cx < 64;   // a free-standing wall: its face looks toward the room's middle
       for (int x = x0; x < cx; x++)
         g_hfoldx[cy * 64 + x] = floor_e ? 1 : 2, g_hbasex[cy * 64 + x] = (uint8)(floor_e ? cx : x0);
     }
