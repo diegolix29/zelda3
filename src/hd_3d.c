@@ -469,7 +469,17 @@ void Hd3d_CaptureLine(Ppu *ppu, int line) {
     return;
   // ppu_redrawLine writes row (line - 1) of the buffer itself: pass the start
   uint32 *row = g_side + (line - 1) * g_w;
+  // every sprite pixel on top of BG1/BG2 in this copy: the 2D game hides
+  // Link under a bridge or behind a wall top with the BG priority, and then
+  // he was missing from the cutout; in 3D the depth buffer hides him
+  // (objBuffer holds the priority in its top 4 bits, see snes/ppu.c)
+  static PpuZbufType saved[kPpuXPixels];
+  memcpy(saved, ppu->objBuffer.data, sizeof(saved));
+  for (int i = 0; i < kPpuXPixels; i++)
+    if (ppu->objBuffer.data[i] & 0xff)
+      ppu->objBuffer.data[i] = (PpuZbufType)((ppu->objBuffer.data[i] & 0x0fff) | (3 * 4 + 2) << 12);
   ppu_redrawLine(ppu, line, (uint8 *)g_side, g_w * 4, g_weather ? 1 : 0);
+  memcpy(ppu->objBuffer.data, saved, sizeof(saved));
   // pixel column c <-> PPU line buffer index (see PpuDrawWholeLine)
   uint8 *own = g_owner + (line - 1) * g_w;
   int base = kPpuExtraLeftRight - ppu->extraLeftRight;
@@ -956,6 +966,7 @@ static uint32 g_mask_hash;       // tiles the masks were built for
 static uint8 g_hfloor[64 * 64];
 static uint8 g_lower[64 * 64];   // 1 = BG2 has a hole there: the cell shows BG1
 static uint8 g_upper[64 * 64];   // 1 = on the upper floor
+static uint8 g_hbot[64 * 64];    // bridges: height of the deck's underside (open below), 0 = solid to the floor
 static bool g_two_levels;
 static int g_level_h, g_hmax = kWallMax;
 static int g_org_x, g_org_y;     // ground origin of the last 3D frame (room pixel of frame pixel 0, 0)
@@ -1339,6 +1350,10 @@ static void RoomDumpAroundLink(const uint8 *cls) {
   int holes = 0, upper = 0;
   for (int i = 0; i < 64 * 64; i++)
     holes += g_lower[i], upper += g_upper[i];
+  int bridge = 0;
+  for (int i = 0; i < 64 * 64; i++)
+    bridge += g_hbot[i] != 0;
+  Hd3d_Log("  bridge cells (open below): %d%s", bridge, g_hbot[ly * 64 + lx] ? ", Link's cell is one" : "");
   Hd3d_Log("  two floor levels: %s (%s; %d upper cells, upper floor at %d px; Link's floor %d px), %s",
            g_two_levels ? "yes" : "no", holes ? "BG1 under BG2's holes" : "one layer, ledges", upper, g_level_h,
            g_hfloor[ly * 64 + lx], Bg2Only(ppu) ? "BG1 only through BG2's holes" : "BG1 on the main screen");
@@ -1979,6 +1994,34 @@ static void BuildHeightMap(void) {
       }
     }
   }
+  // Bridges: a narrow strip of upper floor (10 tiles at most) with holes at
+  // both ends, across or along, and the lower floor walkable under it (BG1's
+  // collision): an 8 pixel deck, open below, so the lower level passes
+  // under it. Cells with walls under them stay solid: the supports.
+  memset(g_hbot, 0, sizeof(g_hbot));
+
+  if (holes && g_level_h > 8) {
+    for (int i = 0; i < 64 * 64; i++) {
+      uint8 below = dung_bg1_attr_table[i];
+      if (!g_upper[i] || !(below == 0x00 || below == 0x09))
+        continue;
+      int x = i & 63, y = i >> 6;
+      bool bridge = false;
+      for (int axis = 0; axis < 2 && !bridge; axis++) {
+        int dx = axis ? 1 : 0, dy = axis ? 0 : 1, len = 1;
+        bool ends = true;
+        for (int dir = -1; dir <= 1; dir += 2) {
+          int nx = x + dir * dx, ny = y + dir * dy;
+          while (nx >= 0 && nx < 64 && ny >= 0 && ny < 64 && g_upper[ny * 64 + nx])
+            nx += dir * dx, ny += dir * dy, len++;
+          ends &= nx >= 0 && nx < 64 && ny >= 0 && ny < 64 && g_lower[ny * 64 + nx];
+        }
+        bridge = ends && len <= 10;
+      }
+      if (bridge)
+        g_hbot[i] = (uint8)(g_level_h - 8);
+    }
+  }
   g_hmax = 0;
   for (int i = 0; i < 64 * 64; i++) {
     int f = floor_h[i];
@@ -2048,8 +2091,12 @@ static inline float RayZ(const Cam *cm, const float *d, float t) {
 
 // one surface of height H between t0 and t1, entered through face `entered`:
 // false = the ray passes over it
-static inline bool HitBox(const Cam *cm, const float *d, float t0, float t1, float H, int entered, WallHit *hit) {
+// B: underside of a bridge deck (rays passing below it go on), 0 = solid
+static inline bool HitBox(const Cam *cm, const float *d, float t0, float t1, float H, float B, int entered,
+                          WallHit *hit) {
   float z0 = RayZ(cm, d, t0);
+  if (z0 < B)
+    return false;   // under the deck (rays only go down)
   if (z0 < H) {
     hit->t = t0, hit->z = z0, hit->face = entered;
     return true;
@@ -2082,7 +2129,7 @@ static bool CastPixels(const Cam *cm, const float *d, float px0, float py0, floa
     if (te > t1) te = t1;
     int i = (iy & 511) * 512 + (ix & 511);
     int H = floor_h + g_praise[i];
-    if (H && HitBox(cm, d, t, te, (float)H, entered, hit)) {
+    if (H && HitBox(cm, d, t, te, (float)H, g_hbot[(cy & 63) * 64 + (cx & 63)], entered, hit)) {
       hit->pix = i;
       return true;
     }
@@ -2126,7 +2173,7 @@ static bool CastWalls(const Cam *cm, const Ground *gr, const float *d, float t_e
         got = CastPixels(cm, d, px0, py0, t, te, cx, cy, entered, hit);
       } else {
         hit->pix = -1;
-        got = HitBox(cm, d, t, te, g_hmap[c], entered, hit);
+        got = HitBox(cm, d, t, te, g_hmap[c], g_hbot[c], entered, hit);
       }
       if (got) {
         hit->cell = c;
@@ -2277,11 +2324,22 @@ static void DrawTerrain(uint32 *out, int pitch_px, const Cam *cm, const Ground *
 }
 
 // floor height under frame point (u, v) in the last 3D frame with walls
-static float FloorUnder(float u, float v) {
+// (lower = on the lower level: under a bridge, not on it)
+static float FloorUnder(float u, float v, bool lower) {
   if (!g_depth_valid || !g_two_levels)
     return 0.0f;
   int wx = g_org_x + (int)floorf(u), wy = g_org_y + (int)floorf(v);
-  return g_hfloor[((wy >> 3) & 63) * 64 + ((wx >> 3) & 63)];
+  int c = ((wy >> 3) & 63) * 64 + ((wx >> 3) & 63);
+  return g_hbot[c] && lower ? 0.0f : g_hfloor[c];
+}
+
+// whether a sprite group is on the lower level: Link by his layer, enemies
+// by theirs (sprite_floor)
+static bool GroupLower(int key) {
+  if (key == 0) return link_is_on_lower_level != 0;
+  if (key >= 1 && key <= 16) return sprite_floor[key - 1] != 0;
+  if (key >= 160 && key < 176) return sprite_floor[key - 160] != 0;
+  return false;
 }
 
 typedef struct Group {
@@ -2602,7 +2660,8 @@ static int DrawSprites(uint32 *out, int pitch_px, const Cam *cm, Ppu *ppu) {
     GroupAnchor(g, ppu);
     g->key = g->key << 8 | i;
     float sx, sy, sc;
-    g->depth = Cam_ToScreenH(cm, g->ax, g->ay, FloorUnder(g->ax, g->ay), &sx, &sy, &sc) ? cm->F / sc : -1.0f;
+    g->depth = Cam_ToScreenH(cm, g->ax, g->ay, FloorUnder(g->ax, g->ay, GroupLower(g->key >> 8)), &sx, &sy, &sc)
+                   ? cm->F / sc : -1.0f;
   }
   qsort(groups, n, sizeof(Group), CompareGroups);
 
@@ -2611,7 +2670,7 @@ static int DrawSprites(uint32 *out, int pitch_px, const Cam *cm, Ppu *ppu) {
     int id = (g->key & 0xff) + 1;
     float ax = g->ax, ay = g->ay;   // feet
     float sx, sy, sc;
-    if (!Cam_ToScreenH(cm, ax, ay, FloorUnder(ax, ay), &sx, &sy, &sc)) {
+    if (!Cam_ToScreenH(cm, ax, ay, FloorUnder(ax, ay, GroupLower(g->key >> 8)), &sx, &sy, &sc)) {
       if (dump)
         Hd3d_Log("  group key=%d far=%d box=(%d,%d)-(%d,%d): NOT DRAWN (behind the camera)", g->key >> 8, g->far,
                  g->x0, g->y0, g->x1, g->y1);
@@ -2704,7 +2763,7 @@ void Hd3d_EndFrame(uint8 *pixels, int pitch, int width, int height) {
     float lx = (int16)(link_x_coord - BG2HOFS_copy2) - ppu->objBiasX + ppu->extraLeftRight + 8.0f;
     float ly = (int16)(link_y_coord - BG2VOFS_copy2) - ppu->objBiasY + 20.0f;
     // aim at the floor he stands on (eased when he changes level)
-    g_aim_floor += (FloorUnder(lx, ly + 4.0f) - g_aim_floor) * 0.15f;
+    g_aim_floor += (FloorUnder(lx, ly + 4.0f, link_is_on_lower_level != 0) - g_aim_floor) * 0.15f;
     Cam_SetupThird(&cm, width, height, lx, ly, g_aim_floor);
   } else {
     Cam_Setup(&cm, width, height);
