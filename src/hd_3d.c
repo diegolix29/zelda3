@@ -2597,18 +2597,40 @@ static void OamGroups(const bool *vis, const int *fx, const int *fy, const int *
 static void GroupAnchor(Group *g, Ppu *ppu) {
   g->ax = (g->x0 + g->x1 + 1) * 0.5f, g->ay = (float)(g->y1 + 1);
   int key = g->key, wx, wy;
+  float link_fx = (int16)(link_x_coord + 8 - BG2HOFS_copy2) - ppu->objBiasX + ppu->extraLeftRight;
+  float link_fy = (int16)(link_y_coord + 24 - BG2VOFS_copy2) - ppu->objBiasY;
+  // how far the drawing may hang above its feet: things in the air (a pot
+  // carried over Link's head or thrown, an item held up) stand on the ground
+  // under them, or they slid north across the floor as they rose
+  int lift = 0;
   if (key == 0) {
     wx = link_x_coord + 8, wy = link_y_coord + 24;
+  } else if (key >= 32 && key < 160) {
+    // loose pieces (the item from a chest, held up): on Link while he
+    // receives an item or carries something, when above his head
+    if (!link_receiveitem_index && !(link_state_bits & 0x80))
+      return;
+    float cx = (g->x0 + g->x1 + 1) * 0.5f;
+    if (fabsf(cx - link_fx) > 16.0f || g->y1 >= link_fy || g->y1 < link_fy - 64.0f)
+      return;
+    g->ax = cx, g->ay = link_fy;
+    return;
   } else {
     int slot = key >= 1 && key <= 16 ? key - 1 : key >= 160 && key < 176 ? key - 160 : -1;
     if (slot < 0 || !sprite_state[slot])
       return;
+    if (sprite_state[slot] == 10) {
+      // carried: Link's feet
+      g->ax = (g->x0 + g->x1 + 1) * 0.5f, g->ay = link_fy;
+      return;
+    }
     wx = (sprite_x_hi[slot] << 8 | sprite_x_lo[slot]) + 8;
     wy = (sprite_y_hi[slot] << 8 | sprite_y_lo[slot]) + 16;
+    lift = sprite_z[slot];
   }
   float fx = (int16)(wx - BG2HOFS_copy2) - ppu->objBiasX + ppu->extraLeftRight;
   float fy = (int16)(wy - BG2VOFS_copy2) - ppu->objBiasY;
-  if (fy > g->y1 + 1) fy = (float)(g->y1 + 1);
+  if (fy > g->y1 + 1 + lift) fy = (float)(g->y1 + 1 + lift);
   if (fy < g->y1 + 1 - 32 || fx < g->x0 - 16 || fx > g->x1 + 17)
     return;
   g->ax = fx, g->ay = fy;
