@@ -464,6 +464,156 @@ static void DrawNumberTiles(Canvas *cv, int x, int y, int value, int digits, boo
     DrawTile(cv, x, y, (yellow ? 0x3490 : 0x2490) + buf[i]);
 }
 
+// ---------------------------------------------------------------------------
+// Contatore del tempo (super bomba posata, gioco della pala) e piano del
+// labirinto: nel gioco sono le due caselle a destra nell'HUD originale
+// (Hud_SuperBombIndicator, Hud_FloorIndicator), che l'HUD moderno svuota.
+// Qui diventano "mm:ss.cc" o "1F"/"B1" in caratteri chiari su una fascia scura
+// trasparente con i lati tondi e una piccola Triforza per parte, disegnati da
+// zero.
+
+// Cifre 5x7 a tratto doppio (righe dall'alto, 5 bit), poi B e F dei piani
+static const uint8 kTimerDigits[10][7] = {
+  {0x0e, 0x1b, 0x1b, 0x1b, 0x1b, 0x1b, 0x0e}, {0x06, 0x0e, 0x1e, 0x06, 0x06, 0x06, 0x06},
+  {0x0e, 0x1b, 0x03, 0x06, 0x0c, 0x18, 0x1f}, {0x1e, 0x03, 0x03, 0x0e, 0x03, 0x03, 0x1e},
+  {0x03, 0x07, 0x0b, 0x13, 0x1f, 0x03, 0x03}, {0x1f, 0x18, 0x1e, 0x03, 0x03, 0x1b, 0x0e},
+  {0x0e, 0x18, 0x1e, 0x1b, 0x1b, 0x1b, 0x0e}, {0x1f, 0x03, 0x06, 0x06, 0x0c, 0x0c, 0x0c},
+  {0x0e, 0x1b, 0x1b, 0x0e, 0x1b, 0x1b, 0x0e}, {0x0e, 0x1b, 0x1b, 0x0f, 0x03, 0x03, 0x0e},
+};
+static const uint8 kBandB[7] = { 0x1e, 0x1b, 0x1b, 0x1e, 0x1b, 0x1b, 0x1e };
+static const uint8 kBandF[7] = { 0x1f, 0x18, 0x18, 0x1e, 0x18, 0x18, 0x18 };
+// due punti e punto: 2 colonne
+static const uint8 kTimerColon[7] = { 0, 3, 3, 0, 3, 3, 0 };
+static const uint8 kTimerDot[7] = { 0, 0, 0, 0, 0, 3, 3 };
+// Triforza 7x4 ai due lati
+static const uint8 kBandTriforce[4] = { 0x08, 0x1c, 0x22, 0x77 };
+enum { kTimerH = 7, kTimerBandH = 13, kBandTriW = 7, kBandTriH = 4, kTimerPad = 13 };
+
+// Mescola un colore al pixel che c'e' gia' (a = 0..256)
+static void PxBlend(Canvas *cv, int x, int y, uint32 color, int a) {
+  int yy = y + cv->oy;
+  if ((unsigned)x >= (unsigned)cv->width || (unsigned)yy >= (unsigned)cv->height)
+    return;
+  uint32 old = ((uint32 *)(cv->pixels + yy * cv->scale * cv->pitch))[x * cv->scale];
+  if (g_hud_bri < 15)
+    a = a * g_hud_bri / 15;
+  int r = ((old >> 16 & 255) * (256 - a) + (color >> 16 & 255) * a) >> 8;
+  int g = ((old >> 8 & 255) * (256 - a) + (color >> 8 & 255) * a) >> 8;
+  int b = ((old & 255) * (256 - a) + (color & 255) * a) >> 8;
+  int bri = g_hud_bri;
+  g_hud_bri = 15;  // la luminosita' e' gia' nel peso
+  Px(cv, x, y, r << 16 | g << 8 | b);
+  g_hud_bri = bri;
+}
+
+// Carattere largo 5 (cifre e lettere) o 2 (due punti e punto)
+static const uint8 *BandGlyph(char c, int *w) {
+  *w = 5;
+  if (c >= '0' && c <= '9') return kTimerDigits[c - '0'];
+  if (c == 'B') return kBandB;
+  if (c == 'F') return kBandF;
+  *w = 2;
+  return c == ':' ? kTimerColon : kTimerDot;
+}
+
+// Tempo rimasto in fotogrammi: il gioco conta secondi da 62 fotogrammi
+// (super_bomb_indicator_unk2) e i fotogrammi del secondo (unk1); finisce
+// quando i secondi arrivano a 0. -1 = nessun contatore
+static int TimerFrames(void) {
+  if (player_is_indoors || sign8(super_bomb_indicator_unk2))
+    return -1;
+  if (super_bomb_indicator_unk2 == 0)
+    return 0;
+  return (super_bomb_indicator_unk2 - 1) * 62 + super_bomb_indicator_unk1;
+}
+
+// "mm:ss.cc" in tempo vero (60 fotogrammi al secondo): la super bomba
+// posata dura ~5,2 s
+static void TimerText(int frames, char t[9]) {
+  int cs = frames * 100 / 60, mm = cs / 6000;
+  if (mm > 99) mm = 99;
+  t[0] = '0' + mm / 10, t[1] = '0' + mm % 10, t[2] = ':', t[3] = '0' + cs / 1000 % 6;
+  t[4] = '0' + cs / 100 % 10, t[5] = '.', t[6] = '0' + cs / 10 % 10, t[7] = '0' + cs % 10, t[8] = 0;
+}
+
+// Piano mostrato dopo un cambio di piano (Hud_FloorIndicator, circa 3 s):
+// piano 0 = "1F", -1 = "B1". false = niente
+static bool FloorText(char t[4]) {
+  if (!hud_floor_changed_timer || !player_is_indoors)
+    return false;
+  int8 f = (int8)dung_cur_floor;
+  int n = f >= 0 ? f + 1 : -f;
+  if (n > 9)
+    return false;
+  if (f >= 0)
+    t[0] = '0' + n, t[1] = 'F';
+  else
+    t[0] = 'B', t[1] = '0' + n;
+  t[2] = 0;
+  return true;
+}
+
+// Un punto della fascia: pieno (a < 0) o mescolato al gioco sotto
+static void BandPx(Canvas *cv, int x, int y, uint32 col, int a) {
+  if (a < 0)
+    Px(cv, x, y, col);
+  else
+    PxBlend(cv, x, y, col, a);
+}
+
+// Fascia centrata in cx con il testo t
+static void DrawBand(Canvas *cv, int cx, int y, const char *t) {
+  int tw = 0, gw;
+  for (int i = 0; t[i]; i++)
+    BandGlyph(t[i], &gw), tw += gw == 5 ? 7 : 3;
+  tw--;  // niente spazio dopo l'ultimo carattere
+  int w = tw + 2 * kTimerPad, h = kTimerBandH, x = cx - w / 2;
+  // fascia: lati a semicerchio, interno scuro trasparente, bordo chiaro sottile
+  float rad = h * 0.5f;
+  for (int yy = 0; yy < h; yy++) {
+    float dy = yy + 0.5f - rad;
+    int in = (int)(rad - sqrtf(rad * rad - dy * dy) + 0.5f);
+    for (int xx = in; xx < w - in; xx++) {
+      bool edge = yy == 0 || yy == h - 1 || xx == in || xx == w - 1 - in;
+      if (edge)
+        BandPx(cv, x + xx, y + yy, 0x9cac98, 110);
+      else
+        BandPx(cv, x + xx, y + yy, 0x101a14, 170);
+    }
+  }
+  // Triforze ai lati, bianche come i caratteri e con la stessa ombra
+  int ty = (h - kBandTriH) / 2;
+  for (int pass = 0; pass < 2; pass++)
+    for (int r = 0; r < kBandTriH; r++)
+      for (int c = 0; c < kBandTriW; c++)
+        if (kBandTriforce[r] >> (kBandTriW - 1 - c) & 1) {
+          int d = pass == 0;
+          uint32 col = pass == 0 ? 0x000000 : r == 0 ? 0xffffff : 0xeef2e4;
+          int a = pass == 0 ? 150 : -1;
+          BandPx(cv, x + 4 + c + d, y + ty + r + d, col, a);
+          BandPx(cv, x + w - 4 - kBandTriW + c + d, y + ty + r + d, col, a);
+        }
+  // testo: ombra scura e poi caratteri chiari
+  int py = (h - kTimerH) / 2;
+  for (int pass = 0; pass < 2; pass++) {
+    int px = kTimerPad;
+    for (int i = 0; t[i]; i++) {
+      const uint8 *g = BandGlyph(t[i], &gw);
+      bool digit = gw == 5;
+      for (int r = 0; r < kTimerH; r++)
+        for (int c = 0; c < gw; c++) {
+          if (!(g[r] >> (gw - 1 - c) & 1))
+            continue;
+          if (pass == 0)
+            BandPx(cv, x + px + c + 1, y + py + r + 1, 0x000000, 150);
+          else
+            BandPx(cv, x + px + c, y + py + r, r <= 1 ? 0xffffff : 0xeef2e4, -1);
+        }
+      px += gw + (digit ? 2 : 1);
+    }
+  }
+}
+
 void HdHud_Draw(uint8 *pixels, int pitch, int width, int height, int scale) {
   bool in_dialog = false, in_menu = InItemMenu();
   if (!ModernHudOn() || (!in_menu && !HudContext(&in_dialog)))
@@ -599,4 +749,13 @@ void HdHud_Draw(uint8 *pixels, int pitch, int width, int height, int scale) {
       DrawNumberTiles(&cv, x0 + 10, ry - 10, link_num_keys, 1, false);
     }
   }
+
+  // --- Contatore del tempo o piano del labirinto, in alto al centro a filo
+  // con i cuori
+  char band[9];
+  int frames = TimerFrames();
+  if (frames >= 0)
+    TimerText(frames, band), DrawBand(&cv, W / 2, top, band);
+  else if (FloorText(band))
+    DrawBand(&cv, W / 2, top, band);
 }
