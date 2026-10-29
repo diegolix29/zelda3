@@ -947,6 +947,8 @@ enum { kWallMax = 48 };          // tallest wall, pixels
 static uint8 g_hmap[64 * 64];    // height per 8x8 tile of the room
 static uint8 g_hfold[64 * 64];   // 1 = the surface shows the art z pixels north (fold-up)
 static uint8 g_hbase[64 * 64];   // fold-up: tile row just south of the run (where its face stands)
+static uint8 g_hfoldx[64 * 64];  // east/west walls: 1 = the face looks east (art to its west), 2 = west
+static uint8 g_hbasex[64 * 64];  // and the tile column where that face stands
 static uint8 g_hlayer[64 * 64];  // layer that gave the cell its class (0 = BG2, 1 = BG1)
 static uint8 g_partial[64 * 64]; // 1 = an object cell: only the pixels in g_praise stand up
 static uint8 g_praise[512 * 512];// object cells: height of this pixel, 0 = floor drawn in the tile
@@ -1952,7 +1954,8 @@ static void BuildHeightMap(void) {
   // solid tile at all (a doorway) stays flat. The ceiling (the dark void
   // above walls) does not count toward a wall's height: it becomes a flat
   // dark top at the height of the wall in front of it.
-  uint8 wall[64 * 64], ceil[64 * 64], solid[64 * 64];
+  uint8 wall[64 * 64], ceil[64 * 64], solid[64 * 64], side[64 * 64];
+  memset(side, 0, sizeof(side));
   for (int i = 0; i < 64 * 64; i++) {
     ceil[i] = cls[i] == kCls_Ceiling;
     wall[i] = IsWallClass(cls[i]) && !ceil[i];
@@ -1990,7 +1993,9 @@ static void BuildHeightMap(void) {
         } else if (holes && !g_upper[c] && touches_upper) {
           hgt = g_level_h, fold = false;   // the pit's other walls: up to the rim
         } else if (cy - y0 > 6) {
-          hgt = 32, fold = false;          // east and west walls: long runs, seen from above
+          hgt = 32, fold = false;          // east and west walls: long runs, folded sideways (below)
+          for (int y = y0; y < cy; y++)
+            side[y * 64 + cx] = 1;
         } else if (floor_n && !floor_s) {
           hgt = 16, fold = false;          // south wall: we look at its top
         } else if (!floor_s) {
@@ -2016,6 +2021,29 @@ static void BuildHeightMap(void) {
         continue;
       }
       cy++;
+    }
+  }
+  // East and west walls: in 2D their face is painted as the columns next to
+  // the floor, so it folds up sideways like a north wall's: a face point z
+  // up shows the art z pixels from the face, the top the art shifted by the
+  // height. Each row's run of such cells faces the floor beside it.
+  memset(g_hfoldx, 0, sizeof(g_hfoldx));
+  memset(g_hbasex, 0, sizeof(g_hbasex));
+  for (int cy = 0; cy < 64; cy++) {
+    int cx = 0;
+    while (cx < 64) {
+      if (!side[cy * 64 + cx]) {
+        cx++;
+        continue;
+      }
+      int x0 = cx;
+      while (cx < 64 && side[cy * 64 + cx] && g_hmap[cy * 64 + cx] == g_hmap[cy * 64 + x0])
+        cx++;
+      bool floor_e = cx < 64 && !solid[cy * 64 + cx], floor_w = x0 > 0 && !solid[cy * 64 + x0 - 1];
+      if (floor_e == floor_w)
+        continue;   // floor on both sides (a free-standing wall) or none
+      for (int x = x0; x < cx; x++)
+        g_hfoldx[cy * 64 + x] = floor_e ? 1 : 2, g_hbasex[cy * 64 + x] = (uint8)(floor_e ? cx : x0);
     }
   }
   // ceilings: flat and dark, as high as the wall next to them (south first)
@@ -2363,6 +2391,20 @@ static bool ShadeWall(const Ground *gr, const WallHit *h, uint32 *out, float *fu
     case kFace_East: au = ix - k, av = base - 0.5f - z, shade = 196; break;
     case kFace_West: au = ix + k, av = base - 0.5f - z, shade = 176; break;
     case kFace_North: av = base - 0.5f - z, shade = 150; break;
+    }
+  } else if (g_hfoldx[c]) {
+    // east/west wall folded sideways: the face stands at base, the art
+    // runs away from the floor; the back and the run's ends show the face art
+    int col = (int)floorf(ix * 0.125f);
+    float base = (float)((col - (col & 63) + g_hbasex[c]) * 8);
+    bool east = g_hfoldx[c] == 1;   // the face looks east, the art lies to its west
+    float face_u = east ? base - 0.5f - z : base + 0.5f + z;
+    switch (h->face) {
+    case kFace_Top: au = east ? ix - H : ix + H; break;
+    case kFace_East: au = face_u, shade = east ? 224 : 150; break;
+    case kFace_West: au = face_u, shade = east ? 150 : 224; break;
+    case kFace_South: au = face_u, shade = 200; break;
+    case kFace_North: au = face_u, shade = 176; break;
     }
   } else {
     // flat top (south wall, ceiling): its south rows repeat down the face
