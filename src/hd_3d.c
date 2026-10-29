@@ -974,6 +974,8 @@ static uint8 g_lower[64 * 64];   // 1 = BG2 has a hole there: the cell shows BG1
 static uint8 g_upper[64 * 64];   // 1 = on the upper floor
 static uint8 g_hbot[64 * 64];    // bridges: height of the deck's underside (open below), 0 = solid to the floor
 static bool g_two_levels;
+static bool g_raised;            // some floor is above 0 (two levels or a chest platform)
+enum { kPlatformH = 8 };         // chest platforms (the throne room's dais) above their floor
 static int g_level_h, g_hmax = kWallMax;
 static int g_org_x, g_org_y;     // ground origin of the last 3D frame (room pixel of frame pixel 0, 0)
 static float g_aim_floor;        // third person: floor height under Link, eased
@@ -1890,6 +1892,28 @@ static void BuildHeightMap(void) {
     if (IsWallClass(cls[i]) && (attr[i] >= 0x80 && attr[i] <= 0x8f || attr[i] >= 0xf0))
       cls[i] = kCls_Floor;
   }
+  // Chest platforms (T1 0xdc, also the throne room's dais): the rectangle of
+  // the tiles it drew is raised kPlatformH. Its rim and corner trims are its
+  // edge, flat on top; its front row stays a wall (as tall as the raise, the
+  // art standing up as its face); the stairs in it are a ramp (below)
+  uint8 plat[64 * 64];
+  memset(plat, 0, sizeof(plat));
+  for (int o = 0; objects && o < g_n_room_objs; o++) {
+    if (g_room_objs[o].code != (kHd3d_ObjSubtype1 | 0xdc))
+      continue;
+    int x0 = 64, y0 = 64, x1 = -1, y1 = -1;
+    for (int i = 0; i < 64 * 64; i++) {
+      if (g_tile_obj[0][i] != o + 1 && g_tile_obj[1][i] != o + 1)
+        continue;
+      int x = i & 63, y = i >> 6;
+      x0 = IntMin(x0, x), x1 = IntMax(x1, x), y0 = IntMin(y0, y), y1 = IntMax(y1, y);
+      if (cls[i] == kCls_Small)
+        cls[i] = kCls_Floor;   // the rim, the trims and the steps
+    }
+    for (int y = y0; y <= y1; y++)
+      for (int x = x0; x <= x1; x++)
+        plat[y * 64 + x] = 1;
+  }
   FindUpper(attr, cls);
   bool two = g_two_levels;
   g_level_h = two ? LevelHeight(cls) : 0;
@@ -2034,6 +2058,29 @@ static void BuildHeightMap(void) {
           g_hmap[r] = 0;   // a step, not a wall
         }
       }
+    }
+  }
+  // the platforms' raise; their stairs (collision 0x22) climb it as a ramp
+  g_raised = two;
+  for (int cx = 0; cx < 64; cx++) {
+    for (int cy = 0; cy < 64; cy++) {
+      int c = cy * 64 + cx;
+      if (!plat[c] || wall[c])
+        continue;   // the front row: its wall already reaches the top
+      g_raised = true;
+      if (attr[c] != 0x22) {
+        floor_h[c] = (uint8)(floor_h[c] + kPlatformH);
+        continue;
+      }
+      int y0 = cy, n = 0;
+      while (cy < 64 && plat[cy * 64 + cx] && attr[cy * 64 + cx] == 0x22)
+        n++, cy++;
+      for (int k = 0; k < n; k++) {
+        int r = (y0 + k) * 64 + cx;
+        floor_h[r] = (uint8)(floor_h[r] + kPlatformH * (n - k) / (n + 1));
+        g_hmap[r] = 0;
+      }
+      cy--;
     }
   }
   // Bridges: a narrow strip of upper floor (10 tiles at most) with holes at
@@ -2459,7 +2506,7 @@ static void DrawTerrain(uint32 *out, int pitch_px, const Cam *cm, const Ground *
 // floor height under frame point (u, v) in the last 3D frame with walls
 // (lower = on the lower level: under a bridge, not on it)
 static float FloorUnder(float u, float v, bool lower) {
-  if (!g_depth_valid || !g_two_levels)
+  if (!g_depth_valid || !g_raised)
     return 0.0f;
   int wx = g_org_x + (int)floorf(u), wy = g_org_y + (int)floorf(v);
   int c = ((wy >> 3) & 63) * 64 + ((wx >> 3) & 63);
@@ -2481,6 +2528,8 @@ typedef struct Group {
   float ax, ay;        // feet: where the cutout stands on the ground (GroupAnchor)
   int x0, y0, x1, y1;
   bool far;            // drawn from the OAM table (pieces outside the SNES screen)
+  uint8 solid_depth;   // furniture sprites: a box this deep (DrawSolidSprite), 0 = a cutout
+  uint8 solid_top;     // and the drawing rows on its top
   int n_ents;
   uint16 ents[24];     // entries of a far group (0-127 OAM, then far pieces), first wins
 } Group;
@@ -2564,6 +2613,29 @@ static void GroupAnchor(Group *g, Ppu *ppu) {
   g->ax = fx, g->ay = fy;
 }
 
+// Furniture sprites (the throne room's mantle, statues, blocks): solid boxes
+// fixed in the room, not cutouts turned to the camera. depth = pixels from
+// the front to the back, top = drawing rows shown on the top (the rest stand
+// up on the front, at one row per pixel)
+static const struct { uint8 type, depth, top; } kSolidSprites[] = {
+  { 0xee, 8, 4 },     // movable mantle (Hyrule Castle throne room)
+  { 0x1c, 12, 6 },    // movable statue
+  { 0x38, 12, 6 },    // eye statue
+  { 0x57, 12, 6 },    // desert palace statue
+  { 0x8a, 12, 6 },    // spike block
+  { 0xf2, 12, 6 },    // medallion tablet
+};
+
+static int SolidSprite(int key) {
+  int slot = key >= 1 && key <= 16 ? key - 1 : key >= 160 && key < 176 ? key - 160 : -1;
+  if (slot < 0 || !sprite_state[slot])
+    return -1;
+  for (int i = 0; i < (int)(sizeof(kSolidSprites) / sizeof(kSolidSprites[0])); i++)
+    if (kSolidSprites[i].type == sprite_type[slot])
+      return i;
+  return -1;
+}
+
 static int CompareGroups(const void *a, const void *b) {
   const Group *ga = (const Group *)a, *gb = (const Group *)b;
   // farther away drawn first (with the camera turned, that is not the top)
@@ -2631,6 +2703,102 @@ static bool OamPixel(Ppu *ppu, int oam1, int col, int row, int size, uint32 *out
     return false;
   *out = CgramToPixel(ppu, 0x80 + 16 * ((oam1 >> 9) & 7) + v, 4);
   return true;
+}
+
+// a furniture group's pixel at frame (x, y), from its OAM entries
+static bool SolidPixel(Ppu *ppu, const Group *g, const int *efx, const int *efy, const int *esz, const int *ecf,
+                       int x, int y, uint32 *out) {
+  for (int e = 0; e < g->n_ents; e++) {
+    int i = g->ents[e], lx = x - efx[i], ly = y - efy[i];
+    if ((unsigned)lx < (unsigned)esz[i] && (unsigned)ly < (unsigned)esz[i] && OamPixel(ppu, ecf[i], lx, ly, esz[i], out))
+      return true;
+  }
+  return false;
+}
+
+// A furniture sprite as a box standing on the floor: its front on the
+// drawing's bottom row, `depth` pixels deep, as tall as the drawing minus
+// the rows on its top. The front shows the drawing upright, the top its top
+// rows, the back the front mirrored, the sides the drawing's edge columns.
+// Drawn by splatting points of the faces that look at the camera (a box's
+// visible faces never cover each other), behind the walls by their depth.
+static void DrawSolidSprite(uint32 *out, int pitch_px, const Cam *cm, Ppu *ppu, const Group *g, const int *efx,
+                            const int *efy, const int *esz, const int *ecf) {
+  int w = g_w, h = g_h;
+  float X0 = (float)g->x0, X1 = (float)(g->x1 + 1), Yf = (float)(g->y1 + 1), D = g->solid_depth, Yb = Yf - D;
+  int span = g->y1 - g->y0 + 1, top = g->solid_top < span ? g->solid_top : span - 1;
+  float H = (float)(span - top);
+  float fl = FloorUnder((X0 + X1) * 0.5f, Yf, GroupLower(g->key >> 8));
+  // samples per drawing pixel: two per screen pixel at the nearest corner
+  float scmax = 0.0f;
+  for (int k = 0; k < 8; k++) {
+    float sx, sy, sc;
+    if (Cam_ToScreenH(cm, k & 1 ? X1 : X0, k & 2 ? Yb : Yf, fl + (k & 4 ? H : 0.0f), &sx, &sy, &sc) && sc > scmax)
+      scmax = sc;
+  }
+  if (scmax <= 0.0f)
+    return;
+  float step = 0.5f / scmax;
+  if (step > 1.0f) step = 1.0f;
+  if (step < 0.125f) step = 0.125f;
+  // the camera's side of each face (the curve bends the far ground away, but
+  // a sprite is near Link, where the world is flat)
+  bool south = cm->oy > Yf, north = cm->oy < Yb, west = cm->ox < X0, east = cm->ox > X1;
+  // the drawing's edge columns, per row, for the sides
+  int8 edge_l[256], edge_r[256];
+  for (int r = 0; r < span && r < 256; r++) {
+    uint32 c;
+    edge_l[r] = edge_r[r] = -1;
+    for (int k = 0; k < 4 && edge_l[r] < 0; k++)
+      if (SolidPixel(ppu, g, efx, efy, esz, ecf, g->x0 + k, g->y0 + r, &c)) edge_l[r] = (int8)k;
+    for (int k = 0; k < 4 && edge_r[r] < 0; k++)
+      if (SolidPixel(ppu, g, efx, efy, esz, ecf, g->x1 - k, g->y0 + r, &c)) edge_r[r] = (int8)k;
+  }
+  for (int f = 0; f < 5; f++) {
+    // face f: 0 top, 1 front, 2 back, 3 west, 4 east; (a, b) across and up
+    // (the top: across and back)
+    if ((f == 1 && !south) || (f == 2 && !north) || (f == 3 && !west) || (f == 4 && !east))
+      continue;
+    if (f == 0 && cm->oz <= fl + H)
+      continue;
+    float amax = f <= 2 ? X1 - X0 : D, bmax = f == 0 ? D : H;
+    for (float b = step * 0.5f; b < bmax; b += step) {
+      for (float a = step * 0.5f; a < amax; a += step) {
+        float u, v, z;
+        int col, row;
+        if (f == 0) {
+          u = X0 + a, v = Yf - b, z = H;
+          col = g->x0 + (int)a, row = g->y0 + top - 1 - (int)(b * top / D);
+        } else {
+          z = b, row = g->y1 - (int)b;
+          int r = row - g->y0;
+          if (f == 1) u = X0 + a, v = Yf, col = g->x0 + (int)a;
+          else if (f == 2) u = X1 - a, v = Yb, col = g->x0 + (int)a;   // seen from behind: mirrored
+          else if (f == 3) u = X0, v = Yf - a, col = edge_l[r] < 0 ? -1 : g->x0 + edge_l[r];
+          else u = X1, v = Yf - a, col = edge_r[r] < 0 ? -1 : g->x1 - edge_r[r];
+          if (col < 0)
+            continue;
+        }
+        float sx, sy, sc;
+        if (!Cam_ToScreenH(cm, u, v, fl + z, &sx, &sy, &sc))
+          continue;
+        int px = (int)floorf(sx), py = (int)floorf(sy);
+        if ((unsigned)px >= (unsigned)w || (unsigned)py >= (unsigned)h)
+          continue;
+        int p = py * w + px;
+        if (g_depth_valid && g_depth[p] < cm->F / sc - 2.0f)
+          continue;   // a wall in front
+        uint32 c;
+        if (!SolidPixel(ppu, g, efx, efy, esz, ecf, col, row, &c))
+          continue;
+        if (f >= 3)
+          c = (c & 0xff000000) | Lerp(c, 0, 256 - (f == 3 ? 176 : 196));
+        else if (f == 2)
+          c = (c & 0xff000000) | Lerp(c, 0, 256 - 150);
+        out[py * pitch_px + px] = c, g_uv[p] = PackUv(col, row), g_kind[p] = kKind_Sprite;
+      }
+    }
+  }
 }
 
 static int g_stat_far_groups;
@@ -2791,6 +2959,31 @@ static int DrawSprites(uint32 *out, int pitch_px, const Cam *cm, Ppu *ppu) {
   for (int i = 0; i < n; i++) {
     Group *g = &groups[i];
     GroupAnchor(g, ppu);
+    // furniture: its box from its OAM entries (pixels Link covers in the 2D
+    // frame are still there), standing at the front, the drawing's bottom
+    int s = SolidSprite(g->key);
+    g->solid_depth = 0;
+    if (s >= 0) {
+      if (!g->far) {
+        g->n_ents = 0;
+        for (int e = 0; e < 128 && g->n_ents < (int)(sizeof(g->ents) / sizeof(g->ents[0])); e++)
+          if (evis[e] && GroupKey(e) == g->key)
+            g->ents[g->n_ents++] = (uint16)e;
+      }
+      if (g->n_ents) {
+        g->x0 = g->y0 = 1 << 20, g->x1 = g->y1 = -(1 << 20);
+        for (int e = 0; e < g->n_ents; e++) {
+          int k = g->ents[e];
+          g->x0 = IntMin(g->x0, efx[k]), g->x1 = IntMax(g->x1, efx[k] + esz[k] - 1);
+          g->y0 = IntMin(g->y0, efy[k]), g->y1 = IntMax(g->y1, efy[k] + esz[k] - 1);
+        }
+        g->solid_depth = kSolidSprites[s].depth, g->solid_top = kSolidSprites[s].top;
+        g->ax = (g->x0 + g->x1 + 1) * 0.5f, g->ay = (float)(g->y1 + 1);
+        if (dump)
+          Hd3d_Log("  group key=%d: furniture sprite 0x%02x, a box %dx%d, %d deep", g->key, kSolidSprites[s].type,
+                   g->x1 - g->x0 + 1, g->y1 - g->y0 + 1 - g->solid_top, g->solid_depth);
+      }
+    }
     g->key = g->key << 8 | i;
     float sx, sy, sc;
     g->depth = Cam_ToScreenH(cm, g->ax, g->ay, FloorUnder(g->ax, g->ay, GroupLower(g->key >> 8)), &sx, &sy, &sc)
@@ -2817,6 +3010,10 @@ static int DrawSprites(uint32 *out, int pitch_px, const Cam *cm, Ppu *ppu) {
                depth >= kFogEnd ? " NOT DRAWN (past the fog)" : "");
     if (depth >= kFogEnd)
       continue;
+    if (g->solid_depth) {
+      DrawSolidSprite(out, pitch_px, cm, ppu, g, efx, efy, esz, ecf);
+      continue;
+    }
     // behind a wall: the wall's pixels are nearer than the feet
     float zlimit = depth - 4.0f;
     float inv = 1.0f / sc;
