@@ -16,6 +16,7 @@
 #include "hd_world.h"
 #include "zelda_rtl.h"
 #include "snes/ppu.h"
+#include "hd_fx.h"
 
 // Con il mondo continuo la vista e' piu' larga della telecamera del gioco e
 // spostata rispetto a lei (fino al bordo dell'area la telecamera del gioco
@@ -5560,6 +5561,7 @@ void Ancilla24_Gravestone(int k) {  // 88ee01
   Ancilla_PrepAdjustedOamCoord(k, &pt);
   Oam_AllocateFromRegionB(16);
   OamEnt *oam = GetOamCurPtr();
+  HdFx_OamAsBackground(oam, 4);  // dipinta dallo shader come da ferma
   uint16 x = pt.x, y = pt.y;
   for (int i = 0; i < 4; i++, oam++) {
     Ancilla_SetOam(oam, x, y, kAncilla_Gravestone_Char[i], kAncilla_Gravestone_Flags[i] | 0x3d, 2);

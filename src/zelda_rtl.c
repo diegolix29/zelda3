@@ -654,8 +654,10 @@ void ZeldaDrawPpuFrame(uint8 *pixel_buffer, size_t pitch, uint32 render_flags) {
   HdText_BeforeRender(g_zenv.ppu);
   HdFx_IrisBeforeRender(g_zenv.ppu);
   HdFx_ShadowsBeforeRender(g_zenv.ppu, 256 + 2 * g_zenv.ppu->extraLeftRight, height);
+  HdWater_BeforeRender(g_zenv.ppu, 256 + 2 * g_zenv.ppu->extraLeftRight, height);
   HdFx_IceBeforeRender(g_zenv.ppu);
   HdFx_DiveBeforeRender(g_zenv.ppu);
+  HdFx_AsBgBeforeRender(g_zenv.ppu);
   HdFx_SuperBombBeforeRender(g_zenv.ppu);
   HdFx_FogBeforeRender(g_zenv.ppu);
   HdWorld_BeforeRender(256 + 2 * g_zenv.ppu->extraLeftRight, height);
@@ -696,6 +698,7 @@ void ZeldaDrawPpuFrame(uint8 *pixel_buffer, size_t pitch, uint32 render_flags) {
   HdLight_AfterRender(g_zenv.ppu);
   HdFx_IrisAfterRender(g_zenv.ppu);
   HdFx_ShadowsAfterRender(g_zenv.ppu);
+  HdWater_AfterRender(g_zenv.ppu);
   HdFx_FogAfterRender(g_zenv.ppu);
   HdWorld_Composite(pixel_buffer, (int)pitch, 256 + 2 * g_zenv.ppu->extraLeftRight, height);
   HdWorld_WarpMask(pixel_buffer, (int)pitch, 256 + 2 * g_zenv.ppu->extraLeftRight, height);

@@ -15,6 +15,7 @@
 #include "sprite_main.h"
 #include "hd_burn.h"
 #include "hd_world.h"
+#include "hd_fx.h"
 
 static bool g_ApplyLinksMovementToCamera_called;
 
@@ -6481,8 +6482,10 @@ void Sprite_Dungeon_DrawSinglePushBlock(int j) {  // 87f0d9
   y -= BG2VOFS_copy2 + 1;
   x -= BG2HOFS_copy2;
   uint8 ch = kPushedblock_Char[kPushedBlock_Tab1[pushedblocks_some_index]];
-  if (ch != 0xff)
+  if (ch != 0xff) {
+    HdFx_OamAsBackground(oam, 1);  // dipinto dallo shader come da fermo
     SetOamPlain(oam, x, y, ch, 0x20, 2);
+  }
 }
 
 void Link_Initialize() {  // 87f13c

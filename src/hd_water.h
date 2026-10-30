@@ -7,6 +7,11 @@
 
 extern bool g_fx_water;
 
+struct Ppu;
+// Prima e dopo il disegno della PPU: raccoglie gli sprite trasparenti sommati
+// allo schermo secondario (Ppu.objMathOut), che si vedono sopra l'acqua HD
+void HdWater_BeforeRender(struct Ppu *ppu, int width, int height);
+void HdWater_AfterRender(struct Ppu *ppu);
 // Prima di ombre e luci: copia dell'immagine, per tenere le luci sull'acqua nuova
 void HdWater_BeforeEffects(uint8 *pixels, int pitch, int width, int height);
 // Dopo HdFx_MarkWater: ridisegna l'acqua (layer 7) e le cascate

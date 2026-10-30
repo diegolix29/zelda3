@@ -960,6 +960,20 @@ static void PpuDrawBackgrounds(Ppu *ppu, int y, bool sub) {
   }
 }
 
+// Layer di un pixel per il buffer (bit 24-27): quello del pixel, o 1 (fondale)
+// per gli sprite con objAsBg (0x900 sopra il 4 o il 6)
+static inline uint32 PpuOutLayer(uint32 z) {
+  return (z & 0x900) == 0x900 ? 1 : z >> 8 & 7;
+}
+
+// Sprite sommato allo schermo secondario (Ppu.objMathOut): colore dello sprite
+// da solo, strato del pixel dello schermo secondario (bit 24-26), somma a
+// meta' (bit 30) e il segno (bit 31)
+static inline void PpuObjMathOut(Ppu *ppu, uint32 at, uint32 sub, uint32 r, uint32 g, uint32 b, bool half) {
+  ppu->objMathOut[at] = 0x80000000u | (half ? 0x40000000u : 0) | (sub & 0x700) << 16 |
+      (uint32)ppu->brightnessMult[r] << 16 | (uint32)ppu->brightnessMult[g] << 8 | ppu->brightnessMult[b];
+}
+
 static NOINLINE void PpuDrawWholeLine(Ppu *ppu, uint y) {
   if (ppu->forcedBlank) {
     uint8 *dst = &ppu->renderBuffer[(y - 1) * ppu->renderPitch];
@@ -1023,7 +1037,7 @@ static NOINLINE void PpuDrawWholeLine(Ppu *ppu, uint y) {
         // (0=BG1, 1=BG2, 2=BG3, 3=BG4, 4=OBJ/sprite, 5=backdrop). Il byte
         // alto era inutilizzato; la texture viene caricata come BGRA, quindi
         // lo shader lo legge come canale alpha e sa cosa non deve dipingere.
-        dst[0] = (z & 0x700) << 16 |
+        dst[0] = PpuOutLayer(z) << 24 |
                  ppu->brightnessMult[color & clip_color_mask] << 16 |
                  ppu->brightnessMult[(color >> 5) & clip_color_mask] << 8 |
                  ppu->brightnessMult[(color >> 10) & clip_color_mask];
@@ -1041,6 +1055,9 @@ static NOINLINE void PpuDrawWholeLine(Ppu *ppu, uint y) {
         uint32 g = (color >> 5) & clip_color_mask;
         uint32 b = (color >> 10) & clip_color_mask;
         uint8 *color_map = ppu->brightnessMult;
+        uint32 out_layer = PpuOutLayer(ppu->bgBuffers[0].data[i]);
+        if ((main_layer & 9) == 9)
+          main_layer &= 6;  // objAsBg: per la somma colori resta uno sprite
         if (main_layer & 8) {  // sott'acqua (objUnderWater): meta' sprite e meta' acqua
           main_layer &= 7;
           if (rendered_subscreen && (ppu->bgBuffers[1].data[i] & 0xff) != 0) {
@@ -1051,9 +1068,11 @@ static NOINLINE void PpuDrawWholeLine(Ppu *ppu, uint y) {
           }
         } else if (math_enabled_cur & (1 << main_layer)) {
           if (math_enabled_cur & 0x100) {  // addSubscreen ?
-            if ((ppu->bgBuffers[1].data[i] & 0xff) != 0)
+            if ((ppu->bgBuffers[1].data[i] & 0xff) != 0) {
               color2 = ppu->cgram[ppu->bgBuffers[1].data[i] & 0xff], color_map = half_color_map;
-            else  // Don't halve if ppu->addSubscreen && backdrop
+              if (ppu->objMathOut && main_layer == 4 && !(math_enabled_cur & 0x200))
+                PpuObjMathOut(ppu, (y - 1) * ppu->objMathStride + (uint32)(dst - dst_org), ppu->bgBuffers[1].data[i], r, g, b, ppu->halfColor);
+            } else  // Don't halve if ppu->addSubscreen && backdrop
               color2 = fixed_color;
           } else {
             color2 = fixed_color, color_map = half_color_map;
@@ -1070,7 +1089,7 @@ static NOINLINE void PpuDrawWholeLine(Ppu *ppu, uint y) {
           }
         }
         // Vedi sopra: bit 24-27 = layer di provenienza, per lo shader.
-        dst[0] = (uint32)main_layer << 24 |
+        dst[0] = out_layer << 24 |
                  color_map[b] | color_map[g] << 8 | color_map[r] << 16;
       } while (dst++, ++i < right);
     }
@@ -1453,6 +1472,8 @@ static bool ppu_evaluateSprites(Ppu* ppu, int line) {
     }
     if (ppu->objUnderWater[(index >> 1) & 127])
       z |= 0x800;
+    if (ppu->objAsBg[(index >> 1) & 127])
+      z |= 0x900;
     if (scale) {
       // ogni pixel dello schermo prende il pixel dello sprite che gli
       // corrisponde con la scala attorno al centro (come gli sprite affini GBA)

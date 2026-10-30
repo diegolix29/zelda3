@@ -19,6 +19,7 @@
 #include "hd_water.h"
 #include "hd_menu.h"
 #include "hd_icegba.h"
+#include "hd_fx.h"
 
 // todo: move to config
 static const uint16 kBossRooms[] = {
@@ -2311,6 +2312,7 @@ void Sprite_HandlePushedBlocks_One(int i) {
 
   if (pushedblocks_some_index < 3) {
     uint8 *oam = &g_ram[oam_cur_ptr];
+    HdFx_OamAsBackground(oam, 1);  // dipinto dallo shader come da fermo
     oam[0] = x;
     oam[1] = y;
     oam[2] = 12;

@@ -51,6 +51,10 @@ void HdFx_MenuBlur(uint8 *pixels, int pitch, int width, int height);
 bool HdFx_MenuBlurActive(void);
 // Cerchio di transizione (entrate e uscite) morbido e su tutta la larghezza
 typedef struct Ppu Ppu;
+// Blocchi spinti e lapidi in movimento: le n voci OAM da oam in poi si
+// disegnano con il layer del fondale (Ppu.objAsBg), lo shader le dipinge
+void HdFx_OamAsBackground(const void *oam, int n);
+void HdFx_AsBgBeforeRender(Ppu *ppu);
 void HdFx_IrisBeforeRender(Ppu *ppu);
 void HdFx_IrisAfterRender(Ppu *ppu);
 void HdFx_SoftIris(uint8 *pixels, int pitch, int width, int height);

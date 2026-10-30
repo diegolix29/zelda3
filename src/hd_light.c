@@ -416,6 +416,34 @@ static void CollectSpriteLights(bool dark, int ext, int cam_x, int cam_y, float 
       g_fairy_m[g_num_fairies++] = pulse;
     }
   }
+  // Regina delle fate (Cascata dei Desideri, Stagno della Felicita') e fata
+  // grassa della Piramide: sprite 0x72 con sprite_B (con anche sprite_A sono
+  // le scintille). Compare e scompare con la palette 5 degli sprite
+  // (PaletteFilter_SP5F): l'alone si accende e si spegne con lei
+  for (int k = 0; k < 16; k++) {
+    if (!sprite_state[k] || sprite_type[k] != 0x72 || !sprite_B[k] || sprite_A[k] ||
+        g_num_fairies >= kMaxFairies)
+      continue;
+    int now = 0, full = 0;
+    for (int i = 1; i < 8; i++) {
+      uint16 a = main_palette_buffer[0xd0 + i], b = aux_palette_buffer[0xd0 + i];
+      now += (a & 31) + (a >> 5 & 31) + (a >> 10 & 31);
+      full += (b & 31) + (b >> 5 & 31) + (b >> 10 & 31);
+    }
+    float shown = full ? (float)now / full : 1.0f;
+    if (shown > 1.0f) shown = 1.0f;
+    if (shown < 0.05f)
+      continue;
+    // alone grande: un respiro lento (un ciclo in circa 150 fotogrammi), senza
+    // l'onda veloce delle fate piccole che su questo raggio lampeggiava
+    float pulse = 0.88f + 0.10f * sinf(t * 0.2f);  // t = fotogrammi * 0.21
+    // disegno di 32x40 (48 alto per la fata grassa) dall'angolo dello sprite
+    g_fairy_x[g_num_fairies] = (sprite_x_hi[k] << 8 | sprite_x_lo[k]) + 16 - cam_x + ext;
+    g_fairy_y[g_num_fairies] = (sprite_y_hi[k] << 8 | sprite_y_lo[k]) + 22 - (int8)sprite_z[k] - cam_y;
+    g_fairy_r[g_num_fairies] = 34.0f;
+    g_fairy_box[g_num_fairies] = 14;
+    g_fairy_m[g_num_fairies++] = pulse * shown;
+  }
 }
 
 // Lava (per esempio nella Rocca Tartaruga): sono tile animati del fondale (i

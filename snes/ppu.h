@@ -83,9 +83,20 @@ struct Ppu {
   // sopra il fondale ma si mescolano a meta' con lo schermo secondario
   // (l'acqua), come su GBA; nel buffer i loro pixel hanno il bit 0x800
   uint8_t objUnderWater[128];
+  // Oggetti spinti che da fermi sono caselle del fondale (blocchi, lapidi;
+  // hd_fx.c): le voci OAM con objAsBg escono con il layer 1, cosi' lo shader
+  // le dipinge anche mentre si muovono. Nel buffer i pixel hanno 0x900
+  uint8_t objAsBg[128];
   // Scala delle voci OAM in 1/256 (0 = normale): lo sprite si disegna
   // ingrandito o rimpicciolito attorno al suo centro (super bomba, hd_fx.c)
   uint16_t objScale[128];
+  // Sprite trasparenti (hd_water.c): per ogni pixel del fotogramma
+  // (objMathOut, objMathStride per riga) in cui la PPU somma uno sprite allo
+  // schermo secondario, il colore dello sprite da solo con il bit 31 (bit 30:
+  // somma a meta'; bit 24-26: strato del pixel dello schermo secondario).
+  // Chi chiama azzera il buffer; NULL = non serve
+  uint32_t *objMathOut;
+  int objMathStride;
   float mode7PerspectiveLow, mode7PerspectiveHigh;
   // Spostamento visivo della telecamera fluida (non tocca la logica di gioco)
   int16_t bgBiasX, bgBiasY, objBiasX, objBiasY;

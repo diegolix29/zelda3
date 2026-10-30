@@ -258,6 +258,40 @@ static bool EnsureBuffers(int n) {
   return true;
 }
 
+// Sprite trasparenti sull'acqua (la regina delle fate che sale dalla vasca,
+// la fata grassa della Piramide): la PPU li somma allo schermo secondario,
+// cioe' all'acqua del gioco, e attraverso lo sprite si vedeva l'acqua
+// originale. La PPU scrive qui il colore dello sprite da solo (objMathOut):
+// sotto questi pixel l'acqua HD si dipinge (KeepSpritesOverWater) e poi lo
+// sprite si somma all'acqua nuova come fa la PPU (AddSeeThroughSprites)
+static uint32 *g_obj_math;
+static int g_obj_math_cap;
+static bool g_obj_math_valid;
+static int g_num_see_through;
+
+void HdWater_BeforeRender(Ppu *ppu, int width, int height) {
+  int mod;
+  ppu->objMathOut = NULL;
+  g_obj_math_valid = false;
+  if (!InScene(&mod) || ppu->mode == 7)
+    return;
+  int n = width * height;
+  if (n > g_obj_math_cap) {
+    uint32 *p = realloc(g_obj_math, n * sizeof(uint32));
+    if (!p)
+      return;
+    g_obj_math = p, g_obj_math_cap = n;
+  }
+  memset(g_obj_math, 0, n * sizeof(uint32));
+  ppu->objMathOut = g_obj_math;
+  ppu->objMathStride = width;
+}
+
+void HdWater_AfterRender(Ppu *ppu) {
+  g_obj_math_valid = ppu->objMathOut != NULL;
+  ppu->objMathOut = NULL;
+}
+
 void HdWater_BeforeEffects(uint8 *pixels, int pitch, int width, int height) {
   int mod;
   g_pre_valid = false;
@@ -1810,12 +1844,86 @@ static void SpritesShowBackground(int w, int h, int ext) {
 }
 
 // Alla fine: l'acqua sotto gli sprite resta acqua per le distanze dalla riva,
-// ma non si dipinge (7): lo sprite resta com'e'
-static void KeepSpritesOverWater(int n) {
-  for (int i = 0; i < n; i++) {
+// ma non si dipinge (7): lo sprite resta com'e'. Gli sprite trasparenti
+// (g_obj_math) restano acqua da dipingere: si sommano dopo. Solo se lo strato
+// sommato e' quello sotto lo sprite: con la pioggia e le nebbie il gioco
+// somma lo strato della pioggia, e lo sprite deve restare com'e'
+static bool SeeThroughWater(int i, int w, int ext) {
+  int n, wx, wy;
+  return BgUnderSprite(i % w, i / w, ext, &n, &wx, &wy) >= 0 && n == (int)(g_obj_math[i] >> 24 & 7);
+}
+
+static void KeepSpritesOverWater(int w, int h, int ext) {
+  g_num_see_through = 0;
+  for (int i = 0; i < w * h; i++) {
     uint32 l = g_pre[i] >> 24;
-    if (g_kind[i] == 1 && (l == 4 || l == 6))
+    if (g_kind[i] != 1 || (l != 4 && l != 6))
+      continue;
+    if (g_obj_math_valid && (g_obj_math[i] >> 31) && SeeThroughWater(i, w, ext))
+      g_num_see_through++;
+    else if (g_obj_math_valid)
+      g_obj_math[i] = 0, g_kind[i] = 7;
+    else
       g_kind[i] = 7;
+  }
+}
+
+static inline bool SeeThrough(int i) {
+  return g_obj_math_valid && (g_obj_math[i] >> 31) && g_kind[i] == 1;
+}
+
+// Prima di dipingere gli sprite trasparenti: il pixel illuminato era sprite
+// piu' acqua, e la luce (LightRatio) si prende dall'acqua accanto sulla
+// stessa riga applicata al colore dell'acqua sotto lo sprite (g_pre)
+static void SeeThroughLight(uint8 *pixels, int pitch, int w, int h) {
+  for (int y = 0; y < h; y++) {
+    uint32 *row = (uint32 *)(pixels + y * pitch);
+    const uint32 *pre = g_pre + y * w;
+    int ref = -1;
+    for (int x = 0; x < w; x++) {
+      int i = y * w + x;
+      uint32 l = pre[x] >> 24;
+      if (!SeeThrough(i)) {
+        if (g_kind[i] == 1 && l != 4 && l != 6)
+          ref = x;
+        continue;
+      }
+      int r = ref;
+      for (int xx = x + 1; r < 0 && xx < w; xx++) {
+        uint32 ll = pre[xx] >> 24;
+        if (g_kind[i - x + xx] == 1 && ll != 4 && ll != 6)
+          r = xx;
+      }
+      uint32 out = pre[x] & 0xff000000;
+      for (int sh = 0; sh <= 16; sh += 8) {
+        float b = (float)(pre[x] >> sh & 0xff), v = b;
+        if (r >= 0)
+          v = (b + 6) * ((row[r] >> sh & 0xff) + 6.0f) / ((pre[r] >> sh & 0xff) + 6.0f) - 6;
+        int iv = v < 0 ? 0 : v > 255 ? 255 : (int)(v + 0.5f);
+        out |= (uint32)iv << sh;
+      }
+      row[x] = out;
+    }
+  }
+}
+
+// Dopo l'acqua: lo sprite si somma all'acqua HD come nella PPU (a meta' se il
+// gioco somma a meta'); il pixel torna sprite per gli effetti dopo
+static void AddSeeThroughSprites(uint8 *pixels, int pitch, int w, int h) {
+  for (int y = 0; y < h; y++) {
+    uint32 *row = (uint32 *)(pixels + y * pitch);
+    for (int x = 0; x < w; x++) {
+      int i = y * w + x;
+      if (!SeeThrough(i))
+        continue;
+      uint32 o = g_obj_math[i], out = 4u << 24;
+      for (int sh = 0; sh <= 16; sh += 8) {
+        int a = row[x] >> sh & 0xff, s = o >> sh & 0xff;
+        int v = (o & 0x40000000) ? (a + s) >> 1 : a + s;
+        out |= (uint32)(v > 255 ? 255 : v) << sh;
+      }
+      row[x] = out;
+    }
   }
 }
 
@@ -2335,14 +2443,18 @@ void HdWater_Apply(uint8 *pixels, int pitch, int width, int height, int bias_x, 
         g_kind[i] &= ~0x40;
     }
   }
-  KeepSpritesOverWater(w * h);
+  KeepSpritesOverWater(w, h, ext);
   // fino a 27 pixel: piu' in la' l'acqua e' gia' "al largo" (deep = 1)
   ComputeDistance(w, h, 2, 3, 27);
   BlurWater(w, h, kBlurRadius);
 
   // 1 e 2: acqua
+  if (g_num_see_through)
+    SeeThroughLight(pixels, pitch, w, h);
   PaintJob pj = { pixels, pitch, w, h, cam_x, cam_y, ext, t, outdoors, see_floor, dark_shore };
   HdPar_For(PaintWaterRows, &pj, h);
+  if (g_num_see_through)
+    AddSeeThroughSprites(pixels, pitch, w, h);
 
   // 3: cascate
   g_num_bases = 0;

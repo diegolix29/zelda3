@@ -1544,7 +1544,7 @@ void HdFx_Fog(uint8 *pixels, int pitch, int width, int height, int bias_x, int b
   }
   // colori della nebbia a 8 bit, con la luminosita' del gioco: densita' 0 =
   // medio, verso 1 il chiaro, verso -1 lo scuro
-  // nel Bosco d'Ossa (Mondo delle Tenebre) il chiaro dello strato e' poco
+  // nel Bosco d'Ossa (Mondo delle Tenebre) il chiaro dello strato e' poco
   // distante dal medio: le nuvole chiare si fanno un po' piu' evidenti
   float mid[3], up[3], down[3];
   float up_k = (overworld_screen_index & 0x40) ? kFogDarkWorldLight : 1.0f;
@@ -2182,6 +2182,25 @@ void HdFx_IceBeforeRender(Ppu *ppu) {
     else
       ppu->objIce[i] = (oam1 & 0x1ff) == 0x48 || (oam1 & 0x1ff) == 0x58;
   }
+}
+
+// Oggetti spinti che da fermi sono caselle del fondale: il blocco dei
+// labirinti (Sprite_HandlePushedBlocks_One, Sprite_Dungeon_DrawSinglePushBlock)
+// e la lapide (Ancilla24_Gravestone) mentre si muovono sono sprite, e lo
+// shader Four Swords smetteva di dipingerli fino a quando si fermavano.
+// Chi li disegna segna le voci OAM con il fotogramma (frame_counter | 0x100):
+// valgono solo per il fotogramma in cui sono state scritte
+static uint16 g_oam_as_bg[128];
+
+void HdFx_OamAsBackground(const void *oam, int n) {
+  int i = (int)((const uint8 *)oam - &g_ram[0x800]) >> 2;
+  for (; n > 0 && i >= 0 && i < 128; n--, i++)
+    g_oam_as_bg[i] = frame_counter | 0x100;
+}
+
+void HdFx_AsBgBeforeRender(Ppu *ppu) {
+  for (int i = 0; i < 128; i++)
+    ppu->objAsBg[i] = g_oam_as_bg[i] == (frame_counter | 0x100);
 }
 
 // Immersione al chiuso come su GBA (0x80a5298): Link resta sopra il fondale

@@ -636,7 +636,13 @@ void HdWorld_SpriteBegin(int k) {
       }
       spr_disturbed[k] &= ~2;
     } else {
+      // gli altri si fermano per questo passo e poi tornano a fare quello che
+      // facevano senza Link. Prima il segno restava: chi aveva visto Link
+      // veniva rimesso al suo posto a ogni passo e restava fermo per sempre
+      // appena oltre la vista (i granchi del Lago Hylia sul bordo dello
+      // schermo largo)
       g_sight_lost = true;
+      spr_disturbed[k] &= ~2;
     }
   }
   g_sight_alert = sprite_alert_flag;
@@ -2400,6 +2406,7 @@ static void RenderApart(const bool *sel, const GuestGfx *gfx, int width, int hei
     LoadGfx(p, gfx);
     memset(p->objIce, 0, sizeof(p->objIce));
     memset(p->objUnderWater, 0, sizeof(p->objUnderWater));
+    memset(p->objAsBg, 0, sizeof(p->objAsBg));
   }
   p->brightness = 15;  // la luminosita' del gioco si applica dopo (Dim)
   p->forcedBlank = false;
@@ -2997,6 +3004,7 @@ static void LiveRender(LiveArea *la, int width, int height) {
   memset(p->objCastShadow, 0, sizeof(p->objCastShadow));
   memset(p->objIce, 0, sizeof(p->objIce));
   memset(p->objUnderWater, 0, sizeof(p->objUnderWater));
+  memset(p->objAsBg, 0, sizeof(p->objAsBg));
   memset(p->objScale, 0, sizeof(p->objScale));
   for (int i = 0; i <= height; i++)
     ppu_runLine(p, i);
