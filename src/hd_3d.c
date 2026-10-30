@@ -1114,8 +1114,8 @@ static int ObjectClass(int code) {
   case kHd3d_ObjSubtype3:
     if (id <= 0x02 || id == 0x0d || id == 0x17 || id == 0x18 || id == 0x69 || id == 0x6a || id == 0x6e || id == 0x6f)
       return kCls_Wall;
-    if (id == 0x19 || id == 0x2f || id == 0x5a)
-      return kCls_Small;
+    if (id == 0x19 || id == 0x2f || id == 0x5a || id == 0x12)
+      return kCls_Small;   // 0x12: rupee floor
     if (id == 0x2c || id == 0x31 || id == 0x32 || id == 0x16)
       return kCls_Block;
     if (id == 0x4d || id == 0x5d || id == 0x2d)
@@ -1595,9 +1595,9 @@ static bool IsMaskedClass(int c) {
 // north of it; a column too short for both keeps a 4 pixel deep footprint
 // and a lower face.
 // collision of a solid object (pots, columns, statues): anything but the
-// floor, water, holes, stairs and ledges
+// floor, water, holes, stairs, ledges and floor rupees (0x60, walked through)
 static bool IsFootAttr(uint8 a) {
-  return a != 0x00 && a != 0x08 && a != 0x09 && !(a >= 0x1c && a <= 0x1f) && !(a >= 0x28 && a <= 0x2b);
+  return a != 0x00 && a != 0x08 && a != 0x09 && !(a >= 0x1c && a <= 0x1f) && !(a >= 0x28 && a <= 0x2b) && a != 0x60;
 }
 
 static void BuildPixelMasks(Ppu *ppu, const uint8 *cls, const uint8 *attr) {
