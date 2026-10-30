@@ -214,19 +214,13 @@ static int DrawChar(Canvas *cv, int x, int y, uint32 c, uint32 color) {
   int g = Font_GlyphFor(c);
   if (g >= 0 && g < g_font_count && g_font_data) {
     int w = g_font_width[g];
-    int tile = (g & 0x70) * 2 + (g & 0xf);
-    for (int half = 0; half < 2; half++) {
-      const uint8 *t = g_font_data + (tile + half * 16) * 16;
-      for (int row = 0; row < 8; row++) {
-        uint8 d0 = t[row * 2], d1 = t[row * 2 + 1];
-        for (int col = 0; col < 8; col++) {
-          int bit = 7 - col;
-          int v = (d0 >> bit & 1) | (d1 >> bit & 1) << 1;
-          if (v == 1)
-            Canvas_Pixel(cv, x + col, y + half * 8 + row, 0x101018);
-          else if (v >= 2)
-            Canvas_Pixel(cv, x + col, y + half * 8 + row, color);
-        }
+    for (int row = 0; row < 16; row++) {
+      for (int col = 0; col < 8; col++) {
+        int v = HdFx_GameGlyphPixel(g_font_data, g, row, col);
+        if (v == 1)
+          Canvas_Pixel(cv, x + col, y + row, 0x101018);
+        else if (v >= 2)
+          Canvas_Pixel(cv, x + col, y + row, color);
       }
     }
     return w;
@@ -1228,15 +1222,37 @@ static void DrawButtonHints(Canvas *cv) {
   }
 }
 
+// Labirinti per indice (cur_palace_index_x2 / 2): nome (sulla mappa del
+// labirinto e, se banner, all'ingresso) e livello dei labirinti del Mondo
+// delle Tenebre (0 = senza livello). Come su GBA (tabella dei messaggi
+// 0x814e498) fogne, Castello di Hyrule e torre di Agahnim non hanno la
+// scritta all'ingresso.
+typedef struct DungeonEntry {
+  const char *name;
+  uint8 level;
+  bool banner;
+} DungeonEntry;
+
+static const DungeonEntry kDungeons[14] = {
+  { "Fogne del castello", 0, false },
+  { "Castello di Hyrule", 0, false },
+  { "Palazzo dell'Est", 0, true },
+  { "Castello di Sabbia", 0, true },
+  { "Sala superiore del castello", 0, false },  // torre di Agahnim
+  { "Dedalo d'Acqua", 2, true },
+  { "Palazzo Cupo", 1, true },
+  { "Malapalude", 6, true },
+  { "Bosco d'Ossa", 3, true },
+  { "Forte Ghiaccio", 5, true },
+  { "Torre sul Monte", 0, true },
+  { "Tana dei Ladroni", 4, true },
+  { "Rocca Tartaruga", 7, true },
+  { "Torre di Ganon", 8, true },
+};
+
 // Nome del labirinto mostrato sulla mappa del dungeon, in alto al centro
 // (parte della mappa dei labirinti migliorata, ImprovedDungeonMap)
 static void DrawDungeonMapStatus(Canvas *cv) {
-  static const char *const kDungeonNames[14] = {
-    "Fogne del castello", "Castello di Hyrule", "Palazzo dell'Est", "Castello di Sabbia",
-    "Sala superiore del castello", "Dedalo d'Acqua", "Palazzo Cupo", "Malapalude",
-    "Bosco d'Ossa", "Forte Ghiaccio", "Torre sul Monte", "Tana dei Ladroni",
-    "Rocca Tartaruga", "Torre di Ganon",
-  };
   if (!(enhanced_features0 & kFeatures0_ImprovedDungeonMap))
     return;
   if (main_module_index != 14 || submodule_index != 3 || overworld_map_state < 2 || overworld_map_state > 4)
@@ -1244,7 +1260,7 @@ static void DrawDungeonMapStatus(Canvas *cv) {
   int dung = cur_palace_index_x2 >> 1;
   if (dung < 0 || dung >= 14)
     return;
-  const char *name = Tr(kDungeonNames[dung]);
+  const char *name = Tr(kDungeons[dung].name);
   int w = TextWidth(name);
   int x = (cv->width - w) / 2;
   Canvas_Rect(cv, x - 8, 4, w + 16, 18, 0x101830);
@@ -1362,31 +1378,6 @@ static void GbaText(Canvas *cv, int x, int y, const char *s, int pass) {
   }
 }
 
-// Nomi dei dungeon per indice (cur_palace_index_x2 / 2), con il livello dei
-// dungeon del Mondo delle Tenebre (0 = senza livello). Come su GBA (tabella dei
-// messaggi 0x814e498) fogne, Castello di Hyrule e torre di Agahnim non ne hanno.
-typedef struct DungeonEntry {
-  uint8 level;
-  const char *name;
-} DungeonEntry;
-
-static const DungeonEntry kDungeonEntries[14] = {
-  { 0, NULL },                       // fogne
-  { 0, NULL },                       // Castello di Hyrule
-  { 0, "Palazzo dell'Est" },
-  { 0, "Castello di Sabbia" },
-  { 0, NULL },                       // torre di Agahnim
-  { 2, "Dedalo d'Acqua" },
-  { 1, "Palazzo Cupo" },
-  { 6, "Malapalude" },
-  { 3, "Bosco d'Ossa" },
-  { 5, "Forte Ghiaccio" },
-  { 0, "Torre sul Monte" },
-  { 4, "Tana dei Ladroni" },
-  { 7, "Rocca Tartaruga" },
-  { 8, "Torre di Ganon" },
-};
-
 static const DungeonEntry *g_dungeon_name;
 static bool g_dungeon_name_armed;
 static uint16 g_dungeon_name_x, g_dungeon_name_y;
@@ -1404,8 +1395,8 @@ void HdMenu_ShowDungeonName(void) {
   g_dungeon_name_tick = 0;
   g_dungeon_name_held = false;
   uint16 i = cur_palace_index_x2 >> 1;
-  if (cur_palace_index_x2 != 0xff && i < countof(kDungeonEntries) && kDungeonEntries[i].name)
-    g_dungeon_name = &kDungeonEntries[i];
+  if (cur_palace_index_x2 != 0xff && i < countof(kDungeons) && kDungeons[i].banner)
+    g_dungeon_name = &kDungeons[i];
 }
 
 static int GbaTextWidth(const char *s) {

@@ -22,6 +22,7 @@
 #include "zelda_rtl.h"
 #include "variables.h"
 #include "features.h"
+#include "hd_fx.h"
 
 int g_trans_link_dx, g_trans_link_dy;
 
@@ -86,7 +87,7 @@ int HdTrans_ScrollSteps(const HdTransPlan *p) {
 static int CurrentKind(HdTransPlan *plan) {
   if (!(enhanced_features0 & kFeatures0_FastTransitions))
     return kKind_None;
-  if (main_module_index == 7 && (submodule_index == 1 || submodule_index == 2))
+  if (HdFx_RoomScroll())
     return Dungeon_TransitionPlan(plan) ? kKind_Dungeon : kKind_None;
   if (main_module_index == 9)
     return Overworld_TransitionPlan(plan) ? kKind_Outdoors : kKind_None;

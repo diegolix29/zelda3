@@ -199,18 +199,13 @@ static void Px(Canvas *cv, int x, int y, uint32 color) {
   if ((unsigned)x >= (unsigned)cv->width || (unsigned)y >= (unsigned)cv->height)
     return;
   if (g_hud_bri < 15)
-    color = ((color >> 16 & 0xff) * g_hud_bri / 15) << 16 | ((color >> 8 & 0xff) * g_hud_bri / 15) << 8 | (color & 0xff) * g_hud_bri / 15;
+    color = HdFx_DimRgb(color, g_hud_bri);
   int s = cv->scale;
   for (int yy = 0; yy < s; yy++) {
     uint32 *row = (uint32 *)(cv->pixels + (y * s + yy) * cv->pitch);
     for (int xx = 0; xx < s; xx++)
       row[x * s + xx] = (color & 0xffffff) | 0x02000000;  // alpha 2 = HUD
   }
-}
-
-static uint32 Bgr15ToRgb(uint16 c) {
-  uint32 r = c & 31, g = c >> 5 & 31, b = c >> 10 & 31;
-  return (r << 3 | r >> 2) << 16 | (g << 3 | g >> 2) << 8 | (b << 3 | b >> 2);
 }
 
 // Una casella 8x8 dello strato 3 (2 bit per pixel) come la disegnerebbe la PPU
@@ -227,7 +222,7 @@ static void DrawTile(Canvas *cv, int x, int y, uint16 entry) {
       int bit = hf ? c : 7 - c;
       int v = (w >> bit & 1) | (w >> (8 + bit) & 1) << 1;
       if (v)
-        Px(cv, x + c, y + r, (max_digit && v == 2) ? 0xffde52 : Bgr15ToRgb(ppu->cgram[pal * 4 + v]));
+        Px(cv, x + c, y + r, (max_digit && v == 2) ? 0xffde52 : HdFx_Bgr15ToRgb(ppu->cgram[pal * 4 + v]));
     }
   }
 }
@@ -243,7 +238,7 @@ static void DecodeTile(uint16 entry, uint32 *out, int stride) {
     for (int c = 0; c < 8; c++) {
       int bit = hf ? c : 7 - c;
       int v = (w >> bit & 1) | (w >> (8 + bit) & 1) << 1;
-      out[r * stride + c] = v ? (Bgr15ToRgb(ppu->cgram[pal * 4 + v]) | 0xff000000) : 0;
+      out[r * stride + c] = v ? (HdFx_Bgr15ToRgb(ppu->cgram[pal * 4 + v]) | 0xff000000) : 0;
     }
   }
 }
@@ -964,15 +959,13 @@ static int MtAdvance(int c) {
 static void DrawGameGlyph(Canvas *cv, int x, int y, int c, int clip0, int clip1, int alpha) {
   const uint8 *font = FindIndexInMemblk(g_zenv.dialogue_font_blk, 0).ptr;
   int w = GameGlyphWidth(c), pal = text_tilemap_cur >> 10 & 7;
-  int tile = (c & 0x70) * 2 + (c & 0xf);
   for (int r = 0; r < 16; r++) {
     if (y + r < clip0 || y + r >= clip1)
       continue;
-    const uint8 *p = font + (tile + (r < 8 ? 0 : 16)) * 16 + (r & 7) * 2;
     for (int i = 0; i < w; i++) {
-      int v = (p[0] >> (7 - i) & 1) | (p[1] >> (7 - i) & 1) << 1;
+      int v = HdFx_GameGlyphPixel(font, c, r, i);
       if (v)
-        BandPx(cv, x + i, y + r, Bgr15ToRgb(g_zenv.ppu->cgram[pal * 4 + v]), alpha >= 256 ? -1 : alpha);
+        BandPx(cv, x + i, y + r, HdFx_Bgr15ToRgb(g_zenv.ppu->cgram[pal * 4 + v]), alpha >= 256 ? -1 : alpha);
     }
   }
 }
@@ -1012,7 +1005,7 @@ static void DrawModernLine(Canvas *cv, int x, int y, int line, int clip0, int cl
             int v = (t[0] >> (7 - b) & 1) | (t[1] >> (7 - b) & 1) << 1 |
                     (t[16] >> (7 - b) & 1) << 2 | (t[17] >> (7 - b) & 1) << 3;
             if (v)
-              BandPx(cv, px + b, yy, Bgr15ToRgb(pal[v]), alpha >= 256 ? -1 : alpha);
+              BandPx(cv, px + b, yy, HdFx_Bgr15ToRgb(pal[v]), alpha >= 256 ? -1 : alpha);
           }
         }
         continue;

@@ -217,6 +217,20 @@ static void AddFireLight(float x, float y, float radius, float r, float g, float
   AddFireLightDir(x, y, radius, r, g, b, strength, 0);
 }
 
+// Tremolio di torce, bracieri e fate: tf = tempo / 2, ph = fase propria
+static inline float FlamePulse(float tf, float ph) {
+  return 0.82f + 0.12f * sinf(tf * 1.6f + ph) + 0.06f * sinf(tf * 4.1f + ph * 2.0f);
+}
+
+// Luce di una torcia o di un braciere: grande e calda nelle stanze buie,
+// piccola altrove
+static void TorchLight(float x, float y, float pulse, bool dark, int dir) {
+  if (dark)
+    AddFireLightDir(x, y, 100 * pulse, 1.30f * pulse, 1.05f * pulse, 0.72f * pulse, 0.8f, dir);
+  else
+    AddFireLightDir(x, y, 40 * (0.92f + 0.08f * pulse), 0.68f * pulse, 0.44f * pulse, 0.16f * pulse, 0.8f, dir);
+}
+
 static bool IsFireAncilla(int type, float *radius) {
   switch (type) {
   case 0x02: *radius = 36; return true;   // colpo della Bacchetta del Fuoco
@@ -305,12 +319,7 @@ static void CollectLights(const uint8 *pixels, int pitch, int height, int mod, b
       float x = ox + d->x - cam_x + ext, y = oy + d->y - cam_y;
       if (BlackAround(pixels, pitch, frame_w, height, x, y))
         continue;
-      float ph = d->phase * 0.1f;
-      float pulse = 0.82f + 0.12f * sinf(tf * 1.6f + ph) + 0.06f * sinf(tf * 4.1f + ph * 2.0f);
-      if (dark)
-        AddFireLightDir(x, y, 100 * pulse, 1.30f * pulse, 1.05f * pulse, 0.72f * pulse, 0.8f, d->dir);
-      else
-        AddFireLightDir(x, y, 40 * (0.92f + 0.08f * pulse), 0.68f * pulse, 0.44f * pulse, 0.16f * pulse, 0.8f, d->dir);
+      TorchLight(x, y, FlamePulse(tf, d->phase * 0.1f), dark, d->dir);
     }
     // Link con la Lanterna (nelle stanze buie); senza Lanterna una luce minima
     if (dark) {
@@ -407,8 +416,7 @@ static void CollectSpriteLights(bool dark, int ext, int cam_x, int cam_y, float 
       continue;
     float x = (sprite_x_hi[k] << 8 | sprite_x_lo[k]) + 8 - cam_x + ext;
     float y = (sprite_y_hi[k] << 8 | sprite_y_lo[k]) + 8 - (int8)sprite_z[k] - cam_y;
-    float ph = k * 1.7f, tf = t * 0.5f;
-    float pulse = 0.82f + 0.12f * sinf(tf * 1.6f + ph) + 0.06f * sinf(tf * 4.1f + ph * 2.0f);
+    float pulse = FlamePulse(t * 0.5f, k * 1.7f);
     if (g_num_fairies < kMaxFairies) {
       g_fairy_x[g_num_fairies] = x, g_fairy_y[g_num_fairies] = y;
       g_fairy_r[g_num_fairies] = big ? 24.0f : 9.0f;
@@ -573,12 +581,7 @@ static void CollectLavaLights(const uint8 *pixels, int pitch, int width, int hei
           // da sola non e' una pozza ma una fiamma che non si e' riconosciuta
           // fra le torce (per esempio i bracieri della casa del vecchio sulla
           // Montagna della Morte): la luce di una torcia
-          float ph = (col * 7 + row * 13) * 0.1f, tf = t * 0.5f;
-          float pulse = 0.82f + 0.12f * sinf(tf * 1.6f + ph) + 0.06f * sinf(tf * 4.1f + ph * 2.0f);
-          if (dark)
-            AddFireLight(sx + 4, sy + 4, 100 * pulse, 1.30f * pulse, 1.05f * pulse, 0.72f * pulse, 0.8f);
-          else
-            AddFireLight(sx + 4, sy + 4, 40 * (0.92f + 0.08f * pulse), 0.68f * pulse, 0.44f * pulse, 0.16f * pulse, 0.8f);
+          TorchLight(sx + 4, sy + 4, FlamePulse(t * 0.5f, (col * 7 + row * 13) * 0.1f), dark, 0);
           continue;
         }
         float pulse = 0.85f + 0.15f * sinf(t * 0.9f + (col + row) * 0.6f);
@@ -654,9 +657,7 @@ static void ApplyFairyGlow(uint8 *pixels, int pitch, int width, int height) {
         if (d2 >= 1.0f)
           continue;
         float a = (1.0f - d2) * peak;
-        uint32 c = row[x];
-        int r = ((c >> 16) & 0xff) + (int)(85 * a), g = ((c >> 8) & 0xff) + (int)(65 * a), b = (c & 0xff) + (int)(90 * a);
-        row[x] = (c & 0xff000000) | (r > 255 ? 255 : r) << 16 | (g > 255 ? 255 : g) << 8 | (b > 255 ? 255 : b);
+        row[x] = HdFx_AddRgb(row[x], 85, 65, 90, a);
       }
     }
   }
@@ -685,14 +686,13 @@ static void CollectRevivalFairy(int width, int bias_x, int bias_y) {
     return;
   int ext = (width - 256) / 2;
   int cam_x = BG2HOFS_copy2 + bias_x, cam_y = BG2VOFS_copy2 + bias_y;
-  float tf = g_fx_frames * 0.21f * 0.5f;
   g_fairy_x[g_num_fairies] = (ancilla_x_hi[0] << 8 | ancilla_x_lo[0]) + 8 - cam_x + ext;
   g_fairy_y[g_num_fairies] = (ancilla_y_hi[0] << 8 | ancilla_y_lo[0]) + 8 - (int8)ancilla_z[0] - cam_y;
   // sprite da 16x16, piu' grande della fata 0xe3: con raggio 9 l'alone
   // restava quasi tutto sotto la fata
   g_fairy_r[g_num_fairies] = 16.0f;
   g_fairy_box[g_num_fairies] = 6;
-  g_fairy_m[g_num_fairies++] = 0.82f + 0.12f * sinf(tf * 1.6f) + 0.06f * sinf(tf * 4.1f);
+  g_fairy_m[g_num_fairies++] = FlamePulse(g_fx_frames * 0.21f * 0.5f, 0.0f);
 }
 
 static void ApplyLights(uint8 *pixels, int pitch, int width, int height, int bias_x, int bias_y) {
@@ -718,7 +718,7 @@ static void ApplyLights(uint8 *pixels, int pitch, int width, int height, int bia
   // il castello) restano solo in penombra
   float dark_ambient = hdr_dungeon_dark_with_lantern ? 0.0f : kDarkAmbient;
   // passaggio fra le stanze: vale il piu' buio visto (g_dark_hold, sopra)
-  bool passing = main_module_index == 7 && submodule_index != 0;
+  bool passing = HdFx_DungeonPassing();
   if (passing) {
     if (dark_ambient < g_dark_hold)
       g_dark_hold = dark_ambient;

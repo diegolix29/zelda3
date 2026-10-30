@@ -190,14 +190,14 @@ static int SeamTileAddr(BgLayer *bg, int row, int col) {
 }
 
 static bool RoomSeamActive(void) {
-  return main_module_index == 7 && submodule_index == 2 && g_seam_prev_room >= 0 &&
+  return HdFx_RoomScroll() && submodule_index == 2 && g_seam_prev_room >= 0 &&
          g_seam_prev_room != dungeon_room_index;
 }
 
 // Scorrimento della vista: verso un'altra stanza (7/2) o verso l'altra meta'
 // della stessa stanza (7/1)
 static bool RoomScrollActive(void) {
-  return RoomSeamActive() || (main_module_index == 7 && submodule_index == 1 &&
+  return RoomSeamActive() || (HdFx_RoomScroll() && submodule_index == 1 &&
                               g_seam_prev_room == dungeon_room_index);
 }
 
@@ -398,10 +398,12 @@ static bool SmoothCamera_IsGameplay() {
     return true;
   if (mod == 7 || mod == 9)
     return submodule_index == 0;
-  // Dialogo aperto durante il gioco: il fondale resta dov'e'
-  if (mod == 14 && submodule_index == 2)
-    return saved_module_for_menu == 7 || saved_module_for_menu == 9;
-  // Morte di Link: Link e' fermo, la vista non riparte da capo (salto)
+  // Gioco fermo in vista (dialoghi, menu, pozioni, dissolvenze...): il
+  // fondale resta dov'e' invece di riallinearsi di colpo
+  if (HdFx_GameHeldInView())
+    return true;
+  // Morte di Link: Link e' fermo, la vista non riparte da capo (salto),
+  // anche sullo schermo rosso
   if (mod == 18)
     return saved_module_for_menu == 7 || saved_module_for_menu == 9;
   return false;

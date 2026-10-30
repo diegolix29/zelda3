@@ -121,7 +121,7 @@ void HdWater_PrepareAttrs(void) {
 uint8 HdWater_DungAttr(int i, int wx, int wy) {
   i &= 0x1fff;
   int room = (wy >> 9 & 15) << 4 | (wx >> 9 & 15);
-  if (main_module_index == 7 && submodule_index != 0 && room == (g_attr_prev_room & 0xff) &&
+  if (HdFx_DungeonPassing() && room == (g_attr_prev_room & 0xff) &&
       room != (dungeon_room_index & 0xff))
     return g_attr_prev[i];
   return g_attr_cached ? g_attr_cache[i] : dung_bg2_attr_table[i];
@@ -946,9 +946,7 @@ static float g_bright = 1.0f;
 // colore BGR555 dello SNES in 0xRRGGBB con la luminosita' bri (0-15), come la
 // PPU (ppu.c, brightnessMult): prima qui c<<3, fino a 7 piu' scuro dello schermo
 static inline uint32 SnesColor(uint16 c15, int bri) {
-  uint32 r = c15 & 31, g = c15 >> 5 & 31, b = c15 >> 10 & 31;
-  r = (r << 3 | r >> 2) * bri / 15, g = (g << 3 | g >> 2) * bri / 15, b = (b << 3 | b >> 2) * bri / 15;
-  return r << 16 | g << 8 | b;
+  return HdFx_DimRgb(HdFx_Bgr15ToRgb(c15), bri);
 }
 
 // Azzurro o blu: la fascia scura lungo la riva, le sue onde animate (gli
@@ -1155,10 +1153,7 @@ static inline void LightRatio(uint32 lit, uint32 pre, float *k) {
 }
 
 static inline uint32 PackColor(float r, float g, float b, uint32 layer) {
-  int ir = (int)(r + 0.5f), ig = (int)(g + 0.5f), ib = (int)(b + 0.5f);
-  ir = ir < 0 ? 0 : ir > 255 ? 255 : ir;
-  ig = ig < 0 ? 0 : ig > 255 ? 255 : ig;
-  ib = ib < 0 ? 0 : ib > 255 ? 255 : ib;
+  int ir = HdFx_ClampByte((int)(r + 0.5f)), ig = HdFx_ClampByte((int)(g + 0.5f)), ib = HdFx_ClampByte((int)(b + 0.5f));
   return layer << 24 | ir << 16 | ig << 8 | ib;
 }
 

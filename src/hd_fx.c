@@ -30,10 +30,6 @@ static float Rand01() {
   return (g_rng >> 8) * (1.0f / 16777216.0f);
 }
 
-static int ClampByte(int v) {
-  return v < 0 ? 0 : v > 255 ? 255 : v;
-}
-
 static inline bool IsHud(uint32 c) {
   return (c >> 24) == 2;
 }
@@ -45,21 +41,13 @@ static inline bool IsSprite(uint32 c) {
 
 // Somma un colore al pixel (luce additiva); l'HUD resta intatto
 static inline void AddColor(uint32 *p, float r, float g, float b, float a) {
-  uint32 c = *p;
-  if (IsHud(c))
-    return;
-  int cr = ClampByte(((c >> 16) & 0xff) + (int)(r * a));
-  int cg = ClampByte(((c >> 8) & 0xff) + (int)(g * a));
-  int cb = ClampByte((c & 0xff) + (int)(b * a));
-  *p = (c & 0xff000000) | cr << 16 | cg << 8 | cb;
+  if (!IsHud(*p))
+    *p = HdFx_AddRgb(*p, r, g, b, a);
 }
 
 // Sposta il pixel verso un colore, tenendo il layer
 static inline void MixPixel(uint32 *p, int r, int g, int b, float a) {
-  uint32 c = *p;
-  int cr = (c >> 16) & 0xff, cg = (c >> 8) & 0xff, cb = c & 0xff;
-  cr += (int)((r - cr) * a), cg += (int)((g - cg) * a), cb += (int)((b - cb) * a);
-  *p = (c & 0xff000000) | ClampByte(cr) << 16 | ClampByte(cg) << 8 | ClampByte(cb);
+  *p = HdFx_MixRgb(*p, r, g, b, a);
 }
 
 // Segna il pixel come "sprite": lo shader four sword non lo dipinge (lo
@@ -151,11 +139,9 @@ static void ClassifyCells(const uint8 *pixels, int pitch, int width, int height,
 
 uint32 g_fx_frames;  // contatore dei frame di gioco che non si azzera (frame_counter e' a 8 bit)
 
+// (k 0-1: il risultato sta fra i due colori)
 static inline uint32 MixColor(uint32 a, uint32 b, float k) {
-  int ra = (a >> 16) & 0xff, ga = (a >> 8) & 0xff, ba = a & 0xff;
-  int rb = (b >> 16) & 0xff, gb = (b >> 8) & 0xff, bb = b & 0xff;
-  return (a & 0xff000000) | (uint32)(ra + (int)((rb - ra) * k)) << 16 |
-         (uint32)(ga + (int)((gb - ga) * k)) << 8 | (uint32)(ba + (int)((bb - ba) * k));
+  return HdFx_MixRgb(a, (b >> 16) & 0xff, (b >> 8) & 0xff, b & 0xff, k);
 }
 
 static void ApplyHeatHaze(uint8 *pixels, int pitch, int width, int height, int cam_y) {
@@ -781,6 +767,33 @@ bool HdFx_DeathShowsWorld(void) {
   return main_module_index == 18 && (TM_copy & 3) != 0;
 }
 
+// Il gioco e' in vista ma fermo sotto qualcos'altro (menu, dialoghi, pozioni,
+// preghiera, cerchio che si chiude, Mano e buche che si scuriscono, vittorie,
+// Salva ed esci): la vista resta dov'e'. Non vale quando arriva una scena
+// nuova (cerchio che si apre, 17 dalla fase 3): li' la vista riparte
+bool HdFx_GameHeldInView(void) {
+  int m = main_module_index, scene = HdFx_SceneModule();
+  if (m == 7 || m == 9 || m == 11 || m == 16 || (m == 17 && subsubmodule_index >= 3))
+    return false;
+  return scene == 7 || scene == 9 || scene == 11;
+}
+
+bool HdFx_LiveOverworld(void) {
+  return main_module_index == 9 && submodule_index == 0;
+}
+
+bool HdFx_GameLoaded(void) {
+  return main_module_index > 5 && main_module_index != 20;
+}
+
+bool HdFx_DungeonPassing(void) {
+  return main_module_index == 7 && submodule_index != 0;
+}
+
+bool HdFx_RoomScroll(void) {
+  return main_module_index == 7 && (submodule_index == 1 || submodule_index == 2);
+}
+
 // Allagamento della diga: l'acqua del piano di sopra si vede solo dentro la
 // finestra (per riga sinistra e destra in hdma_table_dynamic) che scende.
 // Con lo schermo alto 240 righe la PPU usa la tabella anche per le righe
@@ -959,10 +972,7 @@ static void ApplyRain(uint8 *pixels, int pitch, int width, int height, int cam_x
       if (!IsHud(*c)) {
         // la goccia schiarisce verso un azzurro chiaro: si vede su ogni fondo
         float k = 0.62f * (1.0f - (float)j / d->len);
-        uint32 v = *c;
-        int r = (v >> 16) & 0xff, g = (v >> 8) & 0xff, b = v & 0xff;
-        r += (int)((205 - r) * k), g += (int)((220 - g) * k), b += (int)((245 - b) * k);
-        *c = (v & 0xff000000) | ClampByte(r) << 16 | ClampByte(g) << 8 | ClampByte(b);
+        *c = HdFx_MixRgb(*c, 205, 220, 245, k);
         MarkSharp(c);
       }
     }
@@ -998,11 +1008,7 @@ void HdFx_Lightning(uint8 *pixels, int pitch, int width, int height) {
     for (int x = 0; x < width; x++) {
       if (IsHud(row[x]))
         continue;
-      uint32 c = row[x];
-      int r = (c >> 16) & 0xff, g = (c >> 8) & 0xff, b = c & 0xff;
-      float a = g_flash * 0.40f;
-      r += (int)((235 - r) * a), g += (int)((240 - g) * a), b += (int)((255 - b) * a);
-      row[x] = (c & 0xff000000) | ClampByte(r) << 16 | ClampByte(g) << 8 | ClampByte(b);
+      row[x] = HdFx_MixRgb(row[x], 235, 240, 255, g_flash * 0.40f);
     }
   }
 }
@@ -1294,7 +1300,7 @@ static void ApplyBurning(uint8 *pixels, int pitch, int width, int height, int ca
     }
   }
   n = HdBurn_GetScorched(&tiles);
-  bool live = main_module_index == 9 && submodule_index == 0;
+  bool live = HdFx_LiveOverworld();
   for (int i = 0; i < n; i++) {
     const HdBurnTile *s = &tiles[i];
     if (!HdBurn_TileShown(s))
@@ -1586,7 +1592,7 @@ void HdFx_Fog(uint8 *pixels, int pitch, int width, int height, int bias_x, int b
       int r = ((int)(v >> 16 & 255) + (int)(mid[0] + dir[0] * a)) >> 1;
       int g = ((int)(v >> 8 & 255) + (int)(mid[1] + dir[1] * a)) >> 1;
       int b = ((int)(v & 255) + (int)(mid[2] + dir[2] * a)) >> 1;
-      row[x] = (v & 0xff000000) | ClampByte(r) << 16 | ClampByte(g) << 8 | ClampByte(b);
+      row[x] = (v & 0xff000000) | HdFx_ClampByte(r) << 16 | HdFx_ClampByte(g) << 8 | HdFx_ClampByte(b);
     }
   }
 }
@@ -1679,7 +1685,7 @@ static void DialogGlass(uint8 *pixels, int pitch, int width, int height) {
         continue;
       // strato 2 (interfaccia): lo shader lascia il riquadro sfocato com'e',
       // senza pennellate e ombre nitide sopra
-      row[x] = 2u << 24 | ClampByte(b[0] / b[3]) << 16 | ClampByte(b[1] / b[3]) << 8 | ClampByte(b[2] / b[3]);
+      row[x] = 2u << 24 | HdFx_ClampByte(b[0] / b[3]) << 16 | HdFx_ClampByte(b[1] / b[3]) << 8 | HdFx_ClampByte(b[2] / b[3]);
     }
   }
 }
@@ -1750,7 +1756,7 @@ void HdFx_MenuBlur(uint8 *pixels, int pitch, int width, int height) {
       int r = (int)((((c >> 16) & 0xff) * keep + b[0] * inv) * dark);
       int g = (int)((((c >> 8) & 0xff) * keep + b[1] * inv) * dark);
       int bl = (int)(((c & 0xff) * keep + b[2] * inv) * dark);
-      row[x] = (c & 0xff000000) | ClampByte(r) << 16 | ClampByte(g) << 8 | ClampByte(bl);
+      row[x] = (c & 0xff000000) | HdFx_ClampByte(r) << 16 | HdFx_ClampByte(g) << 8 | HdFx_ClampByte(bl);
     }
   }
 }

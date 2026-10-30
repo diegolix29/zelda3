@@ -6,6 +6,7 @@
 #include "config.h"
 #include "variables.h"
 #include "player.h"
+#include "hd_fx.h"
 
 // Forza dei due motori (pesante e leggero, 0-1), durata e pausa minima fra
 // due vibrazioni dello stesso tipo (in ms). Forza piena solo per i momenti
@@ -44,7 +45,7 @@ static float g_active_force;  // e la sua forza
 // Solo durante il gioco: non nel titolo, nella scelta del file e nella
 // sequenza dimostrativa (tranne i momenti dei menu, kRumble_Menu*)
 static bool InGame(void) {
-  return main_module_index > 5 && main_module_index != 20;
+  return HdFx_GameLoaded();
 }
 
 static void Request(int kind, float k) {
