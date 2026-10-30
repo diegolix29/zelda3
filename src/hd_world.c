@@ -48,12 +48,14 @@ static bool FeatureOn(void) {
 
 // Dialoghi, inventario, pozioni e menu di salvataggio aperti all'aperto: il
 // mondo resta visibile dietro e la vista libera resta ferma dov'era
+static bool InFluteArrival(void);
+
 static bool InMenuOverWorld(void) {
-  int sub = submodule_index;
-  // mappa (7) e Ocarina (10): nella fase 0 il mondo si scurisce ancora visibile
-  return main_module_index == 14 && saved_module_for_menu == 9 &&
-         (sub == 1 || sub == 2 || sub == 4 || sub == 8 || sub == 9 || sub == 11 ||
-          ((sub == 7 || sub == 10) && overworld_map_state == 0));
+  // il mondo fermo in vista (HdFx_SceneModule) sotto menu, dialoghi, pozioni,
+  // preghiera, mappa e Ocarina che si scuriscono (fase 0), Salva ed esci e
+  // caduta in una buca. L'arrivo con l'Ocarina e' InFluteArrival
+  int m = main_module_index;
+  return (m == 14 || m == 17 || m == 23) && HdFx_SceneModule() == 9 && !InFluteArrival();
 }
 
 // Arrivo con l'Ocarina: dalla fase 7 l'area di arrivo e' caricata e compare

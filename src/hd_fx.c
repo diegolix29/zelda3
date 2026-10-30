@@ -753,10 +753,18 @@ int HdFx_SceneModule(void) {
   // cerchio che si chiude (15) o si riapre (16): la scena dentro o fuori
   if (m == 15 || m == 16)
     return player_is_indoors ? 7 : 9;
-  // caduta in un labirinto (buche, Module11): dalla fase 3 la stanza nuova e'
-  // gia' caricata e si vede mentre Link cade (acqua e shader subito)
-  if (m == 17 && subsubmodule_index >= 3)
+  // caduta all'ingresso di un labirinto (Module11: buche all'aperto, Link preso
+  // dalla Mano): nelle fasi 0-1 si scurisce ancora la scena di prima, dalla
+  // fase 3 la stanza nuova e' gia' caricata e si vede mentre Link cade
+  if (m == 17)
+    return subsubmodule_index >= 3 || player_is_indoors ? 7 : 9;
+  // vittoria su un boss (19 pendente, 22 cristallo): la stanza resta in vista
+  // mentre si riempiono cuori e magia, Link gira e lo schermo si scurisce
+  if ((m == 19 || m == 22) && player_is_indoors)
     return 7;
+  // Salva ed esci (23): il gioco si scurisce fermo
+  if (m == 23)
+    return player_is_indoors ? 7 : 9;
   // morte di Link (18): finche' si vede il mondo e' la scena di prima
   if (HdFx_DeathShowsWorld())
     return saved_module_for_menu;

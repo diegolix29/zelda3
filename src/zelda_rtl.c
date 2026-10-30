@@ -325,17 +325,10 @@ static void ConfigurePpuSideSpace() {
   int extra_right = 0, extra_left = 0, extra_bottom = 0;
   bool room_scroll = false;
 //  printf("main %d, sub %d  (%d, %d, %d)\n", main_module_index, submodule_index, BG2HOFS_copy2, room_bounds_x.v[2 | (quadrant_fullsize_x >> 1)], quadrant_fullsize_x >> 1);
-  int mod = main_module_index;
+  // la scena in vista (HdFx_SceneModule: cerchio, cadute, vittorie, morte...);
+  // sotto le mappe e gli altri menu quella da cui si e' aperto
+  int mod = HdFx_SceneModule();
   if (mod == 14)
-    mod = saved_module_for_menu;
-  // cerchio che si chiude (15) o si riapre (16): come dentro o fuori
-  if (mod == 15 || mod == 16)
-    mod = player_is_indoors ? 7 : 9;
-  // caduta in un labirinto (Module11): dalla fase 3 la stanza nuova e' gia' caricata
-  if (mod == 17 && subsubmodule_index >= 3)
-    mod = 7;
-  // morte di Link: come la scena di prima finche' si vede il mondo
-  if (HdFx_DeathShowsWorld())
     mod = saved_module_for_menu;
   // mappa del mondo e mappa dell'Ocarina: nuvole anche oltre il bordo della mappa
   g_zenv.ppu->m7CloudFill = main_module_index == 14 && (submodule_index == 7 || submodule_index == 10);

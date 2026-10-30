@@ -10,6 +10,7 @@
 #include <string.h>
 #include "hd_hud.h"
 #include "hd_world.h"
+#include "hd_fx.h"
 #include "zelda_rtl.h"
 #include "variables.h"
 #include "features.h"
@@ -44,35 +45,17 @@ static bool IsPlayModule(int mod) {
   return mod == 7 || mod == 9 || mod == 11;
 }
 
-// Mappa del labirinto (14/3) e del mondo (14/7): mentre lo schermo si scurisce
-// e (labirinto) si riaccende si vede ancora il gioco; li' tornava l'HUD originale
-static bool MapFadeShowsGame(void) {
-  if (main_module_index != 14 || !IsPlayModule(saved_module_for_menu))
-    return false;
-  if (submodule_index == 3)
-    return overworld_map_state == 0 || overworld_map_state >= 6;
-  return submodule_index == 7 && overworld_map_state == 0;
-}
-
 // Durante il gioco e nei dialoghi (non nei menu, sulla mappa o nei titoli)
 static bool HudContext(bool *in_dialog) {
   int mod = main_module_index;
   *in_dialog = false;
-  // 15 e 16: il cerchio che si chiude e si riapre entrando e uscendo
-  if (IsPlayModule(mod) || mod == 15 || mod == 16 || MapFadeShowsGame())
-    return true;
-  // dialogo (2) e menu di salvataggio aperto con SELECT (11): l'HUD resta
-  if (mod == 14 && (submodule_index == 2 || submodule_index == 11) &&
-      IsPlayModule(saved_module_for_menu)) {
-    *in_dialog = true;
+  // il gioco in vista (HdFx_SceneModule: cerchio, cadute, pozioni, mappe che
+  // si scuriscono, vittorie, Salva ed esci...)
+  if (IsPlayModule(HdFx_SceneModule())) {
+    // dialogo (2) e menu di salvataggio aperto con SELECT (11)
+    *in_dialog = mod == 14 && (submodule_index == 2 || submodule_index == 11);
     return true;
   }
-  // Pozioni (4 rossa, 8 verde, 9 blu e d'oro) e preghiera nel deserto (5): il
-  // gioco resta in vista mentre si riempiono cuori e magia, e li' tornava
-  // l'HUD originale
-  if (mod == 14 && (submodule_index == 4 || submodule_index == 5 || submodule_index == 8 ||
-                    submodule_index == 9) && IsPlayModule(saved_module_for_menu))
-    return true;
   // Morte di Link (18) e fata che lo fa rialzare: l'HUD sparisce solo con la
   // scritta GAME OVER e il menu per continuare (7-9)
   if (mod == 18 && (submodule_index < 7 || submodule_index > 9))
