@@ -37,6 +37,7 @@
 #include "config.h"
 #include "dungeon.h"
 #include "features.h"
+#include "overworld.h"
 
 // same as in snes/ppu.c: the smooth camera offset applies to BG1 and BG2
 #define BG_BIAS_X(ppu, layer) ((layer) < 2 ? (ppu)->bgBiasX : 0)
@@ -987,14 +988,27 @@ static void DrawGround(uint32 *out, int pitch_px, const Cam *cm, const Ground *g
 // own rule. A depth buffer keeps characters behind walls hidden.
 
 enum { kWallMax = 48 };          // tallest wall, pixels
-static uint8 g_hmap[64 * 64];    // height per 8x8 tile of the room
-static uint8 g_hfold[64 * 64];   // 1 = the surface shows the art z pixels north (fold-up), 2 = south (a deep south wall)
-static uint8 g_hbase[64 * 64];   // fold-up: tile row just south of the run (where its face stands)
-static uint8 g_hfoldx[64 * 64];  // east/west walls: 1 = the face looks east (art to its west), 2 = west
-static uint8 g_hbasex[64 * 64];  // and the tile column where that face stands
-static uint8 g_hartw[64 * 64];   // sideways and south folds: pixels of art squeezed onto the face
+// The cells: a room is 64x64 and wraps at 512 pixels; the forest (an outdoor
+// area of 1024 pixels) is 128x128, and only exists inside its rectangle
+enum { kGridMax = 128 };
+static int g_gmask = 63, g_gshift = 6;
+static bool g_grid_out;          // outdoors: cells outside g_gx0, g_gy0 and kGridMax cells on are flat
+static int g_gx0, g_gy0;
+// The forest's shapes, per pixel of its 1024 pixel area (see BuildForestShapes):
+// surface height, height of the open underside, rows down to the column's
+// front, rows of art on a face (0 = a crown, shaded as leaves)
+static uint8 g_ftop[1024 * 1024], g_fbot[1024 * 1024], g_fdown[1024 * 1024], g_fband[1024 * 1024];
+static inline int GridCell(int cx, int cy) {
+  return ((cy & g_gmask) << g_gshift) + (cx & g_gmask);
+}
+static uint8 g_hmap[kGridMax * kGridMax];    // height per 8x8 tile of the room
+static uint8 g_hfold[kGridMax * kGridMax];   // 1 = the surface shows the art z pixels north (fold-up), 2 = south (a deep south wall)
+static uint8 g_hbase[kGridMax * kGridMax];   // fold-up: tile row just south of the run (where its face stands)
+static uint8 g_hfoldx[kGridMax * kGridMax];  // east/west walls: 1 = the face looks east (art to its west), 2 = west
+static uint8 g_hbasex[kGridMax * kGridMax];  // and the tile column where that face stands
+static uint8 g_hartw[kGridMax * kGridMax];   // sideways and south folds: pixels of art squeezed onto the face
 static uint8 g_hlayer[64 * 64];  // layer that gave the cell its class (0 = BG2, 1 = BG1)
-static uint8 g_partial[64 * 64]; // 1 = an object cell: only the pixels in g_praise stand up
+static uint8 g_partial[kGridMax * kGridMax]; // 1 = an object cell: only the pixels in g_praise stand up
 static uint8 g_praise[512 * 512];// object cells: height of this pixel, 0 = floor drawn in the tile
 static uint8 g_pdown[512 * 512]; // object cells: rows from this pixel down to its column's front (face base)
 static uint8 g_pcol[512 * 512];  // object cells: cgram index shown (scratch for BuildPixelMasks)
@@ -1015,10 +1029,10 @@ static int8 g_pcover[512 * 512];
 static uint32 g_mask_hash;       // tiles the masks were built for
 // Two floor levels (see BuildHeightMap): the floor height of each cell, the
 // room's upper level height and the tallest surface (where rays start)
-static uint8 g_hfloor[64 * 64];
+static uint8 g_hfloor[kGridMax * kGridMax];
 static uint8 g_lower[64 * 64];   // 1 = BG2 has a hole there: the cell shows BG1
 static uint8 g_upper[64 * 64];   // 1 = on the upper floor
-static uint8 g_hbot[64 * 64];    // bridges: height of the deck's underside (open below), 0 = solid to the floor
+static uint8 g_hbot[kGridMax * kGridMax];    // bridges: height of the deck's underside (open below), 0 = solid to the floor
 static bool g_two_levels;
 static bool g_raised;            // some floor is above 0 (two levels or a chest platform)
 enum { kPlatformH = 8 };         // chest platforms (the throne room's dais) above their floor
@@ -1913,6 +1927,7 @@ static bool FloorBeside(const uint8 *wall, const uint8 *solid, const uint8 *attr
 }
 
 static void BuildHeightMap(void) {
+  g_gmask = 63, g_gshift = 6, g_grid_out = false;
   // the table of the layer Link is on, as the game's tile detection reads it
   const uint8 *link_attr = dung_bg2_attr_table + (link_is_on_lower_level ? 0x1000 : 0);
   if (!g_tiles_ready)
@@ -2275,6 +2290,414 @@ static void BuildHeightMap(void) {
   }
 }
 
+// --- the forest ---
+//
+// First outdoor heights: the Lost Woods and Skull Woods only. Each 8x8 cell's
+// class comes from its collision and the priority bit of its tile (the part of
+// a tree the 2D game draws over Link). From the art (rendered offline, 2026-10-30):
+//   canopy  solid, priority: round tree crowns, and the walls of hollow logs
+//   arch    walkable, priority: the path inside a log, leaves over a path
+//   trunk   solid, no priority: yellow hedges with a scalloped edge, the dark
+//           roots under a crown, stumps (small groups with rings on top)
+//   small   liftable things: bushes
+// Shapes are per pixel: the outline (color 1 of the tile) bounds a floodfill from
+// outside, so what remains is the drawing's own silhouette, and the distance to
+// its edge rounds it (the outlines inside a crown make its clumps of leaves).
+enum { kOw_Floor, kOw_Trunk, kOw_Small, kOw_Canopy, kOw_Arch };
+enum { kForestTreeH = 24, kForestMassH = 32, kForestTreeCells = 40 };   // kinds of trunk mass; one this small is a stump
+static const char kOwLetters[] = ".TbCA";
+enum { kForestPlainFace = 255 };   // g_fband: sides of plain fill, top its own art (a hedge)
+enum { kForestRim = 28, kForestDome = 16, kForestArchBot = 16, kForestUnderside = 18, kForestOverhang = 10, kForestOutlineD = 10 };
+static uint8 g_ow_cls[kGridMax * kGridMax];
+static int g_ow_cells;
+
+// each connected group of trunk cells: a stump if small and away from leaves
+static void ForestMassHeights(uint8 *mass_h) {
+  static uint16 queue[kGridMax * kGridMax];
+  static uint16 group[kGridMax * kGridMax];
+  memset(mass_h, 0, kGridMax * kGridMax);
+  for (int i = 0; i < kGridMax * kGridMax; i++) {
+    if (g_ow_cls[i] != kOw_Trunk || mass_h[i])
+      continue;
+    int qn = 0, n = 0;
+    bool leaves = false;
+    mass_h[i] = 1, queue[qn++] = (uint16)i;
+    while (qn) {
+      int q = queue[--qn], x = q & (kGridMax - 1), y = q >> 7;
+      group[n++] = (uint16)q;
+      for (int dy = -1; dy <= 1; dy++) {
+        for (int dx = -1; dx <= 1; dx++) {
+          int nx = x + dx, ny = y + dy;
+          if (nx < 0 || nx >= kGridMax || ny < 0 || ny >= kGridMax)
+            continue;
+          int m = ny * kGridMax + nx;
+          leaves |= g_ow_cls[m] == kOw_Canopy || g_ow_cls[m] == kOw_Arch;
+          if (g_ow_cls[m] == kOw_Trunk && !mass_h[m])
+            mass_h[m] = 1, queue[qn++] = (uint16)m;
+        }
+      }
+    }
+    int hgt = !leaves && n <= kForestTreeCells ? kForestTreeH : kForestMassH;
+    for (int k = 0; k < n; k++)
+      mass_h[group[k]] = (uint8)hgt;
+  }
+}
+
+static int ForestMap16(int px, int py);
+
+// a rounded profile: 0 at the edge, 1 from `r` pixels in
+static float ForestRound(int dist, int r) {
+  float t = dist >= r ? 0.0f : 1.0f - (float)dist / r;
+  return sqrtf(1.0f - t * t);
+}
+
+// The pixel shapes, from the cell classes and the tiles in video memory. The
+// outline of a drawing often lies in cells the game calls walkable, and a
+// crown's side lobes in cells without priority, so the classes alone do not
+// give the shapes. Instead a flood from the clean floor cells (no outline pixel)
+// stops at outlines: what it does not reach is standing. Each region inside
+// outlines is then a crown's if it is small and has priority cells (the big
+// regions are hedges, which overlap the stairs of a crown's cells), is small,
+// mostly in walkable cells and beside priority cells (a crown's side lobes are
+// drawn on walkable cells), or is mostly priority cells (a log).
+static uint8 g_fin[1024 * 1024];   // 1 = standing, 2 = and an outline pixel
+static uint8 g_fcrown[1024 * 1024];
+static uint32 g_fqueue[1024 * 1024];
+enum { kForestHedgeRegion = 2000 };
+
+static void ForestDistance(uint8 *dist, const uint8 *in) {
+  for (int i = 0; i < 1024 * 1024; i++)
+    dist[i] = !in[i] ? 0 : in[i] == 2 ? kForestOutlineD : 255;
+  for (int y = 1; y < 1024; y++)
+    for (int x = 1; x < 1024; x++) {
+      int i = y * 1024 + x, a = dist[i - 1] + 1, b = dist[i - 1024] + 1;
+      if (dist[i] > a) dist[i] = (uint8)a;
+      if (dist[i] > b) dist[i] = (uint8)b;
+    }
+  for (int y = 1022; y >= 0; y--)
+    for (int x = 1022; x >= 0; x--) {
+      int i = y * 1024 + x, a = dist[i + 1] + 1, b = dist[i + 1024] + 1;
+      if (dist[i] > a) dist[i] = (uint8)a;
+      if (dist[i] > b) dist[i] = (uint8)b;
+    }
+}
+
+static inline bool ForestLeafCell(int x, int y) {
+  int k = g_ow_cls[(y >> 3) * kGridMax + (x >> 3)];
+  return k == kOw_Canopy || k == kOw_Arch;
+}
+
+static void BuildForestShapes(const uint8 *mass_h) {
+  static const int kDx[4] = { 0, 0, -1, 1 }, kDy[4] = { -1, 1, 0, 0 };
+  static uint8 dist[1024 * 1024], crown_dist[1024 * 1024], mask[1024 * 1024];
+  Ppu *ppu = g_zenv.ppu;
+  const uint16 *map8 = GetMap16toMap8Table();
+  int qn = 0, seeds = 0, sealed = 0;
+  // the area sits on a 1024 pixel boundary: cells are in area coordinates
+  for (int cy = 0; cy < kGridMax; cy++) {
+    for (int cx = 0; cx < kGridMax; cx++) {
+      int wcx = g_gx0 + cx, wcy = g_gy0 + cy, m = ForestMap16(wcx * 8, wcy * 8);
+      uint16 w = m >= 0 ? map8[m * 4 + (wcy & 1) * 2 + (wcx & 1)] : 0;
+      bool outline = false;
+      for (int y = 0; y < 8; y++) {
+        for (int x = 0; x < 8; x++) {
+          bool o = (TileWordPixel(ppu, 1, w, x, y) & 7) == 1;
+          g_fin[(cy * 8 + y) * 1024 + cx * 8 + x] = o ? 2 : 1;
+          outline |= o;
+        }
+      }
+      // solid cells with no outline are fill (a hedge's middle): they stand,
+      // whatever gets past an outline
+      if (g_ow_cls[cy * kGridMax + cx] != kOw_Floor) {
+        for (int y = 0; y < 8 && !outline; y++)
+          memset(&g_fin[(cy * 8 + y) * 1024 + cx * 8], 3, 8);
+        sealed += !outline;
+        continue;
+      }
+      if (outline)
+        continue;
+      seeds++;
+      for (int y = 0; y < 8; y++) {
+        for (int x = 0; x < 8; x++) {
+          uint32 i = (cy * 8 + y) * 1024 + cx * 8 + x;
+          g_fin[i] = 0, g_fqueue[qn++] = i;
+        }
+      }
+    }
+  }
+  while (qn) {
+    uint32 i = g_fqueue[--qn];
+    int x = i & 1023, y = i >> 10;
+    for (int dir = 0; dir < 4; dir++) {
+      int nx = x + kDx[dir], ny = y + kDy[dir];
+      if (nx < 0 || nx > 1023 || ny < 0 || ny > 1023)
+        continue;
+      uint32 n = ny * 1024 + nx;
+      if (g_fin[n] == 1)
+        g_fin[n] = 0, g_fqueue[qn++] = n;
+    }
+  }
+  for (int i = 0; i < 1024 * 1024; i++)
+    if (g_fin[i] == 3)
+      g_fin[i] = 1;
+  // the mouths of the logs: the walkable cells just north and south of a path
+  // inside a log stay open, though their drawing is outlined; the path always
+  // stands, or the log would be cut in two
+  for (int cy = 0; cy < kGridMax; cy++) {
+    for (int cx = 0; cx < kGridMax; cx++) {
+      if (g_ow_cls[cy * kGridMax + cx] != kOw_Arch)
+        continue;
+      for (int dir = -1; dir <= 1; dir += 2) {
+        for (int k = 1; k <= 3; k++) {
+          int ny = cy + dir * k;
+          if (ny < 0 || ny >= kGridMax || g_ow_cls[ny * kGridMax + cx] != kOw_Floor)
+            break;
+          for (int y = 0; y < 8; y++)
+            memset(&g_fin[(ny * 8 + y) * 1024 + cx * 8], 0, 8);
+        }
+      }
+      for (int y = 0; y < 8; y++)
+        for (int x = 0; x < 8; x++)
+          if (!g_fin[(cy * 8 + y) * 1024 + cx * 8 + x])
+            g_fin[(cy * 8 + y) * 1024 + cx * 8 + x] = 1;
+    }
+  }
+  // the regions inside the outlines
+  memset(g_fcrown, 0, sizeof(g_fcrown));
+  memset(mask, 0, sizeof(mask));
+  int kept = 0, crowns = 0;
+  for (int i0 = 0; i0 < 1024 * 1024; i0++) {
+    kept += g_fin[i0] != 0;
+    if (g_fin[i0] != 1 || mask[i0])
+      continue;
+    int n = 0, leaf = 0, walk = 0;
+    bool beside = false;
+    mask[i0] = 1, g_fqueue[qn++] = i0;
+    while (qn) {
+      uint32 i = g_fqueue[--qn];
+      int x = i & 1023, y = i >> 10;
+      n++, leaf += ForestLeafCell(x, y), walk += g_ow_cls[(y >> 3) * kGridMax + (x >> 3)] == kOw_Floor;
+      for (int k = -6; k <= 6 && !beside; k++) {
+        int bx = (x >> 3) + k;
+        beside = bx >= 0 && bx < kGridMax && g_ow_cls[(y >> 3) * kGridMax + bx] == kOw_Canopy;
+      }
+      for (int dir = 0; dir < 4; dir++) {
+        int nx = x + kDx[dir], ny = y + kDy[dir];
+        if (nx < 0 || nx > 1023 || ny < 0 || ny > 1023)
+          continue;
+        uint32 m = ny * 1024 + nx;
+        if (g_fin[m] == 1 && !mask[m])
+          mask[m] = 1, g_fqueue[qn++] = m;
+      }
+    }
+    if (!(n < kForestHedgeRegion && (leaf || (beside && walk * 2 >= n))) && !(leaf * 2 >= n))
+      continue;
+    // again, to mark it (the queue holds no list of the region)
+    crowns += n;
+    g_fcrown[i0] = 1, g_fqueue[qn++] = i0;
+    while (qn) {
+      uint32 i = g_fqueue[--qn];
+      int x = i & 1023, y = i >> 10;
+      for (int dir = 0; dir < 4; dir++) {
+        int nx = x + kDx[dir], ny = y + kDy[dir];
+        if (nx < 0 || nx > 1023 || ny < 0 || ny > 1023)
+          continue;
+        uint32 m = ny * 1024 + nx;
+        if (g_fin[m] == 1 && !g_fcrown[m])
+          g_fcrown[m] = 1, g_fqueue[qn++] = m;
+      }
+    }
+  }
+  // outlines go with the crown they touch; a crown's inner outlines stay
+  // marked 2, so the distance dips there (its clumps of leaves)
+  for (int y = 0; y < 1024; y++) {
+    for (int x = 0; x < 1024; x++) {
+      int i = y * 1024 + x;
+      mask[i] = g_fcrown[i];
+      if (g_fin[i] != 2)
+        continue;
+      bool touches = false;
+      for (int dir = 0; dir < 4 && !touches; dir++) {
+        int nx = x + kDx[dir], ny = y + kDy[dir];
+        touches = nx >= 0 && nx <= 1023 && ny >= 0 && ny <= 1023 && g_fcrown[ny * 1024 + nx] == 1;
+      }
+      mask[i] = touches ? 2 : 0;
+    }
+  }
+  ForestDistance(crown_dist, mask);
+  ForestDistance(dist, g_fin);
+  memset(g_ftop, 0, sizeof(g_ftop));
+  memset(g_fbot, 0, sizeof(g_fbot));
+  memset(g_fband, 0, sizeof(g_fband));
+  for (int y = 0; y < 1024; y++) {
+    for (int x = 0; x < 1024; x++) {
+      int i = y * 1024 + x;
+      if (!g_fin[i])
+        continue;
+      int cx = x >> 3, cy = y >> 3, k = g_ow_cls[cy * kGridMax + cx], d = dist[i];
+      if (mask[i] || k == kOw_Arch) {
+        d = crown_dist[i];
+        g_ftop[i] = (uint8)(kForestRim + kForestDome * ForestRound(d, 24));
+        // near an arch: the wall of a hollow log, down to the ground
+        bool log = k == kOw_Arch;
+        for (int s = 1; s <= 3 && !log; s++)
+          log = (cx >= s && g_ow_cls[cy * kGridMax + cx - s] == kOw_Arch) ||
+                (cx + s < kGridMax && g_ow_cls[cy * kGridMax + cx + s] == kOw_Arch);
+        // a crown overhangs its edge; the middle is the trunk
+        g_fbot[i] = k == kOw_Arch ? kForestArchBot : !log && d < kForestOverhang ? kForestUnderside : 0;
+      } else if (k == kOw_Small) {
+        g_ftop[i] = (uint8)(4 + 8 * ForestRound(d, 6));
+        g_fband[i] = 5;
+      } else {
+        // the roots: just south of a crown
+        bool roots = false;
+        for (int s = 1; s <= 3 && !roots; s++)
+          roots = cy >= s && g_ow_cls[(cy - s) * kGridMax + cx] == kOw_Canopy;
+        if (roots) {
+          g_ftop[i] = kForestUnderside, g_fband[i] = 16;
+        } else if (mass_h[cy * kGridMax + cx] == kForestTreeH) {
+          g_ftop[i] = 12, g_fband[i] = 12;   // a stump
+        } else {
+          g_ftop[i] = (uint8)(10 + 6 * ForestRound(d, 6));   // a hedge
+          g_fband[i] = kForestPlainFace;
+        }
+      }
+    }
+  }
+  // rows down to each column's front, and the cells the caster has to look into
+  memset(g_hmap, 0, sizeof(g_hmap));
+  g_hmax = 0, g_ow_cells = 0;
+  for (int x = 0; x < 1024; x++) {
+    int down = 0;
+    for (int y = 1023; y >= 0; y--) {
+      int i = y * 1024 + x;
+      down = g_ftop[i] ? IntMin(down + 1, 256) : 0;
+      g_fdown[i] = (uint8)(down ? IntMin(down - 1, 255) : 0);
+      if (g_ftop[i]) {
+        int c = GridCell(g_gx0 + (x >> 3), g_gy0 + (y >> 3));
+        g_ow_cells += !g_hmap[c];
+        g_hmap[c] = (uint8)IntMax(g_hmap[c], g_ftop[i]);
+        g_hmax = IntMax(g_hmax, g_ftop[i]);
+      }
+    }
+  }
+  Hd3d_Log("forest shapes built: area 0x%02x, %d raised cells, tallest %d, %d clean floor cells, %d fill cells, standing pixels %d, crowns %d",
+           (uint8)overworld_area_index, g_ow_cells, g_hmax, seeds, sealed, kept, crowns);
+}
+
+static bool ForestHeightsOn(void) {
+  int mod = main_module_index == 14 ? saved_module_for_menu : main_module_index;
+  uint8 area = (uint8)overworld_area_index;
+  return !player_is_indoors && mod == 9 && overworld_screen_index < 0x80 && (area == 0x00 || area == 0x40);
+}
+
+// the map16 at world pixel (px, py) of the current area, -1 = outside it
+static int ForestMap16(int px, int py) {
+  int dx = px - overworld_offset_base_x * 8, dy = py - overworld_offset_base_y;
+  if (dx < 0 || dy < 0 || dx > (overworld_offset_mask_x * 8 | 0xf) || dy > (overworld_offset_mask_y | 0xf))
+    return -1;
+  return overworld_tileattr[(dy >> 4) * 64 + (dx >> 4)];
+}
+
+static int ForestClass(uint8 a, bool prio) {
+  if (a >= 0x50 && a <= 0x57)
+    return kOw_Small;
+  bool solid = (a >= 0x01 && a <= 0x03) || a == 0x27 || a == 0x42 || a == 0x43 || a == 0x46;
+  return solid ? (prio ? kOw_Canopy : kOw_Trunk) : (prio ? kOw_Arch : kOw_Floor);
+}
+
+static void ForestDump(void) {
+  const uint16 *map8 = GetMap16toMap8Table();
+  const uint8 *attrs = GetMap8toTileAttr();
+  int counts[5] = { 0 };
+  for (int i = 0; i < kGridMax * kGridMax; i++)
+    counts[g_ow_cls[i]]++;
+  int lx = link_x_coord + 8, ly = link_y_coord + 16;
+  Hd3d_Log("forest dump: area 0x%02x, Link at (%d, %d), grid at cell (%d, %d), tallest %d", (uint8)overworld_area_index,
+           lx, ly, g_gx0, g_gy0, g_hmax);
+  Hd3d_Log("  cells: floor %d, trunk %d, small %d, canopy %d, arch %d", counts[0], counts[1], counts[2], counts[3], counts[4]);
+  Hd3d_Log("  each cell: map16/8x8 tile, collision, class (. floor T trunk b small C canopy A arch), height/deck underside");
+  for (int cy = (ly >> 3) - 8; cy <= (ly >> 3) + 8; cy++) {
+    char row[512];
+    int n = snprintf(row, sizeof(row), "  y%3d:", cy);
+    for (int cx = (lx >> 3) - 7; cx <= (lx >> 3) + 7 && n < (int)sizeof(row) - 32; cx++) {
+      int m = ForestMap16(cx * 8, cy * 8), c = GridCell(cx, cy);
+      if (m < 0) {
+        n += snprintf(row + n, sizeof(row) - n, " ---");
+        continue;
+      }
+      uint16 w = map8[m * 4 + (cy & 1) * 2 + (cx & 1)];
+      n += snprintf(row + n, sizeof(row) - n, " %c%03x/%03x %02x %c%2d/%2d", cx == lx >> 3 && cy == ly >> 3 ? '*' : ' ', m,
+                    w & 0x3ff, attrs[w & 0x1ff], kOwLetters[g_ow_cls[c]], g_hmap[c], g_fbot[(cy & 127) * 8 * 1024 + (cx & 127) * 8 + 4]);
+    }
+    Hd3d_Log("%s", row);
+  }
+}
+
+static void BuildForestHeights(void) {
+  g_gmask = kGridMax - 1, g_gshift = 7, g_grid_out = true;
+  g_raised = false;
+  g_gx0 = overworld_offset_base_x, g_gy0 = overworld_offset_base_y >> 3;
+  // the tiles change when a bush is lifted or a tree burns
+  uint32 hash = 2166136261u ^ g_gx0 ^ (uint32)g_gy0 << 8 ^ (uint32)overworld_area_index << 16;
+  for (int i = 0; i < 64 * 64; i++)
+    hash = (hash ^ overworld_tileattr[i]) * 16777619u;
+  // and again half a second later: the area's graphics may still be loading
+  static int again;
+  bool build = hash != g_mask_hash;
+  if (build)
+    g_mask_hash = hash, again = 30;
+  else if (again && !--again)
+    build = true;
+  if (build) {
+    const uint16 *map8 = GetMap16toMap8Table();
+    const uint8 *attrs = GetMap8toTileAttr();
+    static uint8 floor_open[kGridMax * kGridMax], g_ow_gap[kGridMax * kGridMax], mass_h[kGridMax * kGridMax];
+    memset(floor_open, 0, sizeof(floor_open));
+    memset(g_ow_gap, 0, sizeof(g_ow_gap));
+    for (int cy = 0; cy < kGridMax; cy++) {
+      for (int cx = 0; cx < kGridMax; cx++) {
+        int wcx = g_gx0 + cx, wcy = g_gy0 + cy, m = ForestMap16(wcx * 8, wcy * 8), k = kOw_Floor;
+        if (m >= 0) {
+          uint16 w = map8[m * 4 + (wcy & 1) * 2 + (wcx & 1)];
+          k = ForestClass(attrs[w & 0x1ff], (w >> 13 & 1) != 0);
+          uint8 a = attrs[w & 0x1ff];
+          floor_open[GridCell(wcx, wcy)] = a == 0x00 || a == 0x48;
+        }
+        g_ow_cls[GridCell(wcx, wcy)] = (uint8)k;
+      }
+    }
+    // a gap one cell wide between solid cells is too narrow for Link: part of
+    // the tree around it (the middle of a small tree's drawing)
+    #define SOLID_AT(xx, yy) ((unsigned)(xx) < kGridMax && (unsigned)(yy) < kGridMax && \
+                              (g_ow_cls[(yy) * kGridMax + (xx)] == kOw_Trunk || g_ow_cls[(yy) * kGridMax + (xx)] == kOw_Canopy))
+    for (int cy = 0; cy < kGridMax; cy++) {
+      for (int cx = 0; cx < kGridMax; cx++) {
+        int c = cy * kGridMax + cx;
+        if (g_ow_cls[c] == kOw_Floor && floor_open[c] && !g_ow_gap[c] &&
+            ((SOLID_AT(cx, cy - 1) && SOLID_AT(cx, cy + 1)) || (SOLID_AT(cx - 1, cy) && SOLID_AT(cx + 1, cy))))
+          g_ow_gap[c] = 1;
+      }
+    }
+    #undef SOLID_AT
+    for (int i = 0; i < kGridMax * kGridMax; i++)
+      if (g_ow_gap[i])
+        g_ow_cls[i] = kOw_Trunk;
+    ForestMassHeights(mass_h);
+    memset(g_hfold, 0, sizeof(g_hfold));
+    memset(g_hfoldx, 0, sizeof(g_hfoldx));
+    memset(g_hfloor, 0, sizeof(g_hfloor));
+    memset(g_hbot, 0, sizeof(g_hbot));
+    memset(g_partial, 0, sizeof(g_partial));
+    BuildForestShapes(mass_h);
+  }
+  g_stat_wall_cells += g_ow_cells;
+  if (g_room_dump_request) {
+    g_room_dump_request = false;
+    ForestDump();
+  }
+}
+
 // ground color at frame coordinates (u, v): the PPU frame inside the SNES
 // screen, past it the room tiles
 static bool SampleSurface(const Ground *gr, float u, float v, uint32 *out) {
@@ -2354,7 +2777,7 @@ static inline bool HitBox(const Cam *cm, const float *d, float t0, float t1, flo
 // the object pixels of cell (cx, cy) between t0 and t1
 static bool CastPixels(const Cam *cm, const float *d, float px0, float py0, float t0, float t1, int cx, int cy,
                        int entered, RayZCache *zc, WallHit *hit) {
-  int floor_h = g_hfloor[(cy & 63) * 64 + (cx & 63)];
+  int floor_h = g_hfloor[GridCell(cx, cy)];
   float x = px0 + t0 * d[0], y = py0 + t0 * d[1];
   int x0 = cx * 8, y0 = cy * 8;
   int ix = (int)floorf(x), iy = (int)floorf(y);
@@ -2371,7 +2794,43 @@ static bool CastPixels(const Cam *cm, const float *d, float px0, float py0, floa
     if (te > t1) te = t1;
     int i = (iy & 511) * 512 + (ix & 511);
     int H = floor_h + g_praise[i];
-    if (H && HitBox(cm, d, t, te, (float)H, g_hbot[(cy & 63) * 64 + (cx & 63)], entered, zc, hit)) {
+    if (H && HitBox(cm, d, t, te, (float)H, g_hbot[GridCell(cx, cy)], entered, zc, hit)) {
+      hit->pix = i;
+      return true;
+    }
+    if (te >= t1)
+      return false;
+    if (nx < ny) {
+      ix += sx, t = nx, nx += tdx;
+      entered = sx > 0 ? kFace_West : kFace_East;
+      if (ix < x0 || ix > x0 + 7) return false;
+    } else {
+      iy += sy, t = ny, ny += tdy;
+      entered = sy > 0 ? kFace_North : kFace_South;
+      if (iy < y0 || iy > y0 + 7) return false;
+    }
+  }
+}
+
+// the forest's pixels of cell (cx, cy) between t0 and t1 (as CastPixels)
+static bool CastForest(const Cam *cm, const float *d, float px0, float py0, float t0, float t1, int cx, int cy,
+                       int entered, RayZCache *zc, WallHit *hit) {
+  float x = px0 + t0 * d[0], y = py0 + t0 * d[1];
+  int x0 = cx * 8, y0 = cy * 8;
+  int ix = (int)floorf(x), iy = (int)floorf(y);
+  ix = ix < x0 ? x0 : ix > x0 + 7 ? x0 + 7 : ix;
+  iy = iy < y0 ? y0 : iy > y0 + 7 ? y0 + 7 : iy;
+  int sx = d[0] > 0 ? 1 : -1, sy = d[1] > 0 ? 1 : -1;
+  float adx = fabsf(d[0]), ady = fabsf(d[1]);
+  float tdx = adx > 1e-9f ? 1.0f / adx : 1e30f, tdy = ady > 1e-9f ? 1.0f / ady : 1e30f;
+  float nx = adx > 1e-9f ? t0 + (sx > 0 ? ix + 1 - x : x - ix) / adx : 1e30f;
+  float ny = ady > 1e-9f ? t0 + (sy > 0 ? iy + 1 - y : y - iy) / ady : 1e30f;
+  float t = t0;
+  for (;;) {
+    float te = nx < ny ? nx : ny;
+    if (te > t1) te = t1;
+    int i = (iy & 1023) * 1024 + (ix & 1023);
+    if (g_ftop[i] && HitBox(cm, d, t, te, g_ftop[i], g_fbot[i], entered, zc, hit)) {
       hit->pix = i;
       return true;
     }
@@ -2409,13 +2868,16 @@ static bool CastWalls(const Cam *cm, const Ground *gr, const float *d, float t_e
   for (;;) {
     float te = nx < ny ? nx : ny;
     if (te > t_end) te = t_end;
-    int c = (cy & 63) * 64 + (cx & 63);
+    int c = GridCell(cx, cy);
     if (gr->clip && ((cx < gr->x0 >> 3 && sx < 0) || (cx >= gr->x1 >> 3 && sx > 0) ||
                      (cy < gr->y0 >> 3 && sy < 0) || (cy >= gr->y1 >> 3 && sy > 0)))
       return false;   // left the room for good
-    if (g_hmap[c] && Ground_InRoom(gr, cx * 8, cy * 8)) {
+    if (g_hmap[c] && Ground_InRoom(gr, cx * 8, cy * 8) &&
+        (!g_grid_out || ((unsigned)(cx - g_gx0) < kGridMax && (unsigned)(cy - g_gy0) < kGridMax))) {
       bool got;
-      if (g_partial[c]) {
+      if (g_grid_out) {
+        got = CastForest(cm, d, px0, py0, t, te, cx, cy, entered, &zc, hit);
+      } else if (g_partial[c]) {
         got = CastPixels(cm, d, px0, py0, t, te, cx, cy, entered, &zc, hit);
       } else {
         hit->pix = -1;
@@ -2448,6 +2910,55 @@ static bool ShadeWall(const Ground *gr, const WallHit *h, uint32 *out, float *fu
   case kFace_West: ix += 0.5f; break;
   case kFace_South: iy -= 0.5f; break;
   case kFace_North: iy += 0.5f; break;
+  }
+  if (g_grid_out) {
+    // the forest: tops are their own art, seen from above. A crown's sides
+    // show the leaves around them, dark below the rim (the trunk in its
+    // shadow). The others stand on a band of art rows at their south end (the
+    // roots, the hedge's edge); the top behind it stretches back to its own art.
+    int top = g_ftop[h->pix], band = g_fband[h->pix], shade = 256;
+    float front = floorf(iy) + g_fdown[h->pix] + 1.0f, d = g_fdown[h->pix] + 0.5f;
+    float z = h->z, au = ix, av = iy;
+    if (!band) {
+      float in = (top - z) * 0.5f;
+      switch (h->face) {
+      case kFace_Top: break;
+      case kFace_South: av = iy - in, shade = 208; break;
+      case kFace_East: au = ix - in, shade = 180; break;
+      case kFace_West: au = ix + in, shade = 164; break;
+      case kFace_North: av = iy + in, shade = 150; break;
+      }
+      if (z < kForestRim)
+        shade = shade * 7 / 16;
+    } else if (band == kForestPlainFace) {
+      // the fill a little way in: the art of the edge itself, a scalloped
+      // outline running along the rows, stretched up into stripes
+      float in = 12.0f + z * 0.5f;
+      switch (h->face) {
+      case kFace_Top: break;
+      case kFace_South: av = front - in, shade = 200; break;
+      case kFace_East: au = ix - in, shade = 180; break;
+      case kFace_West: au = ix + in, shade = 164; break;
+      case kFace_North: av = iy + in, shade = 150; break;
+      }
+    } else {
+      switch (h->face) {
+      case kFace_Top:
+        if (d < 2 * band)
+          av = front - band - d * 0.5f;
+        break;
+      case kFace_South: av = front - 0.5f - z * band / top; break;
+      case kFace_East: au = ix - z, shade = 196; break;
+      case kFace_West: au = ix + z, shade = 176; break;
+      case kFace_North: av = iy + z, shade = 160; break;
+      }
+    }
+    *fu = au - gr->org_x, *fv = av - gr->org_y;
+    if (!SampleSurface(gr, *fu, *fv, out))
+      return false;
+    if (shade < 256)
+      *out = (*out & 0xff000000) | Lerp(*out, 0, 256 - shade);
+    return true;
   }
   int c = h->cell;
   // heights above the cell's own floor (the upper level is raised whole)
@@ -2503,7 +3014,7 @@ static bool ShadeWall(const Ground *gr, const WallHit *h, uint32 *out, float *fu
     // art runs south of it, squeezed by g_hartw / H; the top shows what lies
     // beyond (as a north wall's top)
     int row = (int)floorf(iy * 0.125f);
-    float base = (float)((row - (row & 63) + g_hbase[c]) * 8);
+    float base = (float)((row - (row & g_gmask) + g_hbase[c]) * 8);
     float face_v = base + 0.5f + z * g_hartw[c] / (H > 0 ? H : 1.0f);
     switch (h->face) {
     case kFace_Top: av = iy + g_hartw[c]; break;
@@ -2514,7 +3025,7 @@ static bool ShadeWall(const Ground *gr, const WallHit *h, uint32 *out, float *fu
     }
   } else if (g_hfold[c]) {
     int row = (int)floorf(iy * 0.125f);
-    float base = (float)((row - (row & 63) + g_hbase[c]) * 8);
+    float base = (float)((row - (row & g_gmask) + g_hbase[c]) * 8);
     float dd = base - iy;
     float k = dd > 0 ? fmodf(dd, 8.0f) : 0.0f;   // depth into the run, tiled per 8 pixels
     switch (h->face) {
@@ -2528,7 +3039,7 @@ static bool ShadeWall(const Ground *gr, const WallHit *h, uint32 *out, float *fu
     // east/west wall folded sideways: the face stands at base, the art
     // runs away from the floor; the back and the run's ends show the face art
     int col = (int)floorf(ix * 0.125f);
-    float base = (float)((col - (col & 63) + g_hbasex[c]) * 8);
+    float base = (float)((col - (col & g_gmask) + g_hbasex[c]) * 8);
     bool east = g_hfoldx[c] == 1;   // the face looks east, the art lies to its west
     float a = g_hartw[c], dz = 0.5f + z * a / (H > 0 ? H : 1.0f);
     float face_u = east ? base - dz : base + dz;
@@ -2647,9 +3158,13 @@ static void DrawTerrainRow(void *ctx, int y) {
     } else if (ground) {
       int wx = gr->org_x + (int)floorf(u), wy = gr->org_y + (int)floorf(v);
       int pi = (wy & 511) * 512 + (wx & 511);
-      if (g_partial[((wy >> 3) & 63) * 64 + ((wx >> 3) & 63)] && g_pcover[pi])
+      if (!g_grid_out && g_partial[GridCell(wx >> 3, wy >> 3)] && g_pcover[pi])
         u += g_pcover[pi] * 16;
       ok = Ground_InRoom(gr, wx, wy) && SampleSurface(gr, u, v, &px);
+      // under an overhang: its own drawing is on this ground, in shadow
+      if (ok && g_grid_out && (unsigned)(wx - g_gx0 * 8) < 1024 && (unsigned)(wy - g_gy0 * 8) < 1024 &&
+          g_ftop[(wy & 1023) * 1024 + (wx & 1023)])
+        px = (px & 0xff000000) | Lerp(px, 0, 176);
     } else {
       dst[x] = Sky_Color(sk, cm, x + 0.5f, y + 0.5f, x, y);
       g_depth[i] = 1e9f, g_uv[i] = kUvNone, g_kind[i] = kKind_Sky;
@@ -2690,7 +3205,7 @@ static float FloorUnder(float u, float v, bool lower) {
   if (!g_depth_valid || !g_raised)
     return 0.0f;
   int wx = g_org_x + (int)floorf(u), wy = g_org_y + (int)floorf(v);
-  int c = ((wy >> 3) & 63) * 64 + ((wx >> 3) & 63);
+  int c = GridCell(wx >> 3, wy >> 3);
   return g_hbot[c] && lower ? 0.0f : g_hfloor[c];
 }
 
@@ -2843,10 +3358,10 @@ static bool WallFaceAt(float u, float v, float *face_v, float *face_floor) {
     return false;
   int wx = g_org_x + (int)floorf(u), wy = g_org_y + (int)floorf(v);
   for (int k = 0; k < 3; k++, wy -= 8) {
-    int row = wy >> 3, c = (row & 63) * 64 + ((wx >> 3) & 63);
+    int row = wy >> 3, c = GridCell(wx >> 3, row);
     if (g_hfold[c] != 1 || g_hmap[c] <= g_hfloor[c] || g_partial[c])
       continue;
-    *face_v = (float)((row - (row & 63) + g_hbase[c]) * 8 - g_org_y);
+    *face_v = (float)((row - (row & g_gmask) + g_hbase[c]) * 8 - g_org_y);
     *face_floor = g_hfloor[c];
     return true;
   }
@@ -3338,9 +3853,13 @@ void Hd3d_EndFrame(uint8 *pixels, int pitch, int width, int height) {
   Sky sk;
   Sky_Setup(&sk, outdoors, width);
   uint32 *out = (uint32 *)pixels;
-  bool walls = g_view3d_walls && player_is_indoors;
+  bool forest = g_view3d_walls && ForestHeightsOn();
+  bool walls = forest || (g_view3d_walls && player_is_indoors);
   if (walls) {
-    BuildHeightMap();
+    if (forest)
+      BuildForestHeights();
+    else
+      BuildHeightMap();
     DrawTerrain(out, pitch_px, &cm, &gr, &sk);
   } else {
     DrawGround(out, pitch_px, &cm, &gr, &sk);
@@ -3378,7 +3897,7 @@ void Hd3d_EndFrame(uint8 *pixels, int pitch, int width, int height) {
              g_stat_outside / g_stat_frames, g_stat_missing / g_stat_frames, kSourceNames[gr.source],
              (double)g_stat_far_groups / g_stat_frames, kDistNames[g_view3d_dist],
              g_view3d_dist && !(HdWorld_Active() || player_is_indoors) ? "needs continuous world outdoors" : "ok",
-             g_view3d_walls ? (player_is_indoors ? "on" : "on (indoors only)") : "off", g_stat_wall_cells / g_stat_frames,
+             g_view3d_walls ? (player_is_indoors ? "on" : "on (indoors and the forest)") : "off", g_stat_wall_cells / g_stat_frames,
              width, height, main_module_index, BYTE(overworld_screen_index));
     g_stat_ticks = 0, g_stat_frames = 0, g_stat_groups = 0, g_stat_max_groups = 0;
     g_stat_outside = 0, g_stat_missing = 0, g_stat_far_groups = 0, g_stat_wall_cells = 0;
