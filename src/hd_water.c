@@ -50,7 +50,8 @@ static uint16 *g_dist;
 static uint8 *g_kind;
 static uint8 *g_depth;    // 0 = non si sa, 1 = acqua alta (0x08), 2 = acqua bassa (0x09)
 static uint8 *g_fixed;    // 1 = onda animata dello SNES: acqua in ogni fase (AnimWaterPixel)
-static uint32 *g_sum;     // somme per la media, impacchettate (vedi BlurRows)
+static uint8 *g_spr;      // 1 = pixel di uno sprite: un buco per l'acqua (FillSpriteHoles)
+static uint32 *g_sum;    // somme per la media, impacchettate (vedi BlurRows)
 static uint32 *g_sum2;
 static int g_buf_cap;
 
@@ -248,11 +249,13 @@ static bool EnsureBuffers(int n) {
   if (depth) g_depth = depth;
   uint8 *fixed = realloc(g_fixed, n);
   if (fixed) g_fixed = fixed;
+  uint8 *spr = realloc(g_spr, n);
+  if (spr) g_spr = spr;
   uint32 *sum = realloc(g_sum, n * kSumCh * sizeof(uint32));
   if (sum) g_sum = sum;
   uint32 *sum2 = realloc(g_sum2, n * kSumCh * sizeof(uint32));
   if (sum2) g_sum2 = sum2;
-  if (!pre || !dist || !kind || !depth || !fixed || !sum || !sum2)
+  if (!pre || !dist || !kind || !depth || !fixed || !spr || !sum || !sum2)
     return false;
   g_buf_cap = n;
   return true;
@@ -867,7 +870,7 @@ static void FindWaterColors(int n, int n_water, bool tint_only) {
   uint32 col[kMaxColors];
   int cnt[kMaxColors], inner[kMaxColors], nc = 0, last = -1;
   for (int i = 0; i < n; i++) {
-    if (g_kind[i] != 1 || g_fixed[i])
+    if (g_kind[i] != 1 || g_fixed[i] || g_spr[i])
       continue;  // le onde animate non contano: hanno i colori della fase
     uint32 c = g_pre[i] & 0xffffff;
     if (tint_only && !IsWaterTint(c))
@@ -1068,15 +1071,18 @@ static void BlurRows(void *ctx, int part, int y0, int y1) {
     // le onde animate contano col colore dell'acqua, non con quello della
     // fase (gli archi scuri facevano una macchia che cambiava ogni 9 fotogrammi)
     uint32 wc = g_num_water_colors ? g_water_colors[0] : 0;
+    // gli sprite sopra l'acqua (7) contano come l'acqua accanto
+    // (FillSpriteHoles): senza, il confine fra acqua alta e bassa si spostava
+    // vicino a loro
     for (int x = -r; x < w + r; x++) {
       int xin = x + r, xout = x - r - 1;
-      if (xin < w && k[xin] == 1) {
+      if (xin < w && (k[xin] == 1 || k[xin] == 7)) {
         uint32 c = fx[xin] && wc ? wc : pre[xin];
         acc[0] += (c >> 16 & 0xff) | (c >> 8 & 0xff) << 16;
         acc[1] += (c & 0xff) | 1 << 16 | (uint32)(dp[xin] == 2) << 24;
         acc[2] += dp[xin] != 0;
       }
-      if (xout >= 0 && k[xout] == 1) {
+      if (xout >= 0 && (k[xout] == 1 || k[xout] == 7)) {
         uint32 c = fx[xout] && wc ? wc : pre[xout];
         acc[0] -= (c >> 16 & 0xff) | (c >> 8 & 0xff) << 16;
         acc[1] -= (c & 0xff) | 1 << 16 | (uint32)(dp[xout] == 2) << 24;
@@ -1298,7 +1304,8 @@ static void ClassifyRows(void *ctx, int part, int y0, int y1) {
       if (!outdoors && l == kLayerWater)
         dp[x] = DungeonDepthAt(x - ext + cam_x, y + cam_y);
       g_fixed[y * w + x] = 0;
-      int spout = !outdoors && j->falls ? SpoutAt(x - ext + cam_x, y + cam_y) : 0;
+      g_spr[y * w + x] = (sl == 4 || sl == 6) && x >= g_vis_x0 && x < g_vis_x1 && y < g_vis_y1;
+      int spout =!outdoors && j->falls ? SpoutAt(x - ext + cam_x, y + cam_y) : 0;
       if (x < g_vis_x0 || x >= g_vis_x1 || y >= g_vis_y1) {
         k[x] = 0;  // fasce nere: non e' una riva
       } else if (cell == kCellWarp) {
@@ -1843,6 +1850,49 @@ static void SpritesShowBackground(int w, int h, int ext) {
   HdPar_For(SpriteRowsShowBackground, ctx, h);
 }
 
+// Regola per tutti gli sprite: per l'acqua sono buchi. Il colore dello sfondo
+// sotto (SpritesShowBackground) non sempre c'e' (col mondo continuo il fondale
+// viene dalle immagini delle aree, non dalla VRAM) e allora restava il colore
+// dello sprite: il contorno nero di fuochi, rane e nemici diventava riva e
+// attorno nasceva la fascia nera della schiuma (palude oscura, area 0x73).
+// Ogni pixel di uno sprite prende tipo, profondita' e colore dal pixel vero
+// piu' vicino (nelle 4 direzioni, fino a 64 pixel): la riva continua sotto lo
+// sprite com'e' attorno, e lo sprite non fa mai da riva ne' da acqua. Si rifa'
+// dopo ogni passo che cambia la riva, prima delle distanze
+static void FillSpriteRows(void *ctx, int part, int y0, int y1) {
+  int w = ((const int *)ctx)[0], h = ((const int *)ctx)[1];
+  static const int kDx[4] = { -1, 1, 0, 0 }, kDy[4] = { 0, 0, -1, 1 };
+  for (int y = y0; y < y1; y++)
+    for (int x = 0; x < w; x++) {
+      int i = y * w + x;
+      if (!g_spr[i] || g_kind[i] == 2 || g_kind[i] == 6)
+        continue;  // sopra cascate e getti restano 6 (non le interrompono)
+      int best = -1, best_d = 65;
+      for (int d = 0; d < 4; d++) {
+        int xx = x, yy = y;
+        for (int s = 1; s < best_d; s++) {
+          xx += kDx[d], yy += kDy[d];
+          if (xx < 0 || xx >= w || yy < 0 || yy >= h)
+            break;
+          int r = yy * w + xx;
+          if (!g_spr[r]) {
+            best = r, best_d = s;
+            break;
+          }
+        }
+      }
+      if (best < 0)
+        continue;
+      g_kind[i] = g_kind[best] == 2 ? 6 : g_kind[best], g_depth[i] = g_depth[best], g_fixed[i] = g_fixed[best];
+      g_pre[i] = (g_pre[i] & 0xff000000) | (g_pre[best] & 0xffffff);
+    }
+}
+
+static void FillSpriteHoles(int w, int h) {
+  int ctx[2] = { w, h };
+  HdPar_For(FillSpriteRows, ctx, h);
+}
+
 // Alla fine: l'acqua sotto gli sprite resta acqua per le distanze dalla riva,
 // ma non si dipinge (7): lo sprite resta com'e'. Gli sprite trasparenti
 // (g_obj_math) restano acqua da dipingere: si sommano dopo. Solo se lo strato
@@ -2374,6 +2424,7 @@ void HdWater_Apply(uint8 *pixels, int pitch, int width, int height, int bias_x, 
   SpritesShowBackground(w, h, ext);
   ClassJob cj = { pixels, pitch, w, cam_x, cam_y, ext, outdoors, falls, outside_area, stream };
   HdPar_For(ClassifyRows, &cj, h);
+  FillSpriteHoles(w, h);
   int n_water = 0, n_fall = 0;
   float fall_sum[3] = { 0 };
   for (int p = 0; p < kHdParMaxParts; p++) {
@@ -2414,12 +2465,15 @@ void HdWater_Apply(uint8 *pixels, int pitch, int width, int height, int bias_x, 
     // scogliere resta coperta dall'acqua, come prima
     if (outdoors && (overworld_screen_index & 0x40))
       AnimShorePixels(w, h, cam_x, cam_y, ext);
-    if (outdoors && (overworld_screen_index & 0x40))
+    if (outdoors && (overworld_screen_index & 0x40)) {
+      FillSpriteHoles(w, h);
       ComputeDistance(w, h, 2, 3, 5);  // con la riva cambiata da AnimShorePixels
+    }
     ShoreJob sj = { 0, 0, 0, outdoors, w, cam_x, cam_y, ext };
     HdPar_For(ShorePixels, &sj, w * h);
     if (outdoors)
       GrowShore(w, h);
+    FillSpriteHoles(w, h);
     // nella stanza della diga pareti, pilastri e muri hanno colori vicini a
     // quelli dell'acqua: la riva si cerca solo vicino e con i colori giusti
     bool near = outdoors || FloodRoom();
@@ -2443,6 +2497,7 @@ void HdWater_Apply(uint8 *pixels, int pitch, int width, int height, int bias_x, 
         g_kind[i] &= ~0x40;
     }
   }
+  FillSpriteHoles(w, h);
   KeepSpritesOverWater(w, h, ext);
   // fino a 27 pixel: piu' in la' l'acqua e' gia' "al largo" (deep = 1)
   ComputeDistance(w, h, 2, 3, 27);

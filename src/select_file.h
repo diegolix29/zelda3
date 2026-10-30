@@ -37,6 +37,10 @@ void KILLFile_HandleConfirmation();
 void KILLFile_ChooseTarget();
 void FileSelect_DrawFairy(uint8 x, uint8 y);
 void Module04_NameFile();
+// Nome scritto con la tastiera (main.c): vero nella schermata del nome
+bool NameFile_IsTyping(void);
+// Un carattere ASCII da scrivere nel nome; '\b' cancella l'ultimo
+void NameFile_TypeChar(char c);
 void NameFile_EraseSave();
 void NameFile_DoTheNaming();
 void NameFile_CheckForScrollInputX();

@@ -28,6 +28,7 @@
 #include "audio.h"
 #include "hd_menu.h"
 #include "hd_art.h"
+#include "select_file.h"
 
 static bool g_run_without_emu = 0;
 
@@ -36,6 +37,8 @@ static bool LoadRom(const char *filename);
 static void LoadLinkGraphics();
 static void RenderNumber(uint8 *dst, size_t pitch, int n, bool big);
 static void HandleInput(int keyCode, int modCode, bool pressed);
+static bool NameKeyDown(int sym, int mod);
+static void NameTypeUtf8(const char *s);
 static void HandleCommand(uint32 j, bool pressed);
 static int RemapSdlButton(int button);
 static void HandleGamepadInput(int button, bool pressed);
@@ -499,8 +502,13 @@ int main(int argc, char** argv) {
         }
         break;
       case SDL_KEYDOWN:
-        if (!HdMenu_HandleKey(event.key.keysym.sym, event.key.keysym.mod, true))
+        if (!HdMenu_HandleKey(event.key.keysym.sym, event.key.keysym.mod, true) &&
+            !NameKeyDown(event.key.keysym.sym, event.key.keysym.mod))
           HandleInput(event.key.keysym.sym, event.key.keysym.mod, true);
+        break;
+      case SDL_TEXTINPUT:
+        if (NameFile_IsTyping())
+          NameTypeUtf8(event.text.text);
         break;
       case SDL_KEYUP:
         if (!HdMenu_HandleKey(event.key.keysym.sym, event.key.keysym.mod, false))
@@ -776,6 +784,33 @@ static void HandleCommand_Locked(uint32 j, bool pressed) {
   }
 }
 
+// Schermata del nome: i tasti dei caratteri scrivono il nome (il carattere
+// arriva con SDL_TEXTINPUT) invece di premere i tasti del joypad; Backspace
+// cancella. Frecce, Invio (Start) e i tasti con Ctrl o Alt restano quelli
+static bool NameKeyDown(int sym, int mod) {
+  if (!NameFile_IsTyping() || (mod & (KMOD_CTRL | KMOD_ALT)))
+    return false;
+  if (sym == SDLK_BACKSPACE) {
+    NameFile_TypeChar('\b');
+    return true;
+  }
+  // tasti dei caratteri in qualunque lingua della tastiera (anche le vocali accentate): i
+  // tasti senza carattere (frecce, F1...) hanno SDLK_SCANCODE_MASK
+  return sym >= 32 && sym != SDLK_DELETE && !(sym & SDLK_SCANCODE_MASK);
+}
+
+// Testo UTF-8 dalla tastiera: le vocali accentate (tastiera italiana)
+// diventano quelle semplici, la griglia del gioco non ha accenti
+static void NameTypeUtf8(const char *s) {
+  static const char kAccents[] = "AAAAAAACEEEEIIIIDNOOOOO#OUUUUYTsaaaaaaaceeeeiiiidnooooo#ouuuuyty";
+  for (const uint8 *p = (const uint8 *)s; *p; p++) {
+    if (*p < 0x80)
+      NameFile_TypeChar((char)*p);
+    else if (*p == 0xc3 && p[1] >= 0x80 && p[1] < 0xc0)
+      NameFile_TypeChar(kAccents[*++p - 0x80]);
+  }
+}
+
 static void HandleInput(int keyCode, int keyMod, bool pressed) {
   int j = FindCmdForSdlKey(keyCode, keyMod);
   if (j != 0)
@@ -1046,6 +1081,21 @@ int Host_GetVolume() {
 
 void Host_AdjustVolume(int step) {
   HandleVolumeAdjustment(step);
+}
+
+void Host_Rumble(float low, float high, int ms) {
+  static const float kScale[4] = { 0, 0.4f, 0.7f, 1.0f };
+  float k = kScale[g_config.rumble & 3];
+  if (k == 0 || ms <= 0)
+    return;
+  low = low < 0 ? 0 : low > 1 ? 1 : low;
+  high = high < 0 ? 0 : high > 1 ? 1 : high;
+  // tutti i controller aperti (OpenOneGamepad); chi non vibra lo ignora
+  for (int i = 0; i < SDL_NumJoysticks(); i++) {
+    SDL_GameController *gc = SDL_GameControllerFromInstanceID(SDL_JoystickGetDeviceInstanceID(i));
+    if (gc)
+      SDL_GameControllerRumble(gc, (uint16)(low * k * 0xffff), (uint16)(high * k * 0xffff), (uint32)ms);
+  }
 }
 
 bool Host_IsOpenGL() {

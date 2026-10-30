@@ -438,6 +438,7 @@ static const char *Tr(const char *it) {
     { "(al riavvio)", "(on restart)" },
     { "Menu opzioni", "Options menu" },
     { "Ripristina tasti predefiniti", "Restore default keys" },
+    { "Vibrazione del controller", "Controller rumble" },
     { "Azione sugli slot", "Slot action" },
     { "Salva", "Save" },
     { "Carica", "Load" },
@@ -545,6 +546,7 @@ static void SaveSettings() {
     AddIni(v, &n, "[Features]", kFeatureOptions[i].ini_key, "%d", (g_config.features0 & kFeatureOptions[i].bit) != 0);
   }
   AddIni(v, &n, "[Features]", "TextSpeed", "%d", g_config.text_speed);
+  AddIni(v, &n, "[Features]", "Rumble", "%d", g_config.rumble);
   if (g_msu_dirty) {
     v[n].section = "[Sound]", v[n].key = "EnableMSU";
     const char *mode = "true";
@@ -679,6 +681,7 @@ static void BuildItems() {
     Config_KeyName(Config_GetKeyForCmd(kKeys_HdMenu), buf2, sizeof(buf2));
     snprintf(buf, sizeof(buf), "%s   -   %s", buf2, Config_PadButtonName(Config_GetPadButtonForCmd(kKeys_HdMenu)));
     AddItem(12, "Menu opzioni", buf);
+    AddItem(14, "Vibrazione del controller", kSmoothCameraNames[g_config.rumble & 3]);
     AddItem(13, "Ripristina tasti predefiniti", NULL);
     break;
   case kPage_Saves:
@@ -806,6 +809,12 @@ static void Activate(int id, int dir) {
       g_msu_on = !g_msu_on, g_msu_dirty = true;
     break;
   case kPage_Controls:
+    if (id == 14) {
+      // spenta, leggera, media, forte; una vibrazione di prova con la nuova forza
+      g_config.rumble = (g_config.rumble + (dir < 0 ? 3 : 1)) & 3;
+      Host_Rumble(1.0f, 1.0f, 300);
+      return;
+    }
     if (dir != 0)
       return;
     if (id == 13) {

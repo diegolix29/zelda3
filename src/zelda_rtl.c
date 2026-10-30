@@ -15,6 +15,7 @@
 #include "hd_light.h"
 #include "hd_fx.h"
 #include "hd_water.h"
+#include "hd_rumble.h"
 #include "hd_hud.h"
 #include "hd_menu.h"
 #include "hd_icegba.h"
@@ -807,6 +808,8 @@ void ZeldaRunFrameInternal(uint16 input, int run_what) {
   if (run_what & 1)
     ZeldaRunGameLoop();
   Interrupt_NMI(input);
+  if (run_what & 1)
+    HdRumble_Tick();
 }
 
 

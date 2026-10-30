@@ -11,6 +11,10 @@ void Host_ToggleFullscreen();
 bool Host_GetDisplayPerf();
 void Host_SetDisplayPerf(bool on);
 int Host_GetVolume();
+// Vibrazione dei controller aperti: forza dei due motori (0-1, pesante e
+// leggero) e durata; si scala con l'opzione Rumble (spenta = niente). Una
+// chiamata nuova prende il posto di quella in corso
+void Host_Rumble(float low, float high, int ms);
 void Host_AdjustVolume(int step);
 bool Host_IsOpenGL();
 // Disegno con uno shader GLSL (per esempio Four Swords)

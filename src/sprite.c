@@ -18,6 +18,7 @@
 #include "overlord.h"
 #include "tile_detect.h"
 #include "sprite_main.h"
+#include "hd_rumble.h"
 #include "assets.h"
 static const uint16 kOamGetBufferPos_Tab0[6] = {0x171, 0x201, 0x31, 0xc1, 0x141, 0x1d1};
 static const uint16 kOamGetBufferPos_Tab1[48] = {
@@ -1177,6 +1178,19 @@ void Sprite_Main() {  // 868328
     // Si segna quali voci OAM scrive ogni nemico (come per Link in
     // LinkOam_Main): con la vista spostata la posizione di ogni pezzo si
     // ricava dal suo nemico invece che dall'oggetto piu' vicino
+    // Chi resta fuori dalla vista non consuma posti: col mondo continuo i
+    // nemici lontani restano attivi e prenotavano lo stesso i loro posti nelle
+    // regioni dell'OAM. Piene, le regioni ricominciano da uno di 8 punti a
+    // rotazione e i pezzi di chi si vede venivano sovrascritti ogni 8
+    // fotogrammi (soldato accanto a Link con la pietra pesante sollevata)
+    static OamEnt full[128];
+    static uint8 ext[128], real_f0[128];
+    uint16 region_base[6], region_wrap[6];
+    memcpy(full, oam_buf, sizeof(full));
+    memcpy(ext, g_ram + 0xa20, sizeof(ext));
+    memcpy(real_f0, g_oam_real_f0, sizeof(real_f0));
+    memcpy(region_base, oam_region_base, sizeof(region_base));
+    memcpy(region_wrap, oam_alloc_arr1, sizeof(region_wrap));
     uint16 saved[128];
     for (int j = 0; j < 128; j++)
       saved[j] = WORD(oam_buf[j].charnum), WORD(oam_buf[j].charnum) = 0xffff;
@@ -1187,13 +1201,16 @@ void Sprite_Main() {  // 868328
     HdWorld_SpriteEnd(i, g_sprite_offscreen[i] != 0);
     // fuori dalla vista: niente pezzi sullo schermo e niente suoni
     bool hide = g_sprite_offscreen[i] != 0;
-    if (hide)
+    if (hide) {
       sound_effect_1 = sfx1, sound_effect_2 = sfx2;
+      memcpy(oam_region_base, region_base, sizeof(region_base));
+      memcpy(oam_alloc_arr1, region_wrap, sizeof(region_wrap));
+    }
     for (int j = 0; j < 128; j++) {
       if (WORD(oam_buf[j].charnum) == 0xffff)
         WORD(oam_buf[j].charnum) = saved[j];
-      else if (hide)
-        oam_buf[j].y = 0xf0, g_oam_real_f0[j] = 0;
+      else if (hide)  // le voci tornano com'erano prima di lui
+        oam_buf[j] = full[j], g_ram[0xa20 + j] = ext[j], g_oam_real_f0[j] = real_f0[j];
       else
         g_sprite_oam_owner[j] = i;
     }
@@ -2679,6 +2696,7 @@ if_3:
     return true;
   }
   SpriteSfx_QueueSfx2WithPan(k, 6);
+  HdRumble(kRumble_Shield);
   Sprite_PlaceRupulseSpark_2(k);
   if (sprite_type[k] == 0x95) {
     SpriteSfx_QueueSfx3WithPan(k, 0x26);

@@ -93,6 +93,7 @@ typedef struct Config {
   // (divise da ItemSwitchLR, che ora e' solo il cambio rapido con L e R)
   bool item_on_x, item_on_lr;
   uint8 text_speed;         // 0 = originale, 1 = veloce, 2 = istantaneo
+  uint8 rumble;             // vibrazione del controller: 0 spenta, 1 leggera, 2 media, 3 forte
 
   const char *link_graphics;
   char *memory_buffer;

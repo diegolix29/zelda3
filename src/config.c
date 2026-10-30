@@ -596,6 +596,10 @@ static bool HandleIniConfig(int section, const char *key, char *value) {
     } else if (StringEqualsNoCase(key, "TextSpeed")) {
       g_config.text_speed = (uint8)strtol(value, (char**)NULL, 10);
       return true;
+    } else if (StringEqualsNoCase(key, "Rumble")) {
+      int v = strtol(value, (char**)NULL, 10);
+      g_config.rumble = (uint8)(v < 0 ? 0 : v > 3 ? 3 : v);
+      return true;
     }
   }
   return false;
