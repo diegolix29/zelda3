@@ -4,6 +4,7 @@
 #include "variables.h"
 #include "messaging.h"
 #include "hud_it.h"
+#include "config.h"
 
 // Inventario esteso a 6 colonne (opzione ExtendedInventory), altrimenti
 // quello originale a 5 colonne
@@ -19,7 +20,6 @@ static bool Hud_DoWeHaveThisItem(uint8 item);
 static void Hud_EquipPrevItem(uint8 *item);
 static void Hud_EquipNextItem(uint8 *item);
 static int Hud_GetItemPosition(int item);
-static void Hud_ReorderItem(int direction);
 static void Hud_Update_Magic();
 static void Hud_Update_Inventory();
 static void Hud_Update_Hearts();
@@ -281,8 +281,6 @@ static const uint8 kDefaultInventoryOrder[24] = {
 
 // Oggetto nella casella (da 0, in ordine di lettura)
 static uint8 Hud_SlotItem(int slot) {
-  if (hud_inventory_order[0] != 0)
-    return hud_inventory_order[slot];
   return kNewStyleInventory ? kDefaultInventoryOrder[slot] : slot + 1;
 }
 
@@ -579,39 +577,103 @@ static bool Hud_DoWeHaveThisItem(uint8 item) {  // 8ddeb0
   return (&link_item_bow)[item - 1] != 0;
 }
 
+// Opzioni "Tasto X per gli oggetti" (ItemOnX) e "Tasti L e R per gli
+// oggetti" (ItemOnLR): a quali tasti si possono assegnare oggetti nel menu
+bool Hud_ItemOnX(void) {
+  return g_config.item_on_x;
+}
+
+bool Hud_ItemOnLR(void) {
+  return g_config.item_on_lr;
+}
+
+// Tasto i (0 Y, 1 X, 2 L, 3 R) a cui si possono assegnare oggetti
+static bool Hud_ButtonTakesItems(int i) {
+  return i == 0 || (i == 1 ? Hud_ItemOnX() : Hud_ItemOnLR());
+}
+
+// Un oggetto sta su un solo tasto fra Y, X, L e R: true se item e' gia' su
+// un tasto diverso da quello di self
+static bool Hud_ItemOnOtherButton(const uint8 *self, uint8 item) {
+  if (!item)
+    return false;
+  for (int i = 0; i < 4; i++) {
+    const uint8 *p = GetCurrentItemButtonPtr(i);
+    if (p != self && *p == item)
+      return true;
+  }
+  return false;
+}
+
+// Svuota X, L e R se l'opzione del tasto e' spenta, e toglie da X, L e R gli
+// oggetti che stanno gia' su Y o su un tasto prima (salvataggi vecchi, cambio
+// di inventario che unisce bottiglie o pala e flauto)
+static void Hud_RemoveDuplicateButtonItems(void) {
+  for (int i = 1; i < 4; i++) {
+    uint8 *p = GetCurrentItemButtonPtr(i);
+    if (!Hud_ButtonTakesItems(i))
+      *p = 0;
+    for (int j = 0; j < i; j++)
+      if (*p && *GetCurrentItemButtonPtr(j) == *p)
+        *p = 0;
+  }
+}
+
+// Il cursore salta gli oggetti che non ci sono e quelli gia' su un altro
+// tasto; se non trova niente resta dov'era
+static bool Hud_CanEquip(uint8 *item) {
+  return Hud_DoWeHaveThisItem(*item) && !Hud_ItemOnOtherButton(item, *item);
+}
+
 static void Hud_EquipPrevItem(uint8 *item) {  // 8dded9
-  do {
+  uint8 old = *item;
+  for (int n = 0; n < 64; n++) {
     Hud_GotoPrevItem(item, item == &hud_cur_item);
-  } while (!Hud_DoWeHaveThisItem(*item));
+    if (Hud_CanEquip(item))
+      return;
+  }
+  *item = old;
 }
 
 static void Hud_EquipNextItem(uint8 *item) {  // 8ddee2
-  do {
+  uint8 old = *item;
+  for (int n = 0; n < 64; n++) {
     Hud_GotoNextItem(item, item == &hud_cur_item);
-  } while (!Hud_DoWeHaveThisItem(*item));
+    if (Hud_CanEquip(item))
+      return;
+  }
+  *item = old;
 }
 
 static void Hud_EquipItemAbove(uint8 *item) {  // 8ddeeb
-  do {
+  uint8 old = *item;
+  for (int n = 0; n < 64; n++) {
     for(int i = 0; i < (kNewStyleInventory ? 6 : 5); i++)
       Hud_GotoPrevItem(item, 1);
-  } while (!Hud_DoWeHaveThisItem(*item));
+    if (Hud_CanEquip(item))
+      return;
+  }
+  *item = old;
 }
 
 static void Hud_EquipItemBelow(uint8 *item) {  // 8ddf00
+  uint8 old = *item;
   int num = *item == 0 ? 1 : (kNewStyleInventory ? 6 : 5);
-  do {
+  for (int n = 0; n < 64; n++) {
     for (int i = 0; i < num; i++)
       Hud_GotoNextItem(item, 1);
-  } while (!Hud_DoWeHaveThisItem(*item));
+    if (Hud_CanEquip(item))
+      return;
+  }
+  *item = old;
 }
 
 int GetCurrentItemButtonIndex() {
-  if (enhanced_features0 & kFeatures0_SwitchLR) {
-    return (joypad1L_last & kJoypadL_X) ? 1 :
-           (joypad1L_last & kJoypadL_L) ? 2 :
+  if (Hud_ItemOnX() && (joypad1L_last & kJoypadL_X))
+    return 1;
+  if (Hud_ItemOnLR())
+    return (joypad1L_last & kJoypadL_L) ? 2 :
            (joypad1L_last & kJoypadL_R) ? 3 : 0;
-  }
   return 0;
 }
 
@@ -640,17 +702,8 @@ void Hud_NormalMenu() {  // 8ddf15
     return;
   }
 
-  if (joypad1H_last & kJoypadH_Y && !(joypad1L_last & kJoypadL_X) && (enhanced_features0 & kFeatures0_SwitchLR)) {
-    if (filtered_joypad_H & kJoypadH_Up) {
-      Hud_ReorderItem(kNewStyleInventory ? -6 : -5);
-    } else if (filtered_joypad_H & kJoypadH_Down) {
-      Hud_ReorderItem(kNewStyleInventory ? 6 : 5);
-    } else if (filtered_joypad_H & kJoypadH_Left) {
-      Hud_ReorderItem(-1);
-    } else if (filtered_joypad_H & kJoypadH_Right) {
-      Hud_ReorderItem(1);
-    }
-  } else if (!BYTE(hud_tmp1)) {
+  if (!BYTE(hud_tmp1)) {
+    Hud_RemoveDuplicateButtonItems();
     // If Special Key button is down, then move their circle
     int btn_index = GetCurrentItemButtonIndex();
     uint8 *item_p = GetCurrentItemButtonPtr(btn_index);
@@ -711,7 +764,7 @@ bool Hud_ExtendedInventory() {
 
 // Cambio di inventario a partita in corso: gli oggetti dei tasti passano da
 // una disposizione all'altra (la 16 e' la bottiglia nell'originale, la pala
-// in quello esteso; le bottiglie estese sono 21-24) e il riordino si azzera
+// in quello esteso; le bottiglie estese sono 21-24)
 static uint8 Hud_ConvertItem(uint8 item, bool extended, bool is_y) {
   if (extended) {
     if (item == kHudItem_BottleOld)
@@ -731,11 +784,16 @@ static uint8 Hud_ConvertItem(uint8 item, bool extended, bool is_y) {
 }
 
 void Hud_ChangeInventoryStyle(bool extended) {
-  hud_inventory_order[0] = 0;
   hud_cur_item_x = Hud_ConvertItem(hud_cur_item_x, extended, false);
   hud_cur_item_l = Hud_ConvertItem(hud_cur_item_l, extended, false);
   hud_cur_item_r = Hud_ConvertItem(hud_cur_item_r, extended, false);
   uint8 item = Hud_ConvertItem(hud_cur_item, extended, true);
+  {
+    uint8 y = hud_cur_item;
+    hud_cur_item = item;  // i doppi si guardano con l'oggetto di Y gia' convertito
+    Hud_RemoveDuplicateButtonItems();
+    hud_cur_item = y;
+  }
   if (item != hud_cur_item && (main_module_index == 7 || main_module_index == 9)) {
     hud_cur_item = item;
     Hud_UpdateEquippedItem();
@@ -1467,11 +1525,11 @@ void Hud_RebuildIndoor() {  // 8dfa60
 static void Hud_DrawXLRItems() {
   // Lettere dei nomi degli oggetti del menu (0x2550 + lettera)
   static const uint16 kLetterTiles[3] = { 0x2550 + 'X' - 'A', 0x2550 + 'L' - 'A', 0x2550 + 'R' - 'A' };
-  bool show = (enhanced_features0 & kFeatures0_ShowXLRItemsInHud) && (enhanced_features0 & kFeatures0_SwitchLR);
   const uint8 items[3] = { hud_cur_item_x, hud_cur_item_l, hud_cur_item_r };
   for (int i = 0; i < 3; i++) {
     uint16 *dst = &hud_tile_indices_buffer[HUDXY(8 + i * 4, 2)];
-    bool on = show && items[i] != 0 && Hud_DoWeHaveThisItem(items[i]);
+    // solo i tasti a cui si possono assegnare oggetti (X, oppure L e R)
+    bool on = Hud_ButtonTakesItems(i + 1) && items[i] != 0 && Hud_DoWeHaveThisItem(items[i]);
     dst[0] = 0x207f;
     dst[32] = on ? kLetterTiles[i] : 0x207f;
     if (on) {
@@ -1486,8 +1544,8 @@ static void Hud_UpdateItemBox() {  // 8dfafd
   // Update r
   if (hud_cur_item)
     Hud_DrawItem(&hud_tile_indices_buffer[HUDXY(5, 1)], Hud_GetIconForItem(hud_cur_item));
-  if (enhanced_features0 & kFeatures0_SwitchLR)
-    Hud_DrawXLRItems();
+  // sempre: un tasto spento dal menu va svuotato (lo fa Hud_DrawXLRItems)
+  Hud_DrawXLRItems();
 }
 
 static void Hud_UpdateHearts_Inner(uint16 *dst, const uint16 *src, int n) {  // 8dfdab
@@ -1634,6 +1692,9 @@ const uint16 *Hud_GetItemBoxPtr(int item) {
 }
 
 void Hud_HandleItemSwitchInputs() {
+  Hud_RemoveDuplicateButtonItems();
+  // "Cambio oggetti con L e R": L e R scorrono gli oggetti di Y, se non hanno
+  // un oggetto assegnato
   if (!(enhanced_features0 & kFeatures0_SwitchLR))
     return;
   
@@ -1652,7 +1713,9 @@ void Hud_HandleItemSwitchInputs() {
       Hud_GotoPrevItem(&item, 1);
     else
       Hud_GotoNextItem(&item, 1);
-    if (Hud_DoWeHaveThisItem(item) && (!(enhanced_features0 & kFeatures0_SwitchLRLimit) || Hud_GetItemPosition(item) <= 3)) {
+    // salta gli oggetti assegnati a X, L o R
+    if (Hud_DoWeHaveThisItem(item) && !Hud_ItemOnOtherButton(&hud_cur_item, item) &&
+        (!(enhanced_features0 & kFeatures0_SwitchLRLimit) || Hud_GetItemPosition(item) <= 3)) {
       if (item != hud_cur_item) {
         hud_cur_item = item;
         sound_effect_2 = 32;
@@ -1663,22 +1726,4 @@ void Hud_HandleItemSwitchInputs() {
       break;
     }
   }
-}
-
-static void Hud_ReorderItem(int direction) {
-  // Initialize inventory order on first use
-  if (hud_inventory_order[0] == 0) {
-    for (int i = 0; i < 24; i++)
-      hud_inventory_order[i] = Hud_SlotItem(i);
-  }
-  int old_pos = Hud_GetItemPosition(hud_cur_item), new_pos = old_pos + direction;
-  if (new_pos < 0)
-    new_pos += kHudItemCount;
-  else if (new_pos >= kHudItemCount)
-    new_pos -= kHudItemCount;
-  uint8 t = hud_inventory_order[old_pos];
-  hud_inventory_order[old_pos] = hud_inventory_order[new_pos];
-  hud_inventory_order[new_pos] = t;
-  Hud_DrawYButtonItems();
-  sound_effect_2 = 32;
 }

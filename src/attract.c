@@ -247,8 +247,11 @@ void Attract_MaidenWarp_Case1() {
   attract_y_base = 72;
   Attract_DrawSpriteSet2(kZeldaPrison_MaidenWarpCase1_Oam + k * 14, kAttract_MaidenWarp_Case1_Num[attract_var21 >> 1 & 7]);
 
-  if (!attract_var21 && attract_var20 == 0x70)
+  if (!attract_var21 && attract_var20 == 0x70) {
     sound_effect_2 = 0x27;
+    if (enhanced_features0 & kFeatures0_DimFlashesGba)
+      g_gba_dim_timer = 0xff;  // GBA 0x80b850c
+  }
 
   if (attract_var21 == 15) {
     attract_var5++;
@@ -805,7 +808,15 @@ void AttractDramatize_AgahnimAltar() {  // 8cf423
     return;
   }
   attract_oam_idx = 0;
-  HandleScreenFlash();
+  if (enhanced_features0 & kFeatures0_DimFlashesGba) {
+    // GBA 0x80b81de: lo schermo si scurisce, il contatore del lampo serve
+    // solo ai tuoni
+    GbaFlash_DimStep(3, 0xc0);
+    if (intro_times_pal_flash)
+      intro_times_pal_flash--;
+  } else {
+    HandleScreenFlash();
+  }
   if (!attract_var18)
     Attract_FadeInStep();
   if (attract_var17 != 255)

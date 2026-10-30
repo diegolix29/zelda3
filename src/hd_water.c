@@ -40,10 +40,13 @@ enum {
 };
 
 static uint32 *g_pre;     // l'immagine prima di ombre e luci
-static int g_pre_cap;
 static bool g_pre_valid;
 static uint16 *g_dist;
-static uint8 *g_kind;     // 0 = altro, 1 = acqua, 2 = cascata
+// Che cosa e' ogni pixel: 0 altro, 1 acqua, 2 cascata, 3 riva (terreno), 6 sprite
+// sopra la cascata o il getto (non la interrompono). Valori di passaggio
+// dentro i singoli passi: 4, 5 e 9 (segni da riempire o da scartare) e i bit
+// 0x20 e 0x40 (IslandCells)
+static uint8 *g_kind;
 static uint8 *g_depth;    // 0 = non si sa, 1 = acqua alta (0x08), 2 = acqua bassa (0x09)
 static uint8 *g_fixed;    // 1 = onda animata dello SNES: acqua in ogni fase (AnimWaterPixel)
 static uint32 *g_sum;     // somme per la media, impacchettate (vedi BlurRows)
@@ -116,7 +119,8 @@ void HdWater_PrepareAttrs(void) {
 uint8 HdWater_DungAttr(int i, int wx, int wy) {
   i &= 0x1fff;
   int room = (wy >> 9 & 15) << 4 | (wx >> 9 & 15);
-  if (main_module_index == 7 && submodule_index != 0 && room == g_attr_prev_room && room != dungeon_room_index)
+  if (main_module_index == 7 && submodule_index != 0 && room == (g_attr_prev_room & 0xff) &&
+      room != (dungeon_room_index & 0xff))
     return g_attr_prev[i];
   return g_attr_cached ? g_attr_cache[i] : dung_bg2_attr_table[i];
 }
@@ -218,12 +222,16 @@ static float Rand01(void) {
   return (s & 0xffffff) * (1.0f / 16777216.0f);
 }
 
+// Colore (0-15) del pixel della casella animata dell'acqua "tile" (0-31) nella
+// fase ph (0-2): le tre fasi stanno nella RAM a 0xa680 (0x400 l'una), riga
+// row, bit = 7 - colonna
+static inline int AnimTilePixel(int ph, int tile, int row, int bit) {
+  const uint8 *p = &g_ram[0xa680 + ph * 0x400 + tile * 32];
+  return HdFx_Pixel4bpp(p[row * 2] | p[row * 2 + 1] << 8, p[16 + row * 2] | p[17 + row * 2] << 8, bit);
+}
+
 static bool InScene(int *mod_out) {
-  if (!g_fx_water)
-    return false;
-  int mod = HdFx_SceneModule();
-  *mod_out = mod;
-  return mod == 7 || mod == 9 || mod == 11;
+  return g_fx_water && HdFx_InGameplay(mod_out);
 }
 
 static bool EnsureBuffers(int n) {
@@ -293,6 +301,15 @@ static bool IsWaterfallEdgeTile(int t) {
 // caselle esaminate anche oltre i bordi dello schermo (kCellMargin per lato):
 // un ponte si riconosce dall'acqua ai due lati, che puo' essere fuori schermo
 enum { kCellMargin = 20, kMaxCellsX = 72 + 2 * kCellMargin, kMaxCellsY = 34 + 2 * kCellMargin };
+
+// casella (indici di g_cells e delle altre tabelle) del pixel x, y dello
+// schermo; restituisce la colonna, la riga va in *cy
+static inline int CellXY(int x, int y, int cam_x, int cam_y, int ext, int *cy) {
+  int wx = x - ext + cam_x, wy = y + cam_y;
+  int cx = (wx >> 3) - (((cam_x - ext) & ~7) >> 3) + kCellMargin;
+  *cy = (wy >> 3) - ((cam_y & ~7) >> 3) + kCellMargin;
+  return cx;
+}
 enum { kCellOther, kCellFall, kCellWater, kCellUnknown, kCellShallow, kCellBridge, kCellSky,
        kCellFallEdge, kCellTrough, kCellWarp };
 static uint8 g_cells[kMaxCellsY][kMaxCellsX];
@@ -388,11 +405,7 @@ static void FindBridges(void) {
   }
 }
 
-// Sul Monte della Morte (chiaro e oscuro) il vuoto
-// oltre i dirupi e' "acqua profonda" per il gioco, ma sullo schermo e' il
-// cielo con le nuvole (marcate anche loro come layer 7): li' l'acqua non si
-// tocca. Vale anche per le aree vicine viste col mondo continuo
-static bool IsSkyPoint(int wx, int wy) {
+bool HdWater_IsSky(int wx, int wy) {
   int col = wx >> 9, row = wy >> 9;
   if ((row == 0 && col >= 3) || (row == 1 && col >= 3 && col <= 6))
     return true;
@@ -471,8 +484,6 @@ static void FindTroughs(void) {
   }
 }
 
-// Che cosa e' ogni cella 8x8 della vista all'aperto: cascata, acqua (attributo
-// 0x08/0x09) o altro. Vero se c'e' una cascata
 // Onde animate dello SNES sulla riva (caselle 0x1c0-0x1df all'aperto): i
 // pixel scuri degli archi cambiano a ogni fase (ogni 9 fotogrammi) e la riva
 // HD, fatta coi colori, saltava avanti e indietro (archi presi per sassi con
@@ -492,11 +503,8 @@ static void ComputeAnimMask(void) {
       uint8 diff = 0;
       int idx0[8];
       for (int ph = 0; ph < 3; ph++) {
-        const uint8 *p = &g_ram[0xa680 + ph * 0x400 + tile * 32];
-        uint8 b0 = p[row * 2], b1 = p[row * 2 + 1], b2 = p[16 + row * 2], b3 = p[17 + row * 2];
         for (int x = 0; x < 8; x++) {
-          int s = 7 - x;
-          int v = (b0 >> s & 1) | (b1 >> s & 1) << 1 | (b2 >> s & 1) << 2 | (b3 >> s & 1) << 3;
+          int v = AnimTilePixel(ph, tile, row, 7 - x);
           if (ph == 0)
             idx0[x] = v;
           else if (v != idx0[x])
@@ -511,7 +519,7 @@ static void ComputeAnimMask(void) {
 // Il pixel (x, y) dello schermo e' un pixel che cambia di una casella animata?
 static bool AnimWaterPixel(int x, int y, int cam_x, int cam_y, int ext) {
   int wx = x - ext + cam_x, wy = y + cam_y;
-  int cx = (wx >> 3) - (((cam_x - ext) & ~7) >> 3) + kCellMargin, cy = (wy >> 3) - ((cam_y & ~7) >> 3) + kCellMargin;
+  int cy, cx = CellXY(x, y, cam_x, cam_y, ext, &cy);
   if (cx < 0 || cy < 0 || cx >= kMaxCellsX || cy >= kMaxCellsY)
     return false;
   int a = g_cell_anim[cy][cx];
@@ -553,6 +561,8 @@ static void KeepShoreAnim(void) {
         g_cell_anim[cy][cx] = -1;
 }
 
+// Che cosa e' ogni cella 8x8 della vista all'aperto: cascata, acqua (attributo
+// 0x08/0x09) o altro. Vero se c'e' una cascata
 static bool ClassifyCells(int width, int height, int cam_x, int cam_y, int ext) {
   bool world = overworld_screen_index < 0x80;  // non nelle aree speciali (Dominio di Zora...)
   const uint8 *attr8 = GetMap8toTileAttr();
@@ -567,7 +577,7 @@ static bool ClassifyCells(int width, int height, int cam_x, int cam_y, int ext) 
       g_cell_lip[cy][cx] = false;
       g_cell_anim[cy][cx] = -1;
       g_cell_shore[cy][cx] = -1;
-      if (world && IsSkyPoint(wx, wy)) {
+      if (world && HdWater_IsSky(wx, wy)) {
         v = kCellSky;
       } else if (wx < cam_x - ext + width + kCellMargin * 8 && wy < cam_y + height + kCellMargin * 8) {
         int e = CellEntry(wx, wy);
@@ -680,8 +690,7 @@ static int DungeonDepthAt(int wx, int wy) {
 }
 
 static inline int CellAt(int x, int y, int cam_x, int cam_y, int ext) {
-  int wx = x - ext + cam_x, wy = y + cam_y;
-  int cx = (wx >> 3) - (((cam_x - ext) & ~7) >> 3) + kCellMargin, cy = (wy >> 3) - ((cam_y & ~7) >> 3) + kCellMargin;
+  int cy, cx = CellXY(x, y, cam_x, cam_y, ext, &cy);
   return cx >= 0 && cy >= 0 && cx < kMaxCellsX && cy < kMaxCellsY ? g_cells[cy][cx] : kCellUnknown;
 }
 
@@ -689,9 +698,8 @@ static inline int CellAt(int x, int y, int cam_x, int cam_y, int ext) {
 // pixel non e' nella cima: la fascia chiara si misura da li', uguale per
 // tutte le colonne (anche quelle dei bordi diagonali, che cominciano piu' giu')
 static int LipTop(int x, int y, int cam_x, int cam_y, int ext) {
-  int wx = x - ext + cam_x, wy = y + cam_y;
   int y0 = ((cam_y & ~7) >> 3) - kCellMargin;
-  int cx = (wx >> 3) - (((cam_x - ext) & ~7) >> 3) + kCellMargin, cy = (wy >> 3) - y0;
+  int cy, cx = CellXY(x, y, cam_x, cam_y, ext, &cy);
   if (cx < 0 || cy < 0 || cx >= kMaxCellsX || cy >= kMaxCellsY || !g_cell_lip[cy][cx])
     return -1;
   while (cy > 0 && g_cell_lip[cy - 1][cx])
@@ -701,9 +709,9 @@ static int LipTop(int x, int y, int cam_x, int cam_y, int ext) {
 
 // ---------------------------------------------------------------------------
 // Distanza in pixel (trasformata a due passate, 3 in orizzontale e verticale,
-// 4 in diagonale) dai pixel con g_kind >= seed (dalla riva: terreno e cascate,
-// cosi' c'e' schiuma anche alla base delle cascate). HUD e personaggi sono
-// "trasparenti"; fuori dall'immagine non c'e' riva.
+// 4 in diagonale) dai pixel con g_kind fra seed_lo e seed_hi (dalla riva:
+// terreno e cascate, cosi' c'e' schiuma anche alla base delle cascate). HUD e
+// personaggi sono "trasparenti"; fuori dall'immagine non c'e' riva.
 
 static inline int MinI(int a, int b) {
   return a < b ? a : b;
@@ -887,6 +895,14 @@ static void FindWaterColors(int n, int n_water) {
 static int g_bri = 15;
 static float g_bright = 1.0f;
 
+// colore BGR555 dello SNES in 0xRRGGBB con la luminosita' bri (0-15), come la
+// PPU (ppu.c, brightnessMult): prima qui c<<3, fino a 7 piu' scuro dello schermo
+static inline uint32 SnesColor(uint16 c15, int bri) {
+  uint32 r = c15 & 31, g = c15 >> 5 & 31, b = c15 >> 10 & 31;
+  r = (r << 3 | r >> 2) * bri / 15, g = (g << 3 | g >> 2) * bri / 15, b = (b << 3 | b >> 2) * bri / 15;
+  return r << 16 | g << 8 | b;
+}
+
 // Azzurro o blu: la fascia scura lungo la riva, le sue onde animate (gli
 // ovali dello SNES) e la linea chiara della riva. Erba, terra e rocce no
 // La notte di pioggia dell'inizio (prima di salvare Zelda) ha i colori piu'
@@ -906,14 +922,6 @@ static inline bool IsFallEdgeColor(uint32 c) {
     return true;
   int cr = c >> 16 & 0xff, cg = c >> 8 & 0xff, cb = c & 0xff;
   return (overworld_screen_index & 0x40) && cg >= cr + 40 * g_bri / 15 && cg >= cb;
-}
-
-static inline bool IsWaterColor(uint32 c) {
-  c &= 0xffffff;
-  for (int j = 0; j < g_num_water_colors; j++)
-    if (g_water_colors[j] == c)
-      return true;
-  return false;
 }
 
 // Colore simile a uno dei colori dell'acqua (somma delle differenze <= tol) e
@@ -1150,11 +1158,6 @@ static void UpdateMist(bool step) {
   }
 }
 
-// Parte dell'immagine disegnata dal gioco: senza il mondo continuo, nelle aree
-// speciali (Dominio di Zora, sotto il ponte...) e al bordo dell'area le fasce
-// laterali e la riga in fondo restano nere. Li' l'acqua non c'e'
-static int g_vis_x0, g_vis_x1, g_vis_y1;
-
 // dark: Mondo Oscuro all'aperto, nebbia nera come la schiuma della riva
 static void DrawMist(uint8 *pixels, int pitch, int width, int height, int cam_x, int cam_y, int ext, bool dark) {
   for (int i = 0; i < g_num_mist; i++) {
@@ -1167,10 +1170,11 @@ static void DrawMist(uint8 *pixels, int pitch, int width, int height, int cam_x,
     int x0 = (int)(cx - rad), x1 = (int)(cx + rad) + 1, y0 = (int)(cy - rad), y1 = (int)(cy + rad) + 1;
     if (x1 < 0 || y1 < 0 || x0 >= width || y0 >= height)
       continue;
-    if (x0 < g_vis_x0) x0 = g_vis_x0;
+    // nelle fasce nere puo' andare: le ripulisce ClearHiddenBands (zelda_rtl.c)
+    if (x0 < 0) x0 = 0;
     if (y0 < 0) y0 = 0;
-    if (x1 > g_vis_x1) x1 = g_vis_x1;
-    if (y1 > g_vis_y1) y1 = g_vis_y1;
+    if (x1 > width) x1 = width;
+    if (y1 > height) y1 = height;
     float inv = 1.0f / (rad * rad);
     for (int y = y0; y < y1; y++) {
       uint32 *row = (uint32 *)(pixels + y * pitch);
@@ -1192,7 +1196,12 @@ static void DrawMist(uint8 *pixels, int pitch, int width, int height, int cam_x,
 
 // ---------------------------------------------------------------------------
 
-// Che cosa e' ogni pixel: 1 acqua, 2 cascata, 3 riva (terreno), 0 il resto
+// Parte dell'immagine disegnata dal gioco: senza il mondo continuo, nelle aree
+// speciali (Dominio di Zora, sotto il ponte...) e al bordo dell'area le fasce
+// laterali e la riga in fondo restano nere. Li' l'acqua non c'e'
+static int g_vis_x0, g_vis_x1, g_vis_y1;
+
+// Che cosa e' ogni pixel (g_kind)
 typedef struct ClassJob {
   const uint8 *pixels;
   int pitch, w, cam_x, cam_y, ext;
@@ -1307,7 +1316,7 @@ static void ClassifyRows(void *ctx, int part, int y0, int y1) {
 // azzurro) e' riva: prima diventava acqua e la riva si staccava dai sassi
 static bool AnimPixelWaterish(int x, int y, int cam_x, int cam_y, int ext) {
   int wx = x - ext + cam_x, wy = y + cam_y;
-  int cx = (wx >> 3) - (((cam_x - ext) & ~7) >> 3) + kCellMargin, cy = (wy >> 3) - ((cam_y & ~7) >> 3) + kCellMargin;
+  int cy, cx = CellXY(x, y, cam_x, cam_y, ext, &cy);
   if (cx < 0 || cy < 0 || cx >= kMaxCellsX || cy >= kMaxCellsY)
     return true;
   int a = g_cell_anim[cy][cx];
@@ -1318,28 +1327,36 @@ static bool AnimPixelWaterish(int x, int y, int cam_x, int cam_y, int ext) {
   if (a & 0x200) py = 7 - py;
   int tile = a & 0x1f, pal = (a >> 10) & 7, s = 7 - px;
   for (int ph = 0; ph < 3; ph++) {
-    const uint8 *p = &g_ram[0xa680 + ph * 0x400 + tile * 32];
-    int v = (p[py * 2] >> s & 1) | (p[py * 2 + 1] >> s & 1) << 1 | (p[16 + py * 2] >> s & 1) << 2 |
-            (p[17 + py * 2] >> s & 1) << 3;
+    int v = AnimTilePixel(ph, tile, py, s);
     // trasparente: il colore di fondo
-    uint16 c15 = main_palette_buffer[v ? pal * 16 + v : 0];
-    int r = (c15 & 31) << 3, g = (c15 >> 5 & 31) << 3, b = (c15 >> 10 & 31) << 3;
-    uint32 c = (uint32)(r * g_bri / 15) << 16 | (uint32)(g * g_bri / 15) << 8 | (uint32)(b * g_bri / 15);
+    uint32 c = SnesColor(HdFx_RealBg(main_palette_buffer, v ? pal * 16 + v : 0), g_bri);
     if (Luma(c) * 3 < g_water_min_luma * 2 && !IsNearWaterColor(c, 48) && !IsBluish(c))
       return false;
   }
   return true;
 }
 
+typedef struct AnimShoreJob {
+  int w, cam_x, cam_y, ext;
+} AnimShoreJob;
+
+// righe y0-y1 (in parallelo: ogni pixel guarda solo se stesso e le tabelle)
+static void AnimShoreRows(void *ctx, int part, int y0, int y1) {
+  const AnimShoreJob *j = (const AnimShoreJob *)ctx;
+  int w = j->w;
+  for (int y = y0; y < y1; y++)
+    for (int x = 0; x < w; x++) {
+      int i = y * w + x;
+      if (g_fixed[i] && g_kind[i] == 1 && !AnimPixelWaterish(x, y, j->cam_x, j->cam_y, j->ext))
+        g_kind[i] = 3, g_fixed[i] = 0;
+    }
+}
+
 static void AnimShorePixels(int w, int h, int cam_x, int cam_y, int ext) {
   if (!g_num_water_colors)
     return;
-  for (int y = 0; y < h; y++)
-    for (int x = 0; x < w; x++) {
-      int i = y * w + x;
-      if (g_fixed[i] && g_kind[i] == 1 && !AnimPixelWaterish(x, y, cam_x, cam_y, ext))
-        g_kind[i] = 3, g_fixed[i] = 0;
-    }
+  AnimShoreJob j = { w, cam_x, cam_y, ext };
+  HdPar_For(AnimShoreRows, &j, h);
 }
 
 // Mondo Oscuro: la riva e' la base nera della scogliera con le linee verdi
@@ -1351,13 +1368,6 @@ static void AnimShorePixels(int w, int h, int cam_x, int cam_y, int ext) {
 // Oscuro costava 2 ms in piu' di una scena uguale del Mondo Chiaro
 static uint8 g_cell_border[kMaxCellsY][kMaxCellsX];     // riva nella casella o in una delle 4 accanto
 static uint32 g_cell_dark[kMaxCellsY][kMaxCellsX];      // colore piu' scuro della casella di riva
-
-static inline int CellXY(int x, int y, int cam_x, int cam_y, int ext, int *cy) {
-  int wx = x - ext + cam_x, wy = y + cam_y;
-  int cx = (wx >> 3) - (((cam_x - ext) & ~7) >> 3) + kCellMargin;
-  *cy = (wy >> 3) - ((cam_y & ~7) >> 3) + kCellMargin;
-  return cx;
-}
 
 static int ShoreCellOf(int x, int y, int cam_x, int cam_y, int ext) {
   int cy, cx = CellXY(x, y, cam_x, cam_y, ext, &cy);
@@ -1512,20 +1522,54 @@ static uint32 AnimCellDarkest(int a) {
   uint16 seen = 0;
   for (int ph = 0; ph < 3; ph++)
     for (int py = 0; py < 8; py++) {
-      const uint8 *p = &g_ram[0xa680 + ph * 0x400 + tile * 32];
       for (int s = 0; s < 8; s++) {
-        int v = (p[py * 2] >> s & 1) | (p[py * 2 + 1] >> s & 1) << 1 | (p[16 + py * 2] >> s & 1) << 2 |
-                (p[17 + py * 2] >> s & 1) << 3;
+        int v = AnimTilePixel(ph, tile, py, s);
         if (!v || (seen >> v & 1))
           continue;
         seen |= 1 << v;
-        uint16 c15 = main_palette_buffer[pal * 16 + v];
-        int r = (c15 & 31) << 3, g = (c15 >> 5 & 31) << 3, b = (c15 >> 10 & 31) << 3;
-        if (r + g + b < best)
-          best = r + g + b, res = (uint32)(r * g_bri / 15) << 16 | (uint32)(g * g_bri / 15) << 8 | (uint32)(b * g_bri / 15);
+        uint16 c15 = HdFx_RealBg(main_palette_buffer, pal * 16 + v);
+        int sum = (c15 & 31) + (c15 >> 5 & 31) + (c15 >> 10 & 31);
+        if (sum < best)
+          best = sum, res = SnesColor(c15, g_bri);
       }
     }
   return res;
+}
+
+// Colori delle caselle animate della riva (tutte le fasi): le linee verdi
+// e la fascia della riva del Mondo Oscuro. Il verde di altre cose accanto
+// all'acqua (la struttura del Palazzo della Palude) non e' riva da coprire
+enum { kMaxShoreColors = 64 };
+static uint32 g_shore_colors[kMaxShoreColors];
+static int g_num_shore_colors;
+
+static void AddAnimCellColors(int a) {
+  int tile = a & 0x1f, pal = (a >> 10) & 7;
+  uint16 seen = 0;
+  for (int ph = 0; ph < 3; ph++)
+    for (int py = 0; py < 8; py++)
+      for (int s = 0; s < 8; s++) {
+        int v = AnimTilePixel(ph, tile, py, s);
+        if (!v || (seen >> v & 1))
+          continue;
+        seen |= 1 << v;
+        uint32 c = SnesColor(HdFx_RealBg(main_palette_buffer, pal * 16 + v), g_bri);
+        int j = 0;
+        while (j < g_num_shore_colors && g_shore_colors[j] != c)
+          j++;
+        if (j == g_num_shore_colors && j < kMaxShoreColors)
+          g_shore_colors[g_num_shore_colors++] = c;
+      }
+}
+
+static bool IsShoreAnimColor(uint32 c) {
+  int r = c >> 16 & 0xff, g = c >> 8 & 0xff, b = c & 0xff;
+  for (int j = 0; j < g_num_shore_colors; j++) {
+    uint32 s = g_shore_colors[j];
+    if (abs(r - (int)(s >> 16 & 0xff)) <= 6 && abs(g - (int)(s >> 8 & 0xff)) <= 6 && abs(b - (int)(s & 0xff)) <= 6)
+      return true;
+  }
+  return false;
 }
 
 // conta come riva solo una casella animata a 2 caselle al massimo da una
@@ -1541,6 +1585,7 @@ static void MarkDarkShoreCells(void) {
   static uint32 cache[256];
   static uint8 known[256];
   memset(known, 0, sizeof(known));
+  g_num_shore_colors = 0;
   for (int cy = 0; cy < kMaxCellsY; cy++)
     for (int cx = 0; cx < kMaxCellsX; cx++) {
       if (!near_anim[cy][cx])
@@ -1550,7 +1595,7 @@ static void MarkDarkShoreCells(void) {
         continue;
       int key = (a & 0x1f) | ((a >> 10) & 7) << 5;
       if (!known[key])
-        cache[key] = AnimCellDarkest(a), known[key] = 1;
+        cache[key] = AnimCellDarkest(a), known[key] = 1, AddAnimCellColors(a);
       g_cell_dark[cy][cx] = cache[key];
     }
   for (int cy = 0; cy < kMaxCellsY; cy++)
@@ -1581,7 +1626,7 @@ static void DarkShoreRows(void *ctx, int part, int y0, int y1) {
         continue;
       uint32 c = g_pre[i];
       int r = c >> 16 & 0xff, g = c >> 8 & 0xff, b = c & 0xff;
-      bool green = g >= r + 8 && g >= b;
+      bool green = g >= r + 8 && g >= b && IsShoreAnimColor(c);
       bool black = j->have_band && abs(r - (int)(band >> 16 & 0xff)) <= 6 && abs(g - (int)(band >> 8 & 0xff)) <= 6 &&
                    abs(b - (int)(band & 0xff)) <= 6;
       if (!green && !black)
@@ -1622,7 +1667,7 @@ static void GrowGreenRows(void *ctx, int part, int y0, int y1) {
         continue;
       uint32 c = g_pre[i];
       int r = c >> 16 & 0xff, g = c >> 8 & 0xff, b = c & 0xff;
-      if (g < r + 8 || g < b)
+      if (g < r + 8 || g < b || !IsShoreAnimColor(c))
         continue;
       if ((x > 0 && g_kind[i - 1] == 1) || (x < w - 1 && g_kind[i + 1] == 1) ||
           (y > 0 && g_kind[i - w] == 1) || (y < h - 1 && g_kind[i + w] == 1))
@@ -1657,6 +1702,60 @@ static void DarkShoreToWater(int w, int h, int cam_x, int cam_y, int ext) {
     j.mode = 1;
     HdPar_For(GrowGreenRows, &j, h);
   }
+}
+
+// Fondale sotto uno sprite: il pixel del primo strato acceso (BG1, poi BG2)
+// che non e' trasparente, colore BGR555; -1 se trasparente
+static int BgUnderSprite(int x, int y, int ext) {
+  Ppu *ppu = g_zenv.ppu;
+  static const uint8 kTm[2] = { 1, 2 };
+  for (int n = 0; n < 2; n++) {
+    if (!(TM_copy & kTm[n]))
+      continue;
+    const BgLayer *bg = &ppu->bgLayer[n];
+    int hofs = n ? BG2HOFS_copy : BG1HOFS_copy, vofs = n ? BG2VOFS_copy : BG1VOFS_copy;
+    // la riga 0 dello schermo e' la riga 1 del fondale (come HdWorld_Composite)
+    int px = (x - ext + hofs + ppu->bgBiasX) & 0x3ff, py = (y + 1 + vofs + ppu->bgBiasY) & 0x3ff;
+    int tx = px >> 3 & 63, ty = py >> 3 & 63;
+    uint16 adr = bg->tilemapAdr + ((ty & 31) << 5 | (tx & 31));
+    if ((tx & 32) && bg->tilemapWider) adr += 0x400;
+    if ((ty & 32) && bg->tilemapHigher) adr += bg->tilemapWider ? 0x800 : 0x400;
+    uint16 e = ppu->vram[adr & 0x7fff];
+    int row = (e & 0x8000) ? 7 - (py & 7) : (py & 7);
+    int bit = (e & 0x4000) ? (px & 7) : 7 - (px & 7);
+    const uint16 *t = &ppu->vram[(bg->tileAdr + (e & 0x3ff) * 16) & 0x7fff];
+    int v = HdFx_Pixel4bpp(t[row], t[row + 8], bit);
+    if (v)
+      return HdFx_RealBg(ppu->cgram, (e >> 10 & 7) * 16 + v);
+  }
+  return -1;
+}
+
+// Sprite sopra la riva (la trappola a spuntoni che scorre lungo il bordo
+// della vasca, nemici e Link sulla sponda): sotto c'e' la riva, non un buco.
+// Prima la schiuma si piegava attorno allo sprite e lo seguiva. Sopra
+// l'acqua lo sprite resta com'era (chi nuota non ha la schiuma attorno)
+typedef struct SpriteShoreJob {
+  int w, ext;
+  bool outdoors;
+} SpriteShoreJob;
+
+static void SpriteShoreRows(void *ctx, int part, int y0, int y1) {
+  const SpriteShoreJob *j = (const SpriteShoreJob *)ctx;
+  int w = j->w;
+  for (int y = y0; y < y1 && y < g_vis_y1; y++)
+    for (int x = g_vis_x0; x < g_vis_x1; x++) {
+      int i = y * w + x;
+      uint32 l = g_pre[i] >> 24;
+      if (g_kind[i] != 0 || (l != 4 && l != 6))
+        continue;
+      int c15 = BgUnderSprite(x, y, j->ext);
+      if (c15 < 0)
+        continue;
+      uint32 c = SnesColor((uint16)c15, g_bri);
+      if (!IsNearWaterColor(c, 24) && !(j->outdoors && IsBluish(c)))
+        g_kind[i] = 3;
+    }
 }
 
 // La riva vera, pixel per pixel (i due passi di HdWater_Apply)
@@ -1808,7 +1907,6 @@ static void GrowBluishWater(int w, int h) {
   }
 }
 
-// I pixel d'acqua di una striscia di righe
 // Corrente (Palazzo della Palude, stanza 0x16): sul piano di sopra le caselle
 // d'acqua 0x1b0/0x1b1 con la palette 7 sono animate dal gioco come acqua che
 // scorre verso sinistra (a destra se ribaltate). -1 sinistra, 1 destra, 0 ferma
@@ -1842,13 +1940,11 @@ static uint32 FloorColor(int wx, int wy) {
   int r = e & 0x8000 ? 7 - (wy & 7) : wy & 7, bit = e & 0x4000 ? wx & 7 : 7 - (wx & 7);
   int adr = ppu->bgLayer[1].tileAdr + (e & 0x3ff) * 16 + r;
   uint16 p01 = ppu->vram[adr & 0x7fff], p23 = ppu->vram[(adr + 8) & 0x7fff];
-  int v = (p01 >> bit & 1) | (p01 >> (8 + bit) & 1) << 1 | (p23 >> bit & 1) << 2 | (p23 >> (8 + bit) & 1) << 3;
-  uint16 col = ppu->cgram[v ? (e >> 10 & 7) * 16 + v : 0];
-  uint32 cr = col & 31, cg = col >> 5 & 31, cb = col >> 10 & 31, br = INIDISP_copy & 15;
-  cr = (cr << 3 | cr >> 2) * br / 15, cg = (cg << 3 | cg >> 2) * br / 15, cb = (cb << 3 | cb >> 2) * br / 15;
-  return cr << 16 | cg << 8 | cb;
+  int v = HdFx_Pixel4bpp(p01, p23, bit);
+  return SnesColor(HdFx_RealBg(ppu->cgram, v ? (e >> 10 & 7) * 16 + v : 0), INIDISP_copy & 15);
 }
 
+// I pixel d'acqua di una striscia di righe
 static void PaintWaterRows(void *ctx, int part, int y0, int y1) {
   const PaintJob *j = (const PaintJob *)ctx;
   uint8 *pixels = j->pixels;
@@ -2144,6 +2240,9 @@ void HdWater_Apply(uint8 *pixels, int pitch, int width, int height, int bias_x, 
     // scogliere resta coperta dall'acqua, come prima
     if (outdoors && (overworld_screen_index & 0x40))
       AnimShorePixels(w, h, cam_x, cam_y, ext);
+    SpriteShoreJob spj = { w, ext, outdoors };
+    HdPar_For(SpriteShoreRows, &spj, h);
+    ComputeDistance(w, h, 2, 3, 5);  // con la riva sotto gli sprite
     ShoreJob sj = { 0, 0, 0, outdoors, w, cam_x, cam_y, ext };
     HdPar_For(ShorePixels, &sj, w * h);
     if (outdoors)

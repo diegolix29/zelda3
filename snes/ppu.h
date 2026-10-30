@@ -59,7 +59,8 @@ struct Ppu {
   // Posizione verticale vera (con il segno) di ogni sprite, quando la vista
   // e' spostata rispetto alla telecamera del gioco (vedi zelda_rtl.c)
   bool objYValid, objXValid;
-  // sprite con y = 0xF0 da disegnare comunque (pezzi di Link, vedi zelda_rtl.c)
+  // sprite con y = 0xF0 da disegnare comunque (pezzi di Link e sprite spostati
+  // dalla telecamera, g_oam_real_f0; vedi zelda_rtl.c)
   uint8_t objShowF0[128];
   // Sprite sempre davanti agli strati (mentre il fondale arriva da altrove)
   bool objOnTop;

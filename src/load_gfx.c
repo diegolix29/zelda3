@@ -1946,6 +1946,14 @@ void LoadGearPalette(int dst, const uint16 *src, int n) {  // 8ed741
   memcpy(&main_palette_buffer[dst >> 1], src, sizeof(uint16) * n);
 }
 
+// Meno flash VC: i pavimenti che lampeggiano hanno colori fissi, come nelle
+// versioni Virtual Console (anche dal menu, senza riavviare)
+void Palette_ApplyDimFlashFloor(bool on) {
+  static const uint16 kOrg[3] = { 0xc72, 0x109c, 0x11ff }, kVc[3] = { 0x70, 0x95, 0x57 };
+  for (int i = 0; i < 3; i++)
+    kPalette_DungBgMain[0x484 + i] = on ? kVc[i] : kOrg[i];
+}
+
 void Filter_Majorly_Whiten_Bg() {  // 8ed757
   for (int i = 32; i < 128; i++)
     main_palette_buffer[i] = Filter_Majorly_Whiten_Color(aux_palette_buffer[i]);
@@ -1953,6 +1961,7 @@ void Filter_Majorly_Whiten_Bg() {  // 8ed757
 }
 
 uint16 Filter_Majorly_Whiten_Color(uint16 c) {  // 8ed7fe
+  // su GBA il bianco e' pieno (+14, 0x81331b4): cambia solo il ritmo
   int amt = (enhanced_features0 & kFeatures0_DimFlashes) ? 3 : 14;
   int r = (c & 0x1f) + amt;
   int g = (c & 0x3e0) + (amt << 5);
@@ -2198,7 +2207,84 @@ void Palette_LoadAgahnim() {  // 9bf0c2
   flag_update_cgram_in_nmi++;
 }
 
+// Meno lampi come su GBA (ita.gba): niente bianco a intermittenza. La GBA
+// scurisce lo sfondo poco a poco (Etere, telewarp di Agahnim, introduzione:
+// 0x8134a58 e 0x81333ec), per i fulmini di Agahnim lo scurisce e lo rischiara
+// (0x80cb1b8) e il lampo del pipistrello resta bianco fisso (0x80cb398)
+uint8 g_gba_dim_timer;
+static uint8 g_gba_bolt_timer, g_gba_bolt_len;
+
+static uint16 GbaFlash_DarkenColor(uint16 c) {  // 0x8133374
+  int r = c & 0x1f, g = c & 0x3e0, b = c & 0x7c00;
+  if (r > 1)
+    r -= 1;
+  if (g > 0x20)
+    g -= 0x20;
+  if (b > 0x1000)  // la GBA confronta il blu con 4, non con 1
+    b -= 0x400;
+  return r | g | b;
+}
+
+void GbaFlash_DimStep(uint8 mask, uint8 min) {  // 0x8134a58
+  if (!g_gba_dim_timer || submodule_index != 0)
+    return;
+  if (!--g_gba_dim_timer) {
+    Palette_Restore_BG_And_HUD();
+    return;
+  }
+  if (g_gba_dim_timer >= min && !(g_gba_dim_timer & mask)) {
+    for (int i = 32; i < 128; i++)
+      main_palette_buffer[i] = GbaFlash_DarkenColor(main_palette_buffer[i]);
+    main_palette_buffer[0] = aux_palette_buffer[0] ? main_palette_buffer[32] : 0;
+    flag_update_cgram_in_nmi++;
+  }
+}
+
+void GbaFlash_DimHold(uint8 v) {
+  if (g_gba_dim_timer < v)
+    g_gba_dim_timer = v;
+}
+
+void GbaFlash_Bolt(uint8 len) {
+  g_gba_bolt_timer = g_gba_bolt_len = len;
+}
+
+static void GbaFlash_BoltStep() {  // 0x80cb1b8
+  if (!g_gba_bolt_timer || submodule_index != 0)
+    return;
+  if (!--g_gba_bolt_timer) {
+    Palette_Restore_BG_And_HUD();
+    return;
+  }
+  // entra in un quarto del tempo, resta a 15 e se ne va nell'ultimo quarto
+  int t = g_gba_bolt_timer, q = g_gba_bolt_len >> 2, d;
+  if (t < q)
+    d = (t << 4) / q;
+  else if (t > 3 * q)
+    d = ((g_gba_bolt_len - t) << 4) / q;
+  else
+    d = 15;
+  for (int i = 32; i < 128; i++) {
+    uint16 c = aux_palette_buffer[i];
+    int r = (c & 0x1f) - d, g = (c & 0x3e0) - (d << 5), b = (c & 0x7c00) - (d << 10);
+    main_palette_buffer[i] = (r > 0 ? r : 0) | (g > 0 ? g : 0) | (b > 0 ? b : 0);
+  }
+  main_palette_buffer[0] = aux_palette_buffer[0] ? main_palette_buffer[32] : 0;
+  flag_update_cgram_in_nmi++;
+}
+
 void HandleScreenFlash() {  // 9de9b6
+  if (enhanced_features0 & kFeatures0_DimFlashesGba) {  // 0x80cb398
+    GbaFlash_BoltStep();
+    if (!intro_times_pal_flash || submodule_index != 0)
+      return;
+    if (!--intro_times_pal_flash)
+      Palette_Restore_BG_And_HUD();
+    else
+      Filter_Majorly_Whiten_Bg();
+    flag_update_cgram_in_nmi++;
+    return;
+  }
   int j = intro_times_pal_flash;
   if (!j || submodule_index != 0)
     return;

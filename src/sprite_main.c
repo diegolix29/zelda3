@@ -17881,15 +17881,22 @@ void CutsceneAgahnim_Agahnim(int k) {  // 9dd23f
         sprite_delay_main[k] = 255;
         sprite_subtype2[k] = 2;
         sprite_subtype[k] = 255;
+        if (enhanced_features0 & kFeatures0_DimFlashesGba)
+          g_gba_dim_timer = 0xf0;  // GBA 0x80db03c
       }
     }
     break;
   case 2:  // do telewarp
+    if (enhanced_features0 & kFeatures0_DimFlashesGba) {  // GBA 0x80db070: scurisce, niente lampi
+      GbaFlash_DimStep(3, 0xb0);
+      GbaFlash_DimHold(0x10);
+    }
     if (!sprite_delay_main[k]) {
       sprite_ai_state[k]++;
       sprite_delay_main[k] = 80;
     } else if (sprite_delay_main[k] == 120) {
-      intro_times_pal_flash = 120;
+      if (!(enhanced_features0 & kFeatures0_DimFlashesGba))
+        intro_times_pal_flash = 120;
     } else if (sprite_delay_main[k] < 128 && (sprite_delay_main[k] & 3) == 0) {
       sound_effect_2 = 0x2b;
       if (sprite_subtype2[k] != 14)
@@ -17897,6 +17904,14 @@ void CutsceneAgahnim_Agahnim(int k) {  // 9dd23f
     }
     break;
   case 3:  // complete telewarp
+    if (enhanced_features0 & kFeatures0_DimFlashesGba) {  // GBA 0x80db0f8
+      GbaFlash_DimStep(3, 0xb0);
+      GbaFlash_DimHold(0x10);
+      if (!sprite_delay_main[k]) {
+        g_gba_dim_timer = 0;
+        Palette_Restore_BG_And_HUD();
+      }
+    }
     if (sprite_delay_main[k]) {
       if (!(sprite_delay_main[k] & 3) && sprite_subtype[k] != 9)
         sprite_subtype[k] += 2;
@@ -18721,7 +18736,10 @@ void Sprite_SpawnLightning(int k) {  // 9de612
     Sprite_SetX(j, info.r0_x + kAgahnim_Lighting_X[i]);
     sprite_y_lo[j] = info.r2_y + 12 + (t >> 16);
     sprite_delay_main[j] = 2;
-    intro_times_pal_flash = 32;
+    if (enhanced_features0 & kFeatures0_DimFlashesGba)
+      GbaFlash_Bolt(0x30);  // GBA 0x80dccaa: lo schermo si scurisce e torna
+    else
+      intro_times_pal_flash = 32;
   }
 }
 

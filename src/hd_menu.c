@@ -1,5 +1,5 @@
 // Menu opzioni in gioco (tasto Esc o clic della levetta destra), rimappatura
-// dei tasti, salvataggi rapidi e salvataggi automatici ai cambi di area.
+// dei tasti e salvataggi rapidi.
 #include <SDL.h>
 #include "hd_menu.h"
 #include <stdio.h>
@@ -11,6 +11,7 @@
 #include "variables.h"
 #include "config.h"
 #include "features.h"
+#include "load_gfx.h"
 #include "util.h"
 #include "snes/ppu.h"
 #include "hd_light.h"
@@ -54,7 +55,6 @@ static int g_page;
 static int g_cursor[6];
 static int g_scroll;
 static int g_capture = -1;        // indice del comando in attesa di un tasto
-static bool g_capture_pad;
 static bool g_slot_action_save;
 static char g_message[96];
 static int g_message_timer;
@@ -80,7 +80,6 @@ static const FeatureOption kFeatureOptions[] = {
   { "Transizioni veloci", "FastTransitions", kFeatures0_FastTransitions },
   { "Mondo continuo all'esterno", "ContinuousWorld", kFeatures0_ContinuousWorld },
   { "HUD moderno", "ModernHud", kFeatures0_ModernHud },
-  { "Oggetti X, L, R nell'HUD", "ShowXLRItemsInHud", kFeatures0_ShowXLRItemsInHud },
   { "Nomi dei labirinti", "DungeonNames", kFeatures0_DungeonNames },
   { "Mappa migliorata", "ImprovedWorldMap", kFeatures0_ImprovedWorldMap },
   { "Mappa dei labirinti migliorata", "ImprovedDungeonMap", kFeatures0_ImprovedDungeonMap },
@@ -311,7 +310,7 @@ void HdMenu_ShowMessage(const char *msg) {
   ShowMessage(msg);
 }
 
-void HdMenu_AfterFrame(bool is_replay) {
+void HdMenu_AfterFrame(void) {
   UpdateDungeonName();
   if (g_message_timer)
     g_message_timer--;
@@ -350,7 +349,7 @@ void HdMenu_ApplyConfig() {
   g_fx_item_glow = g_config.fx_item_glow;
   g_fx_rain = g_config.fx_rain;
   g_fx_menu_blur = g_config.fx_menu_blur, g_fx_sprite_shadows = g_config.fx_sprite_shadows;
-  g_fx_soft_iris = g_config.fx_soft_iris, g_fx_button_hints = g_config.fx_button_hints;
+  g_fx_soft_iris = g_config.fx_soft_iris;
   g_fx_whirlpool = g_config.fx_whirlpool;
   g_fx_fog = g_config.fx_fog;
   g_fx_water = g_config.fx_water;
@@ -365,11 +364,12 @@ static const char *Tr(const char *it) {
     { "Transizioni veloci", "Fast transitions" },
     { "Mondo continuo all'esterno", "Continuous overworld" },
     { "HUD moderno", "Modern HUD" },
-    { "Oggetti X, L, R nell'HUD", "X, L, R items in the HUD" },
     { "Richiede Cambio oggetti con L e R", "Requires Switch items with L and R" },
     { "Richiede la PPU ottimizzata (NewRenderer)", "Requires the optimized PPU (NewRenderer)" },
     { "Nomi dei labirinti", "Dungeon names" },
+    { "Tasto X per gli oggetti", "X button for items" },
     { "Cambio oggetti con L e R", "Switch items with L and R" },
+    { "Tasti L e R per gli oggetti", "L and R buttons for items" },
     { "Spada e oggetti interazione ambiente", "Sword and items interaction" },
     { "Oggetti riempiono le risorse", "Items refill resources" },
     { "Interazione bruciatura e congelamento", "Burn and freeze interaction" },
@@ -426,6 +426,8 @@ static const char *Tr(const char *it) {
     { "Raggi dalle finestre", "Light rays from windows" },
     { "Bagliore degli oggetti ricevuti", "Glow of received items" },
     { "Pioggia e lampi migliorati", "Improved rain and lightning" },
+    { "Meno flash VC", "Fewer flashes (VC)" },
+    { "Meno flash GBA", "Fewer flashes (GBA)" },
     { "Nebbia migliorata", "Improved fog" },
     { "Acqua e cascate realistiche", "Realistic water and waterfalls" },
     { "Sfocatura dietro menu e dialoghi", "Blur behind menus and dialogues" },
@@ -459,7 +461,6 @@ static const char *Tr(const char *it) {
     { "Tasti predefiniti ripristinati", "Default keys restored" },
     { "Scegli", "Select" },
     { "Chiudi", "Close" },
-    { "Riordina", "Sort" },
     { "Segnalino", "Marker" },
     { "Centra su Link", "Center on Link" },
     { "Veloce", "Fast" },
@@ -487,7 +488,6 @@ static const char *Tr(const char *it) {
     { "Segnalino tolto", "Marker removed" },
     { "Troppi segnalini, togline qualcuno", "Too many markers, remove some" },
     { "Segnalino aggiunto", "Marker added" },
-    { "A segnalino   Y centra su Link   tieni B per scorrere veloce", "A marker   Y center on Link   hold B to scroll fast" },
   };
   if (IsItalian())
     return it;
@@ -510,42 +510,56 @@ static void AddIni(IniValue *v, int *n, const char *section, const char *key, co
 }
 
 static void SaveSettings() {
-  IniValue v[64];
+  IniValue v[96];
   int n = 0;
-  AddIni(v, &n, "[Graphics]", "SmoothCamera", "%d", g_config.smooth_camera);
   AddIni(v, &n, "[Graphics]", "View3D", "%d", g_config.view3d);
   AddIni(v, &n, "[Graphics]", "View3DCurve", "%d", g_config.view3d_curve);
   AddIni(v, &n, "[Graphics]", "View3DDrawDistance", "%d", g_config.view3d_dist);
   AddIni(v, &n, "[Graphics]", "View3DWalls", "%d", g_config.view3d_walls);
   AddIni(v, &n, "[Graphics]", "View3DCamera", "%d", g_config.view3d_cam);
-  AddIni(v, &n, "[Graphics]", "EnhancedMode7", "%d", g_config.enhanced_mode7);
+  // Senza la PPU ottimizzata ApplyConfigRules spegne solo in memoria le
+  // opzioni che la richiedono (e il menu non le lascia accendere): nell'ini
+  // restano le scelte dell'utente, che altrimenti si cancellavano chiudendo il menu
+  bool ppu = g_config.new_renderer;
+  if (ppu) {
+    AddIni(v, &n, "[Graphics]", "SmoothCamera", "%d", g_config.smooth_camera);
+    AddIni(v, &n, "[Graphics]", "EnhancedMode7", "%d", g_config.enhanced_mode7);
+    AddIni(v, &n, "[Graphics]", "HighRefreshInterpolation", "%d", g_config.high_refresh);
+    AddIni(v, &n, "[Graphics]", "DynamicLighting", "%d", g_config.dynamic_light);
+    AddIni(v, &n, "[Graphics]", "FxHeatAndFlames", "%d", g_config.fx_heat);
+    AddIni(v, &n, "[Graphics]", "FxWindowRays", "%d", g_config.fx_window_rays);
+    AddIni(v, &n, "[Graphics]", "FxItemGlow", "%d", g_config.fx_item_glow);
+    AddIni(v, &n, "[Graphics]", "FxRain", "%d", g_config.fx_rain);
+    AddIni(v, &n, "[Graphics]", "FxForestFog", "%d", g_config.fx_fog);
+    AddIni(v, &n, "[Graphics]", "FxWater", "%d", g_config.fx_water);
+    AddIni(v, &n, "[Graphics]", "FxMenuBlur", "%d", g_config.fx_menu_blur);
+    AddIni(v, &n, "[Graphics]", "FxSpriteShadows", "%d", g_config.fx_sprite_shadows);
+    AddIni(v, &n, "[Graphics]", "FxSoftIris", "%d", g_config.fx_soft_iris);
+    AddIni(v, &n, "[Graphics]", "FxButtonHints", "%d", g_config.fx_button_hints);
+    AddIni(v, &n, "[Graphics]", "FxWhirlpoolGlow", "%d", g_config.fx_whirlpool);
+  }
   AddIni(v, &n, "[Graphics]", "HdText", "%d", g_config.hd_text);
-  AddIni(v, &n, "[Graphics]", "HighRefreshInterpolation", "%d", g_config.high_refresh);
-  AddIni(v, &n, "[Graphics]", "DynamicLighting", "%d", g_config.dynamic_light);
-  AddIni(v, &n, "[Graphics]", "FxHeatAndFlames", "%d", g_config.fx_heat);
-  AddIni(v, &n, "[Graphics]", "FxWindowRays", "%d", g_config.fx_window_rays);
-  AddIni(v, &n, "[Graphics]", "FxItemGlow", "%d", g_config.fx_item_glow);
-  AddIni(v, &n, "[Graphics]", "FxRain", "%d", g_config.fx_rain);
-  AddIni(v, &n, "[Graphics]", "FxForestFog", "%d", g_config.fx_fog);
-  AddIni(v, &n, "[Graphics]", "FxWater", "%d", g_config.fx_water);
-  AddIni(v, &n, "[Graphics]", "FxMenuBlur", "%d", g_config.fx_menu_blur);
-  AddIni(v, &n, "[Graphics]", "FxSpriteShadows", "%d", g_config.fx_sprite_shadows);
-  AddIni(v, &n, "[Graphics]", "FxSoftIris", "%d", g_config.fx_soft_iris);
-  AddIni(v, &n, "[Graphics]", "FxButtonHints", "%d", g_config.fx_button_hints);
-  AddIni(v, &n, "[Graphics]", "FxWhirlpoolGlow", "%d", g_config.fx_whirlpool);
   AddIni(v, &n, "[Graphics]", "OfficialArtwork", "%d", g_config.official_artwork);
   AddIni(v, &n, "[Graphics]", "BlondLink", "%d", g_config.blond_link);
+  AddIni(v, &n, "[Graphics]", "DimFlashes", "%d", (g_config.features0 & kFeatures0_DimFlashes) != 0);
+  AddIni(v, &n, "[Graphics]", "DimFlashesGba", "%d", (g_config.features0 & kFeatures0_DimFlashesGba) != 0);
+  AddIni(v, &n, "[Features]", "GbaEnemyDamage", "%d", g_config.gba_damage);
   AddIni(v, &n, "[Features]", "FlipperDive", "%d", g_config.flipper_dive);
   AddIni(v, &n, "[Features]", "StuckArrows", "%d", g_config.stuck_arrows);
   AddIni(v, &n, "[Features]", "HurricaneSpin", "%d", g_config.hurricane_spin);
+  AddIni(v, &n, "[Features]", "ItemOnX", "%d", g_config.item_on_x);
+  AddIni(v, &n, "[Features]", "ItemOnLR", "%d", g_config.item_on_lr);
   // La lingua si scrive solo se cambiata dal menu (altrimenti resta quella
   // dell'ini, anche de, fr...)
   if (g_lang_dirty) {
     v[n].section = "[General]", v[n].key = "Language";
     snprintf(v[n].value, sizeof(v[n].value), "%s", g_config.language ? g_config.language : "us"), n++;
   }
-  for (int i = 0; i < countof(kFeatureOptions); i++)
+  for (int i = 0; i < countof(kFeatureOptions); i++) {
+    if (!ppu && (kFeatureOptions[i].bit & (kFeatures0_ContinuousWorld | kFeatures0_FastTransitions)))
+      continue;
     AddIni(v, &n, "[Features]", kFeatureOptions[i].ini_key, "%d", (g_config.features0 & kFeatureOptions[i].bit) != 0);
+  }
   AddIni(v, &n, "[Features]", "TextSpeed", "%d", g_config.text_speed);
   if (g_msu_dirty) {
     v[n].section = "[Sound]", v[n].key = "EnableMSU";
@@ -651,12 +665,21 @@ static void BuildItems() {
     AddItem(22, "Distanza di disegno 3D", kView3dDistNames[g_view3d_dist % kHd3d_NumDists]);
     AddItem(23, "Muri 3D al chiuso", YesNo(g_view3d_walls != 0));
     AddItem(24, "Telecamera 3D", kView3dCamNames[g_view3d_cam % kHd3d_NumCams]);
+    AddItem(25, "Meno flash VC", YesNo((g_config.features0 & kFeatures0_DimFlashes) != 0));
+    AddItem(26, "Meno flash GBA", YesNo((g_config.features0 & kFeatures0_DimFlashesGba) != 0));
     break;
   case kPage_Game:
     AddItem(100, "Velocit\xc3\xa0 del testo", kTextSpeedNames[g_config.text_speed % 3]);
     AddItem(101, "Lingua dei dialoghi", IsItalian() ? "Italiano" : "English");
-    for (int i = 0; i < countof(kFeatureOptions); i++)
+    for (int i = 0; i < countof(kFeatureOptions); i++) {
+      // tasto X, cambio con L e R, tasti L e R: le tre opzioni degli oggetti
+      // sui tasti stanno insieme
+      if (kFeatureOptions[i].bit == kFeatures0_SwitchLR)
+        AddItem(105, "Tasto X per gli oggetti", YesNo(g_config.item_on_x));
       AddItem(i, kFeatureOptions[i].label, YesNo((g_config.features0 & kFeatureOptions[i].bit) != 0));
+      if (kFeatureOptions[i].bit == kFeatures0_SwitchLR)
+        AddItem(106, "Tasti L e R per gli oggetti", YesNo(g_config.item_on_lr));
+    }
     AddItem(102, "Immersione con le pinne", YesNo(g_config.flipper_dive));
     AddItem(103, "Frecce piantate nei muri", YesNo(g_config.stuck_arrows));
     AddItem(104, "Giravolta Tornado", YesNo(g_config.hurricane_spin));
@@ -745,6 +768,13 @@ static void Activate(int id, int dir) {
         Hd3d_SetWalls(!g_view3d_walls, "options menu");
     } else if (id == 24) {
         Hd3d_SetCamera(g_view3d_cam + 1, "options menu");
+    } else if (id == 25 || id == 26) {
+      // meno flash VC o GBA: accenderne uno spegne l'altro
+      uint32 bit = id == 25 ? kFeatures0_DimFlashes : kFeatures0_DimFlashesGba;
+      bool on = !(g_config.features0 & bit);
+      SetFeature(kFeatures0_DimFlashes | kFeatures0_DimFlashesGba, false);
+      SetFeature(bit, on);
+      Palette_ApplyDimFlashFloor((g_config.features0 & kFeatures0_DimFlashes) != 0);
     } else if (id == 15 && g_zenv.ppu->extraLeftRight == 0) {
       ShowMessage("Richiede lo schermo 16:9 o 16:10");
     } else if (id >= 7 && id <= 17) {
@@ -771,20 +801,28 @@ static void Activate(int id, int dir) {
       g_config.stuck_arrows = !g_config.stuck_arrows;
     } else if (id == 104) {
       g_config.hurricane_spin = !g_config.hurricane_spin;
+    } else if (id == 105 || id == 106) {
+      bool *opt = id == 105 ? &g_config.item_on_x : &g_config.item_on_lr;
+      *opt = !*opt;
+      // tasti L e R per gli oggetti oppure cambio oggetti con L e R
+      if (id == 106 && g_config.item_on_lr)
+        SetFeature(kFeatures0_SwitchLR | kFeatures0_SwitchLRLimit, false);
     } else {
       uint32 bit = kFeatureOptions[id].bit;
       if ((bit == kFeatures0_ContinuousWorld || bit == kFeatures0_FastTransitions) && !g_config.new_renderer) {
         ShowMessage("Richiede la PPU ottimizzata (NewRenderer)");
         break;
       }
-      // oggetti X, L, R nell'HUD solo con il cambio oggetti con L e R
-      if ((bit == kFeatures0_ShowXLRItemsInHud || bit == kFeatures0_SwitchLRLimit) && !(g_config.features0 & kFeatures0_SwitchLR)) {
+      // L/R solo sui primi 4 oggetti solo con il cambio con L e R
+      if (bit == kFeatures0_SwitchLRLimit && !(g_config.features0 & kFeatures0_SwitchLR)) {
         ShowMessage("Richiede Cambio oggetti con L e R");
         break;
       }
       SetFeature(bit, !(g_config.features0 & bit));
       if (bit == kFeatures0_SwitchLR && !(g_config.features0 & bit))
-        SetFeature(kFeatures0_ShowXLRItemsInHud, false), SetFeature(kFeatures0_SwitchLRLimit, false);
+        SetFeature(kFeatures0_SwitchLRLimit, false);
+      if (bit == kFeatures0_SwitchLR && (g_config.features0 & bit))
+        g_config.item_on_lr = false;
     }
     break;
   case kPage_Audio:
@@ -1168,14 +1206,15 @@ static void DrawButtonHints(Canvas *cv) {
   // il tasto della mappa e' X, oppure Select se a X e' assegnato un oggetto
   int map_btn = hud_cur_item_x != 0 ? kBtn_Select : kBtn_X;
   int sub = submodule_index;
-  if (sub == 1) {  // inventario: ai lati, due e due, per non coprire i riquadri
+  // inventario: ai lati, due e due, per non coprire i riquadri. Solo col menu
+  // fermo in basso (Hud_BringMenuDown finito, 0xff18): mentre scende o risale
+  // gli passerebbe sopra; spariscono appena si preme START per chiuderlo (5)
+  if (sub == 1 && (uint16)BG3VOFS_copy2 == 0xff18 && overworld_map_state != 5) {
     Hint left[2] = { { kBtn_Dpad, "Scegli" }, { kBtn_Start, "Chiudi" } };
     Hint right[2];
     int nr = 0;
     if (sram_progress_indicator)
       right[nr++] = (Hint){ kBtn_Select, "Salva" };
-    if (enhanced_features0 & kFeatures0_SwitchLR)
-      right[nr++] = (Hint){ kBtn_Y, "Riordina" };
     // Le colonne stanno nelle fasce laterali: in 16:9 (71 px) con il margine
     // interno pieno, in 16:10 (51 px) con un margine piu' stretto. In 4:3 non
     // c'e' spazio: niente suggerimenti (sotto coprirebbero i riquadri)
@@ -1205,8 +1244,8 @@ static void DrawButtonHints(Canvas *cv) {
   }
 }
 
-// Nome del labirinto mostrato sulla mappa del dungeon, in alto al centro (fa
-// parte della mappa migliorata, decisione dell'utente)
+// Nome del labirinto mostrato sulla mappa del dungeon, in alto al centro
+// (parte della mappa dei labirinti migliorata, ImprovedDungeonMap)
 static void DrawDungeonMapStatus(Canvas *cv) {
   static const char *const kDungeonNames[14] = {
     "Fogne del castello", "Castello di Hyrule", "Palazzo dell'Est", "Castello di Sabbia",
@@ -1214,7 +1253,7 @@ static void DrawDungeonMapStatus(Canvas *cv) {
     "Bosco d'Ossa", "Forte Ghiaccio", "Torre sul Monte", "Tana dei Ladroni",
     "Rocca Tartaruga", "Torre di Ganon",
   };
-  if (!(enhanced_features0 & kFeatures0_ImprovedWorldMap))
+  if (!(enhanced_features0 & kFeatures0_ImprovedDungeonMap))
     return;
   if (main_module_index != 14 || submodule_index != 3 || overworld_map_state < 2 || overworld_map_state > 4)
     return;
@@ -1442,11 +1481,17 @@ bool HdMenu_FreezeEnemies(void) {
 // premuta la freccia si ferma appena dentro (l'input si ignora anche mentre lo
 // schermo si schiarisce) e vede la scritta: quella freccia conta gia' come primo
 // tasto, quindi lasciata e ripremuta toglie la scritta e muove subito Link.
-// Il tasto della mappa (X) intanto non conta: non apre la mappa e non toglie
+// Il tasto della mappa intanto non conta: non apre la mappa e non toglie
 // la scritta; la corsa (A) e tutti gli altri si'.
-enum { kInputMapButton = 1 << 9 };  // X (kKbdRemap in main.c)
-// su, giu', sinistra, destra, A (corsa) e Y (oggetto)
-enum { kInputPassThrough = 0xf0 | 1 << 8 | 1 << 1 };
+// Tasto della mappa (bit di kKbdRemap in main.c): X, oppure Select con un
+// oggetto su X (DidPressButtonForMap in messaging.c)
+static int MapButtonMask(void) {
+  return hud_cur_item_x ? 1 << 2 : 1 << 9;
+}
+// su, giu', sinistra, destra, A (corsa) e Y (oggetto), X con un oggetto su X
+static int PassThroughMask(void) {
+  return 0xf0 | 1 << 8 | 1 << 1 | (hud_cur_item_x ? 1 << 9 : 0);
+}
 static bool g_dungeon_name_swallow;
 static int g_dungeon_name_prev_inputs;
 
@@ -1454,7 +1499,7 @@ int HdMenu_FilterInput(int inputs) {
   int all = inputs;
   // con la scritta (o mentre la si aspetta) il tasto della mappa non esiste
   if (g_dungeon_name && main_module_index == 7)
-    inputs &= ~kInputMapButton;
+    inputs &= ~MapButtonMask();
   int pressed = inputs & ~g_dungeon_name_prev_inputs;
   g_dungeon_name_prev_inputs = inputs;
   if (g_dungeon_name_swallow) {
@@ -1483,8 +1528,8 @@ int HdMenu_FilterInput(int inputs) {
   // come su GBA una direzione o la corsa tolgono la scritta e Link si muove
   // subito; l'oggetto pure (vicino alla porta il gioco non lo usa); la spada
   // e gli altri tasti la tolgono soltanto, la mappa e' gia' esclusa sopra
-  if (pressed & kInputPassThrough)
-    return inputs & kInputPassThrough;
+  if (pressed & PassThroughMask())
+    return inputs & PassThroughMask();
   g_dungeon_name_swallow = true;
   return 0;
 }

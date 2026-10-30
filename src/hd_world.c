@@ -9,8 +9,10 @@
 //   memoria video), si carica l'area con le funzioni del gioco (grafica,
 //   colori, mappa delle caselle), si disegna il terreno e si ripristina tutto;
 // - nel frame disegnato, il fondale fuori dall'area corrente viene preso da
-//   quelle immagini. Durante il passaggio fra due aree, quando la memoria
-//   video contiene un misto delle due, tutto il fondale viene dalle immagini;
+//   quelle immagini. Col mondo continuo il passaggio fra due aree si fa in
+//   un solo frame di gioco; nel passaggio col mosaico (Bosco Perduto), quando
+//   la memoria video e' ancora dell'area vecchia, tutto il fondale viene
+//   dalle immagini;
 // - i nemici delle aree vicine visibili si muovono dal vivo, ognuno in una
 //   copia dello stato del gioco preparata per la sua area (piu' sotto).
 // I labirinti e le case restano a schermate, come nel gioco.
@@ -70,6 +72,12 @@ static bool InSoftIris(void) {
          !player_is_indoors;
 }
 
+// Morte di Link all'aperto: il mondo continuo resta finche' il gioco mostra
+// il mondo (prima dello schermo rosso e dopo la fata), con la vista ferma
+static bool InDeathOverWorld(void) {
+  return saved_module_for_menu == 9 && HdFx_DeathShowsWorld();
+}
+
 // Ritorno dalla mappa del mondo: il gioco ricarica le sovrapposizioni e
 // schiarisce lo schermo (sottomoduli 32-34) prima di ridare il controllo
 static bool InMapReturn(void) {
@@ -79,7 +87,8 @@ static bool InMapReturn(void) {
 bool HdWorld_Active(void) {
   if (!FeatureOn() || overworld_screen_index >= 0x80)
     return false;
-  if (main_module_index != 9 && !InMenuOverWorld() && !InFluteArrival() && !InSoftIris())
+  if (main_module_index != 9 && !InMenuOverWorld() && !InFluteArrival() && !InSoftIris() &&
+      !InDeathOverWorld())
     return false;
   return g_zenv.ppu->mode != 7;
 }
@@ -158,10 +167,6 @@ static inline uint32 Dim(uint32 c) {
   return (c & 0xff000000) | r << 16 | g << 8 | b;
 }
 
-static bool InTransition(void) {
-  return main_module_index == 9 && submodule_index >= 1 && submodule_index <= 8;
-}
-
 // Passaggio con mosaico e dissolvenza (aree con la nebbia, come il Bosco
 // Perduto): il numero dell'area cambia subito, mentre la memoria video resta
 // quella vecchia fino al buio
@@ -179,7 +184,7 @@ static bool InSpecialExit(void) {
 }
 
 bool HdWorld_BackgroundFromImages(void) {
-  return HdWorld_Active() && (InTransition() || InMosaicTransition());
+  return HdWorld_Active() && InMosaicTransition();
 }
 
 // ---------------------------------------------------------------------------
@@ -380,7 +385,8 @@ bool HdWorld_InsideCurrentArea(int wx, int wy) {
 //   resta all'aperto;
 // - i nemici: quelli sconfitti non ricompaiono, quelli vivi tornano dove
 //   erano, con la loro vita e il loro stato (tutti i dati del loro posto nelle
-//   tabelle del gioco). Si dimenticano quando Link si allontana di 3 aree.
+//   tabelle del gioco). Si dimenticano quando fra Link e la loro area ci sono
+//   3 aree in mezzo (kEnemyResetGap).
 // - l'aspetto dei nemici vivi l'ultima volta che erano sullo schermo: cosi'
 //   si vedono, fermi, oltre il bordo dell'area quando la loro area non si
 //   muove dal vivo;
@@ -702,7 +708,7 @@ bool HdWorld_LeashWall(int k, uint16 x, uint16 y) {
 
 // Sprite_SpawnProbeAlways: le sonde dei soldati (che "vedono" Link quando lo
 // toccano) usano solo i posti 0-9. Col mondo tutto attivo un'area con molti
-// nemici li occupa tutti (0x75 nel Mondo delle Tenebre ne ha 14) e i soldati
+// nemici li occupa tutti (0x75 nel Mondo delle Tenebre ne elenca 22) e i soldati
 // non vedevano mai Link: chi lo vede puo' usare anche i posti 10-14 (il 15
 // resta ai colpi dei nemici)
 bool HdWorld_ProbeMoreSlots(int k) {
@@ -779,7 +785,7 @@ static void ResetFarEnemies(int lx, int ly, const uint8 *main_ram) {
 
 // Le tabelle del gioco hanno 16 posti e i nemici dell'area ne usano al
 // massimo 14 (0-13); alcune aree, soprattutto nel Mondo delle Tenebre, ne
-// hanno di piu' (0x75 ne ha 15) e con tutti i nemici caricati qualcuno
+// hanno di piu' (0x75 ne elenca 22) e con tutti i nemici caricati qualcuno
 // restava fuori. Quando non c'e' posto, il nemico non caricato con la casa
 // piu' vicina a Link, dentro la schermata di Link, prende il posto del nemico
 // tranquillo (non disturbato) piu' lontano, oltre una volta e mezza la
@@ -951,8 +957,9 @@ static bool IsAreaEnemy(int k) {
   return t && t < 0xf4 && (uint8)(t - 1) == sprite_type[k];
 }
 
-// Mondo vivo: un nemico dell'area che esce dalla vista resta fermo dov'e'
-// (sprite_pause) invece di sparire e ricomparire al punto di partenza.
+// Mondo vivo: un nemico dell'area che esce dalla vista continua a muoversi
+// senza disegnarsi (g_sprite_offscreen, in Sprite_PrepOamCoordOrDoubleRet)
+// invece di sparire e ricomparire al punto di partenza.
 // Anche gli oggetti caduti che spariscono da soli (IsTimedDrop) restano
 // finche' il tempo non scade, invece di sparire appena escono dalla vista
 bool HdWorld_KeepOffscreen(int k) {
@@ -1290,10 +1297,8 @@ static void DrawFrozenEnemies(uint8 *pixels, int pitch, int width, int height, i
   int cur = BYTE(overworld_screen_index) & 0x7f;
   for (int a = 0; a < 128; a++) {
     AreaState *st = &g_states[a];
-    // l'area appena raggiunta si salta, tranne nel primo frame del passaggio,
-    // quando il gioco non ha ancora caricato i suoi nemici (sparivano per un
-    // frame)
-    if (!st->used || (a == cur && !InTransition()) || ((a ^ cur) & 0x40) || !st->n_alive || LiveShown(a))
+    // l'area di Link si salta: i suoi nemici li disegna il gioco
+    if (!st->used || a == cur || ((a ^ cur) & 0x40) || !st->n_alive || LiveShown(a))
       continue;
     for (int i = 0; i < st->n_alive; i++) {
       EnemyRec *r = &st->alive[i];
@@ -1328,7 +1333,7 @@ static void DrawFrozenEnemies(uint8 *pixels, int pitch, int width, int height, i
           uint32 l = row[sx] >> 24;
           if (l == 2 || l == 4 || l == 6)
             continue;  // HUD e sprite veri restano davanti
-          if (HdWorld_InsideCurrentArea(cam_x + sx, cam_y + sy) && !InTransition())
+          if (HdWorld_InsideCurrentArea(cam_x + sx, cam_y + sy))
             continue;
           row[sx] = Dim(c);
         }
@@ -1344,7 +1349,6 @@ static int g_world_dx, g_world_dy;
 static float g_vis_x, g_vis_y;     // posizione della vista libera
 static int g_last_lx, g_last_ly;   // Link nel frame precedente
 static bool g_vis_valid;
-static int g_prev_mode;
 static int g_prev_module;
 static int g_prev_area = -1;      // area esterna nel frame precedente
 static bool g_vis_glide;          // uscita da una casa: la vista scivola al suo posto
@@ -1379,6 +1383,13 @@ void HdWorld_UpdateCamera(int *cam_x, int *cam_y) {
     *cam_y = gy + g_world_dy;
     return;
   }
+  // morte di Link: la vista resta dov'era, anche sullo schermo rosso, e
+  // tornato il gioco riprende a seguire Link da li'
+  if (main_module_index == 18 && saved_module_for_menu == 9 && g_vis_valid) {
+    *cam_x = gx + g_world_dx;
+    *cam_y = gy + g_world_dy;
+    return;
+  }
   if (HdWorld_Active() && InMenuOverWorld() && g_vis_valid) {
     // menu o dialogo aperto: la vista non si muove (e alla chiusura riprende
     // a seguire Link da dove era)
@@ -1391,13 +1402,11 @@ void HdWorld_UpdateCamera(int *cam_x, int *cam_y) {
   // fase 10: Link esce dalla porta dopo il cerchio che si apre; fase 9: prima
   // si apre il portone (chiesa, castello): la vista resta su Link
   int mode = !HdWorld_Active() ? 0 : InFluteArrival() || InSoftIris() ? 1 : main_module_index != 9 ? 0 :
-             submodule_index == 0 || submodule_index == 9 || submodule_index == 10 || InMapReturn() ? 1 : InTransition() ? 2 :
+             submodule_index == 0 || submodule_index == 9 || submodule_index == 10 || InMapReturn() ? 1 :
              InMosaicTransition() ? 3 : 0;
-  int prev_mode = g_prev_mode;
-  g_prev_mode = mode;
   // Col mondo continuo il passaggio fra aree si fa tutto in un frame di gioco
-  // (Overworld_RunScrollTransition): la vista non vede mai la modalita' 2,
-  // il cambio d'area si riconosce dal numero dell'area
+  // (fasi 1-8 nello stesso frame, InstantWorldTransition): il cambio d'area
+  // si riconosce dal numero dell'area
   int area = main_module_index == 9 ? BYTE(overworld_screen_index) : -1;
   bool area_changed = area >= 0 && g_prev_area >= 0 && area != g_prev_area;
   g_prev_area = area;
@@ -1430,19 +1439,13 @@ void HdWorld_UpdateCamera(int *cam_x, int *cam_y) {
       if (cx != vx) g_vis_x = (float)cx;
       if (cy != vy) g_vis_y = (float)cy;
     }
-  } else if (mode == 2) {
-    // Durante il passaggio fra aree la vista si muove esattamente come Link
-    if (g_vis_valid)
-      g_vis_x += mx, g_vis_y += my;
-    else
-      g_vis_x = (float)gx, g_vis_y = (float)gy;
   } else {
     // Appena finito il passaggio il gioco fissa il punto dello schermo in cui
     // tiene Link (camera_*_coord_scroll_hi) a modo suo, anche 20-30 pixel
     // lontano da dove Link e' nella vista. Lo si sposta dove Link e' davvero:
     // la vista continua a seguirlo senza recuperi, e la telecamera del gioco
     // riparte quando la vista la raggiunge.
-    if ((prev_mode == 2 || area_changed) && g_vis_valid) {
+    if (area_changed && g_vis_valid) {
       int px = lx - (int)floorf(g_vis_x + 0.5f), py = ly - (int)floorf(g_vis_y + 0.5f);
       if (px > 16 && px < 240) {
         camera_x_coord_scroll_hi = gx + px;
@@ -1525,31 +1528,30 @@ enum { kHiddenRows = 2, kWorldBottom = 4096 - kHiddenRows };
 // Fra la montagna (0x03, 0x05, 0x07 e le loro parti, anche nel Mondo Oscuro)
 // e la pianura non si passa: il bordo dell'area verso l'altro livello fa da
 // fine del mondo, come per il gioco (nord per le aree sotto la montagna, sud
-// per quelle di montagna, e i lati dove accanto c'e' l'altro livello). Prima la vista mostrava l'altro livello nella
-// nebbia e, uscendo dal Dominio di Zora, partiva dalla telecamera del gioco
-// e poi saltava su
-static bool MountainAbove(int head, int *top) {
-  static const uint8 kMountain[] = { 0x03, 0x04, 0x0b, 0x0c, 0x05, 0x06, 0x0d, 0x0e, 0x07 };
-  int a = head & 0x3f, x, y, s;
-  AreaRect(a, &x, &y, &s);
-  if (y == 0)
-    return false;
-  for (int cx = x; cx < x + s; cx += 512) {
-    int up = ((y - 1) >> 9) * 8 + (cx >> 9);
-    for (int i = 0; i < (int)sizeof(kMountain); i++)
-      if (kMountain[i] == up) {
-        *top = y;
-        return true;
-      }
-  }
-  return false;
-}
+// per quelle di montagna, e i lati dove accanto c'e' l'altro livello). Prima
+// la vista mostrava l'altro livello nella nebbia e, uscendo dal Dominio di
+// Zora, partiva dalla telecamera del gioco e poi saltava su
 
+// Quadrato 512x512 della mappa (riga * 8 + colonna) sul Monte della Morte
 static bool IsMountainCell(int cell) {
   static const uint8 kMountain[] = { 0x03, 0x04, 0x0b, 0x0c, 0x05, 0x06, 0x0d, 0x0e, 0x07 };
   for (int i = 0; i < (int)sizeof(kMountain); i++)
     if (kMountain[i] == cell)
       return true;
+  return false;
+}
+
+static bool MountainAbove(int head, int *top) {
+  int a = head & 0x3f, x, y, s;
+  AreaRect(a, &x, &y, &s);
+  if (y == 0)
+    return false;
+  for (int cx = x; cx < x + s; cx += 512) {
+    if (IsMountainCell(((y - 1) >> 9) * 8 + (cx >> 9))) {
+      *top = y;
+      return true;
+    }
+  }
   return false;
 }
 
@@ -1659,7 +1661,7 @@ static void DrawLoadedArea(AreaImage *img) {
   // sulla montagna le nuvole non hanno pennellate, come l'acqua (hd_fx.c,
   // HdFx_IsCloudColor)
   bool mountain = sc == 0x03 || sc == 0x05 || sc == 0x07;
-  uint32 backdrop = Bgr15ToPixel(main_palette_buffer[0], backdrop_scene ? 3 : 5);
+  uint32 backdrop = Bgr15ToPixel(HdFx_RealBg(main_palette_buffer, 0), backdrop_scene ? 3 : 5);
   for (int r = 0; r < n16; r++) {
     for (int c = 0; c < n16; c++) {
       uint16 m16 = dung_bg2[r * 64 + c];
@@ -1684,7 +1686,7 @@ static void DrawLoadedArea(AreaImage *img) {
             ac->x = ox, ac->y = oy, ac->entry = e;
             ac->color[0] = water && !backdrop_scene ? (backdrop & 0xffffff) | 7u << 24 : backdrop;
             for (int v = 1; v < 16; v++)
-              ac->color[v] = Bgr15ToPixel(main_palette_buffer[pal * 16 + v],
+              ac->color[v] = Bgr15ToPixel(HdFx_RealBg(main_palette_buffer, pal * 16 + v),
                                           water || (cloud_tile && HdFx_IsCloudColor(e, v)) ? 7 : 1);
           }
         }
@@ -1694,11 +1696,10 @@ static void DrawLoadedArea(AreaImage *img) {
           uint32 *dst = img->pix + (oy + row) * img->size + ox;
           for (int col = 0; col < 8; col++) {
             int bit = hf ? col : 7 - col;
-            int v = (p01 >> bit & 1) | (p01 >> (8 + bit) & 1) << 1 |
-                    (p23 >> bit & 1) << 2 | (p23 >> (8 + bit) & 1) << 3;
+            int v = HdFx_Pixel4bpp(p01, p23, bit);
             // sulla montagna lo sfondo e' il cielo anche nelle caselle che per
             // il gioco sono acqua profonda (il vuoto oltre i dirupi)
-            dst[col] = v ? Bgr15ToPixel(main_palette_buffer[pal * 16 + v],
+            dst[col] = v ? Bgr15ToPixel(HdFx_RealBg(main_palette_buffer, pal * 16 + v),
                                         water || (cloud_tile && HdFx_IsCloudColor(e, v)) ? 7 : 1) :
                        water && !backdrop_scene ? (backdrop & 0xffffff) | 7u << 24 : backdrop;
           }
@@ -1971,8 +1972,8 @@ static int OverlayColor(const OverlayCtx *o, int sx, int sy) {
   int bit = (e & 0x4000) ? (px & 7) : 7 - (px & 7);
   const uint16 *t = &ppu->vram[(bg->tileAdr + (e & 0x3ff) * 16) & 0x7fff];
   uint16 p01 = t[row], p23 = t[row + 8];
-  int v = (p01 >> bit & 1) | (p01 >> (8 + bit) & 1) << 1 | (p23 >> bit & 1) << 2 | (p23 >> (8 + bit) & 1) << 3;
-  return v ? ppu->cgram[(e >> 10 & 7) * 16 + v] : -1;
+  int v = HdFx_Pixel4bpp(p01, p23, bit);
+  return v ? HdFx_RealBg(ppu->cgram, (e >> 10 & 7) * 16 + v) : -1;
 }
 
 int HdWorld_OverlayColorAt(int sx, int sy) {
@@ -2089,37 +2090,10 @@ static void DrawAnimatedCells(uint8 *pixels, int pitch, int width, int height, i
           if (l == 2 || l == 4 || l == 6)
             continue;  // HUD e sprite restano davanti
           int bit = hf ? col : 7 - col;
-          int v = (p01 >> bit & 1) | (p01 >> (8 + bit) & 1) << 1 |
-                  (p23 >> bit & 1) << 2 | (p23 >> (8 + bit) & 1) << 3;
+          int v = HdFx_Pixel4bpp(p01, p23, bit);
           dst[sx] = OverlayBlend(ov, Dim(ac->color[v]), sx, sy);
         }
       }
-    }
-  }
-}
-
-// Il gioco scurisce lo schermo abbassando i colori delle palette (rispetto
-// alla copia intatta) e poi spegnendolo: le immagini delle aree hanno i
-// colori pieni, quindi si scuriscono qui nella stessa misura
-static void FadeLikeGame(uint8 *pixels, int pitch, int width, int height) {
-  int cur[3] = { 0 }, full[3] = { 0 };
-  for (int i = 0x20; i < 0x80; i++) {
-    uint16 c = main_palette_buffer[i], a = aux_palette_buffer[i];
-    for (int k = 0; k < 3; k++)
-      cur[k] += c >> (5 * k) & 31, full[k] += a >> (5 * k) & 31;
-  }
-  int f[3];  // in 256esimi: rosso, verde, blu
-  for (int k = 0; k < 3; k++)
-    f[k] = g_zenv.ppu->forcedBlank ? 0 : full[k] ? (cur[k] * 256 / full[k] > 256 ? 256 : cur[k] * 256 / full[k]) : 256;
-  if (f[0] == 256 && f[1] == 256 && f[2] == 256)
-    return;
-  for (int y = 0; y < height; y++) {
-    uint32 *row = (uint32 *)(pixels + y * pitch);
-    for (int x = 0; x < width; x++) {
-      uint32 c = row[x], l = c >> 24;
-      if (l == 2 || l == 4 || l == 6)
-        continue;  // HUD e sprite li disegna gia' la PPU
-      row[x] = l << 24 | ((c >> 16 & 255) * f[0] >> 8) << 16 | ((c >> 8 & 255) * f[1] >> 8) << 8 | ((c & 255) * f[2] >> 8);
     }
   }
 }
@@ -2485,7 +2459,7 @@ void HdWorld_BeforeRender(int width, int height) {
   // soldato che segue Link, respinto da una freccia oltre il bordo). I pezzi
   // che sporgono oltre il bordo si disegnano a parte, sopra alle immagini.
   // (non nel menu: i suoi sprite vanno sopra all'HUD)
-  if (main_module_index != 9 || InTransition() || InMosaicTransition() || !mp->objXValid || !mp->objYValid ||
+  if (main_module_index != 9 || InMosaicTransition() || !mp->objXValid || !mp->objYValid ||
       (g_world_dx == 0 && g_world_dy == 0 && mp->extraLeftRight == 0))
     return;
   int ext = (width - 256) / 2;
@@ -2578,7 +2552,6 @@ typedef struct LiveArea {
   bool used;
   int head;            // area (con il bit del mondo)
   uint32 key;          // AreaKey quando e' stata preparata
-  uint32 wanted_at;    // ultimo frame in cui toccava la vista
   bool near;           // tocca la vista (con il margine): si disegna
   bool fresh;          // ha fatto un passo: gli sprite vanno ridisegnati
   bool drawn;          // pix contiene gli sprite dell'ultimo passo
@@ -2774,7 +2747,6 @@ static bool LiveBuild(LiveArea *la, int head, int vx, int vy) {
   la->head = head;
   la->key = AreaKey(head);
   la->fresh = la->drawn = la->near = false;
-  la->wanted_at = g_live_frame;
   memset(la->chase, 0, sizeof(la->chase));
   memset(la->chase_type, 0xff, sizeof(la->chase_type));
   memcpy(la->ram, g_ram, sizeof(g_saved_ram));
@@ -2929,7 +2901,6 @@ void HdWorld_TickNeighbors(void) {
       la->used = false;
       continue;
     }
-    la->wanted_at = g_live_frame;
     la->near = want_near[j];
   }
   if (!nw)
@@ -2969,7 +2940,7 @@ void HdWorld_TickNeighbors(void) {
     }
   for (int i = 0; i < kMaxLive; i++) {
     LiveArea *la = &g_live[i];
-    if (la->used && la->wanted_at == g_live_frame)
+    if (la->used)
       LiveTick(la, vx, vy, &m);
   }
   RestoreMain();
@@ -3091,8 +3062,7 @@ static void DrawArrowList(uint8 *pixels, int pitch, int width, int height, int c
             if ((unsigned)sx >= (unsigned)width)
               continue;
             int bit = hf ? col : 7 - col;
-            int v = (p01 >> bit & 1) | (p01 >> (8 + bit) & 1) << 1 |
-                    (p23 >> bit & 1) << 2 | (p23 >> (8 + bit) & 1) << 3;
+            int v = HdFx_Pixel4bpp(p01, p23, bit);
             uint32 l = dst[sx] >> 24;
             if (!v || l == 2 || l == 4 || l == 6)
               continue;
@@ -3134,7 +3104,7 @@ static void NormalGameArrows(uint8 *pixels, int pitch, int width, int height) {
   Ppu *ppu = g_zenv.ppu;
   if (player_is_indoors) {
     // al chiuso: le frecce della stanza (anche col mondo continuo)
-    if (!g_room_n_arrows || g_room_arrows_room != dungeon_room_index || !ShowsRoom())
+    if (!g_room_n_arrows || !ShowsRoom())
       return;
     g_bright = ppu->forcedBlank ? 0 : ppu->brightness;
     int ext = (width - 256) / 2;
@@ -3176,7 +3146,7 @@ void HdWorld_Composite(uint8 *pixels, int pitch, int width, int height) {
   g_bright = ppu->forcedBlank ? 0 : ppu->brightness;
   PreparePaletteMap();
   bool mosaic = InMosaicTransition();
-  bool all = InTransition() || mosaic;
+  bool all = mosaic;
   // aspetto dei nemici, anche quando la vista coincide con quella del gioco
   if (main_module_index == 9 && submodule_index == 0 && PersistOn())
     CaptureEnemies(pixels, pitch, width, height);
@@ -3206,7 +3176,7 @@ void HdWorld_Composite(uint8 *pixels, int pitch, int width, int height) {
   if (in_x0 < ax) in_x0 = ax;
   if (in_x1 > ax + as) in_x1 = ax + as;
   // area vicina non ancora disegnata (al massimo un frame): colore di fondo
-  uint32 outside = Bgr15ToPixel(main_palette_buffer[0], 5);
+  uint32 outside = Bgr15ToPixel(HdFx_RealBg(main_palette_buffer, 0), 5);
   int last_head = -2;
   AreaImage *img = NULL;
   // Mosaico del gioco anche sulle immagini (blocchi allineati come nella PPU)
@@ -3248,8 +3218,6 @@ void HdWorld_Composite(uint8 *pixels, int pitch, int width, int height) {
     DrawAnimatedCells(pixels, pitch, width, height, cam_x, cam_y, all, &ov);
     DrawPersistent(pixels, pitch, width, height, cam_x, cam_y, &ov);
   }
-  if (mosaic)
-    FadeLikeGame(pixels, pitch, width, height);
   PrefetchNeighbors();
 }
 

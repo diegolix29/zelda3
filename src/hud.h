@@ -61,6 +61,8 @@ void Hud_RebuildIndoor();
 void Hud_Rebuild();
 const uint16 *Hud_GetItemBoxPtr(int item);
 int GetCurrentItemButtonIndex();
+bool Hud_ItemOnX(void);
+bool Hud_ItemOnLR(void);
 uint8 *GetCurrentItemButtonPtr(int i);
 
 void Hud_HandleItemSwitchInputs();

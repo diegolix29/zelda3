@@ -191,10 +191,6 @@ static const struct { const char *text; uint8 tiles; } kLabels[] = {
   { "CRISTALLI", 5 },
 };
 
-int HudIt_LabelTiles(int label) {
-  return kLabels[label].tiles;
-}
-
 void HudIt_DrawLabel(uint16 *dst, int label) {
   int tile = kTileLabels;
   for (int i = 0; i < label; i++)

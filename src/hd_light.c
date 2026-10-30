@@ -63,26 +63,10 @@ static float *g_factor;               // fattori di luce per pixel (3 canali)
 static int g_factor_cap;
 int g_hd_light_sub;
 
+// la scena di gioco in vista, come per gli altri effetti HD (prima qui un
+// controllo a parte: luci spente nel cerchio 15/16 e nelle aree speciali 11)
 static bool InGameplay(int *mod_out) {
-  int mod = main_module_index;
-  if (mod == 14) {
-    int sub = submodule_index;
-    // mappa del labirinto (Module0E_03): nelle dissolvenze di apertura (fase 0)
-    // e di chiusura (fasi 7-8) si vede ancora la stanza. Senza luci tornava per
-    // un attimo il cono della Lanterna del gioco
-    bool dung_map_fade = sub == 3 && (overworld_map_state == 0 || overworld_map_state >= 7);
-    // pozioni (4, 8, 9) e preghiera nel deserto (5): si vede il gioco, prima
-    // la stanza si scuriva per tutta la ricarica
-    bool refill = sub == 4 || sub == 5 || sub == 8 || sub == 9;
-    if (sub != 1 && sub != 2 && sub != 11 && !refill && !dung_map_fade)
-      return false;  // mappe e altri menu: niente luci
-    mod = saved_module_for_menu;
-  }
-  // caduta in un labirinto (buche, Module11): dalla fase 3 la stanza e' gia' quella nuova
-  if (mod == 17 && subsubmodule_index >= 3)
-    mod = 7;
-  *mod_out = mod;
-  return mod == 7 || mod == 9;
+  return HdFx_InGameplay(mod_out);
 }
 
 // Stanza buia del gioco (serve la Lanterna o le torce)
@@ -90,12 +74,25 @@ static bool IsDarkRoom(int mod) {
   return mod == 7 && dung_want_lights_out;
 }
 
-// Passaggio con dissolvenza fra le stanze (Module07_02, da e verso le stanze
-// buie): il gioco carica subito la stanza nuova, buio compreso, mentre quella
-// vecchia sta ancora sfumando (fasi 0-2, la 2 e' Module07_02_FadedFilter, un
-// filtro della palette). Fino al nero la stanza vecchia tiene la sua luce
-// (prima diventava nera al primo fotogramma)
+// Luce durante i passaggi fra le stanze (Module07, sottomodulo diverso da 0).
+// Tre casi, ognuno con il suo stato:
+// - g_fade_dark: nella dissolvenza (Module07_02, da e verso le stanze buie) il
+//   gioco carica subito la stanza nuova, buio compreso, mentre quella vecchia
+//   sta ancora sfumando (fasi 0-2, la 2 e' Module07_02_FadedFilter, un filtro
+//   della palette). Fino al nero la stanza vecchia tiene la sua luce (prima
+//   diventava nera al primo fotogramma)
+// - g_dark_hold: il gioco azzera per un po' hdr_dungeon_dark_with_lantern
+//   anche se la stanza e' buia (la stanza da Lanterna saliva alla penombra
+//   mentre Link usciva), e entrando in una stanza da Lanterna il valore arriva
+//   gia' durante la dissolvenza (compariva in penombra e diventava nera di
+//   colpo): per tutto il passaggio vale il piu' buio visto
+// - g_snap_pending: nella stanza nuova la luce e' subito quella giusta, anche
+//   durante il passaggio, invece di salire piano come accendendo le torce
+// Una sola foto della luce a stanza ferma non basta: la stanza nuova deve
+// avere la sua luce prima che il passaggio finisca
 static bool g_fade_dark;              // stanza buia, quella di prima durante la dissolvenza
+static float g_dark_hold;             // luce minima delle stanze buie nel passaggio
+static bool g_snap_pending;           // stanza nuova: luce subito giusta
 
 static bool FadeHoldsOldRoom(void) {
   return main_module_index == 7 && submodule_index == 2 && subsubmodule_index <= 2;
@@ -276,7 +273,8 @@ static void CollectLights(const uint8 *pixels, int pitch, int height, int mod, b
   if (mod == 7) {
     // Torce accese della stanza
     int room = dungeon_room_index;
-    int ox = BG2HOFS_copy2 & ~0x1ff, oy = BG2VOFS_copy2 & ~0x1ff;  // la telecamera sta sempre dentro la stanza
+    // stanza della telecamera (nello scorrimento 7/2 per un po' quella vecchia)
+    int ox = BG2HOFS_copy2 & ~0x1ff, oy = BG2VOFS_copy2 & ~0x1ff;
     int start = dung_index_of_torches_start >> 1;
     uint16 torch_mask = GetTorchMask();
     for (int i = start; i < start + 16; i++) {
@@ -433,8 +431,7 @@ static void CollectSpriteLights(bool dark, int ext, int cam_x, int cam_y, float 
 static uint8 g_lava_known[2][64 * 64 / 8];
 static int g_lava_room = -1;
 
-static bool IsLavaCell(const uint8 *pixels, int pitch, int width, int height, const uint16 *tm,
-                       int row, int col, int ox, int oy, int cam_x, int cam_y, int ext) {
+static bool IsLavaCell(const uint16 *tm, int row, int col, int ox, int oy) {
   if (row < 0 || col < 0 || row >= 64 || col >= 64)
     return false;
   int ch = tm[row * 64 + col] & 0x3ff;
@@ -460,7 +457,7 @@ static bool IsLavaCell(const uint8 *pixels, int pitch, int width, int height, co
     int v = (bits >> (7 - px)) & 1 | (bits >> (14 - px)) & 2 | (bits >> (21 - px)) & 4 | (bits >> (28 - px)) & 8;
     if (!v)
       continue;
-    uint16 c = ppu->cgram[pal + v];
+    uint16 c = HdFx_RealBg(ppu->cgram, pal + v);
     int r = (c & 31) << 3, g = (c >> 5 & 31) << 3, b = (c >> 10 & 31) << 3;
     seen++;
     red += r > 120 && r > g + 30 && b < r / 2;  // rosso-arancio: lava (non acqua o altro)
@@ -507,7 +504,8 @@ static bool LavaShows(const uint8 *pixels, int pitch, int width, int height, int
 
 static void CollectLavaLights(const uint8 *pixels, int pitch, int width, int height,
                               bool dark, int ext, int cam_x, int cam_y, float t) {
-  int ox = BG2HOFS_copy2 & ~0x1ff, oy = BG2VOFS_copy2 & ~0x1ff;  // la telecamera sta sempre dentro la stanza
+  // stanza della telecamera (nello scorrimento 7/2 per un po' quella vecchia)
+  int ox = BG2HOFS_copy2 & ~0x1ff, oy = BG2VOFS_copy2 & ~0x1ff;
   if (g_lava_room != dungeon_room_index) {
     g_lava_room = dungeon_room_index;
     memset(g_lava_known, 0, sizeof(g_lava_known));
@@ -517,7 +515,7 @@ static void CollectLavaLights(const uint8 *pixels, int pitch, int width, int hei
     const uint16 *tm = layer ? dung_bg1 : dung_bg2;
     for (int row = 0; row < 64; row += 2) {
       for (int col = 0; col < 64; col += 2) {
-        if (!IsLavaCell(pixels, pitch, width, height, tm, row, col, ox, oy, cam_x, cam_y, ext))
+        if (!IsLavaCell(tm, row, col, ox, oy))
           continue;
         int sx = ox + col * 8 + 4 - cam_x + ext, sy = oy + row * 8 + 4 - cam_y;
         // solo vicino allo schermo: in alcune stanze (Rocca Tartaruga) la lava
@@ -533,8 +531,7 @@ static void CollectLavaLights(const uint8 *pixels, int pitch, int width, int hei
         int n = 0, dx = 0, dy = 0;
         for (int k = 0; k < 8; k++) {
           static const int8 kDir[8][2] = { {-1,-1},{0,-1},{1,-1},{-1,0},{1,0},{-1,1},{0,1},{1,1} };
-          if (IsLavaCell(pixels, pitch, width, height, tm, row + kDir[k][1] * 2, col + kDir[k][0] * 2,
-                         ox, oy, cam_x, cam_y, ext))
+          if (IsLavaCell(tm, row + kDir[k][1] * 2, col + kDir[k][0] * 2, ox, oy))
             n++, dx += kDir[k][0], dy += kDir[k][1];
         }
         float inner = n / 8.0f;  // 1 in mezzo alla pozza, meno sul bordo
@@ -709,15 +706,7 @@ static void ApplyLights(uint8 *pixels, int pitch, int width, int height, int bia
   // completamente al buio; le altre (per esempio il passaggio segreto sotto
   // il castello) restano solo in penombra
   float dark_ambient = hdr_dungeon_dark_with_lantern ? 0.0f : kDarkAmbient;
-  // Durante i passaggi fra le stanze (scale, porte) il gioco azzera per un
-  // po' hdr_dungeon_dark_with_lantern anche se la stanza e' buia: la stanza
-  // da Lanterna saliva alla penombra mentre Link usciva. Si tiene il valore
-  // di prima finche' il passaggio non e' finito
-  static float g_dark_hold;
-  static bool g_snap_pending;
-  // Entrando in una stanza da Lanterna il valore arriva gia' durante la
-  // dissolvenza: vale il piu' buio dei due (la stanza compariva in penombra
-  // e diventava nera di colpo a passaggio finito)
+  // passaggio fra le stanze: vale il piu' buio visto (g_dark_hold, sopra)
   bool passing = main_module_index == 7 && submodule_index != 0;
   if (passing) {
     if (dark_ambient < g_dark_hold)

@@ -1,4 +1,4 @@
-// Menu opzioni in gioco, salvataggi automatici e altre migliorie "HD".
+// Menu opzioni in gioco, salvataggi rapidi e altre migliorie "HD".
 #ifndef ZELDA3_HD_MENU_H_
 #define ZELDA3_HD_MENU_H_
 
@@ -45,7 +45,7 @@ bool HdMenu_FreezeEnemies(void);
 int HdMenu_FilterInput(int inputs);
 
 // Da chiamare dopo ogni frame di gioco (con l'audio bloccato)
-void HdMenu_AfterFrame(bool is_replay);
+void HdMenu_AfterFrame(void);
 
 // Testo nitido: rettangolo (in pixel del frame) del riquadro dei dialoghi da
 // ridisegnare sopra lo shader, e ingrandimento 4x per pixel art.

@@ -82,6 +82,20 @@ static bool InGameMenu(void) {
          IsPlayModule(saved_module_for_menu);
 }
 
+// Menu START (inventario, 14/1) aperto durante il gioco
+static bool InItemMenu(void) {
+  return main_module_index == 14 && submodule_index == 1 && IsPlayModule(saved_module_for_menu);
+}
+
+// Pixel di cui il menu START e' sceso (0-232, Hud_BringMenuDown e
+// Hud_CloseMenu). Nel gioco l'HUD sta nello stesso strato del menu (BG3) e
+// scende con lui fino a uscire dallo schermo: l'HUD moderno fa lo stesso, con
+// tasti X e L/R o senza (sta tutto sotto la riga 8, a 232 pixel e' fuori)
+static int ItemMenuPush(void) {
+  int d = -(int16)BG3VOFS_copy2;
+  return d > 0 ? d : 0;
+}
+
 void HdHud_BeforeRender(Ppu *ppu) {
   bool dlg;
   bool active = ModernHudOn() && (HudContext(&dlg) || InGameMenu());
@@ -368,6 +382,28 @@ static void DrawImage(Canvas *cv, int x, int y, const uint32 *img, int w, int h)
     }
 }
 
+// Nome del tasto (A, B, X, Y) al centro del tasto, 4x5 come la L e la R dei
+// dorsali, in un tono piu' scuro del tasto; gli oggetti lo coprono.
+// (bx, by) = angolo del tasto dentro l'immagine disegnata in (x, y)
+static void DrawButtonLetter(Canvas *cv, int x, int y, const uint32 *img, int w, int bx, int by, char ch) {
+  static const uint8 kGlyph[4][5] = {
+    { 0x6, 0x9, 0xf, 0x9, 0x9 },  // A
+    { 0xe, 0x9, 0xe, 0x9, 0xe },  // B
+    { 0x9, 0x9, 0x6, 0x9, 0x9 },  // X
+    { 0x9, 0x9, 0x6, 0x6, 0x6 },  // Y
+  };
+  const uint8 *g = kGlyph[ch == 'A' ? 0 : ch == 'B' ? 1 : ch == 'X' ? 2 : 3];
+  int lx = bx + (HD_BUTTON_SIZE - 4) / 2, ly = by + (HD_BUTTON_SIZE - 5) / 2;
+  for (int r = 0; r < 5; r++)
+    for (int c = 0; c < 4; c++) {
+      uint32 v = img[(ly + r) * w + lx + c];
+      if (!(g[r] & 8 >> c) || !(v >> 24))
+        continue;
+      uint32 dark = ((v >> 16 & 0xff) * 7 / 10) << 16 | ((v >> 8 & 0xff) * 7 / 10) << 8 | (v & 0xff) * 7 / 10;
+      Px(cv, x + lx + c, y + ly + r, dark);
+    }
+}
+
 // Primo pixel visibile (riga e colonna) di una casella: serve ad allineare i
 // tasti esattamente al cuore piu' in alto a sinistra
 static void TileFirstPixel(uint16 entry, int *row, int *col) {
@@ -429,8 +465,8 @@ static void DrawNumberTiles(Canvas *cv, int x, int y, int value, int digits, boo
 }
 
 void HdHud_Draw(uint8 *pixels, int pitch, int width, int height, int scale) {
-  bool in_dialog;
-  if (!ModernHudOn() || !HudContext(&in_dialog))
+  bool in_dialog = false, in_menu = InItemMenu();
+  if (!ModernHudOn() || (!in_menu && !HudContext(&in_dialog)))
     return;
   Ppu *ppu = g_zenv.ppu;
   if (!(ppu->screenEnabled[0] & 4) || ppu->mode == 7)
@@ -438,24 +474,13 @@ void HdHud_Draw(uint8 *pixels, int pitch, int width, int height, int scale) {
   g_hud_bri = ppu->forcedBlank ? 0 : ppu->brightness;
   if (g_hud_bri == 0)
     return;
-  // Nei dialoghi l'HUD scivola fuori dallo schermo (in alto i cuori e i
-  // tasti, in basso rupie e chiavi) e rientra quando il dialogo finisce
-  static float slide;
-  static uint8 last_frame;
-  if (last_frame != frame_counter) {
-    last_frame = frame_counter;
-    float target = in_dialog ? 1.0f : 0.0f;
-    slide += (target > slide ? 1.0f : -1.0f) / 10.0f;
-    if (slide < 0) slide = 0;
-    if (slide > 1) slide = 1;
-  }
-  float ease = slide * slide * (3 - 2 * slide);
-  if (ease >= 1.0f)
-    return;
-  Canvas cv = { pixels, pitch, width / scale, height / scale, scale, -(int)(ease * 48 + 0.5f) };
-  Canvas cvb = cv;
-  cvb.oy = (int)(ease * 32 + 0.5f);
+  // Come l'HUD originale resta anche nei dialoghi (prima scivolava fuori) e
+  // il menu START lo spinge giu' mentre scende
+  int push = in_menu ? ItemMenuPush() : 0;
+  Canvas cv = { pixels, pitch, width / scale, height / scale, scale, push };
   int W = cv.width, H = cv.height;
+  if (push >= H)
+    return;
 
   // --- Cuori (caselle originali 8x8, 10 per riga) ------------------------
   const int x0 = 8, y0 = 8;
@@ -512,26 +537,39 @@ void HdHud_Draw(uint8 *pixels, int pitch, int width, int height, int scale) {
 
   // --- Tasti: il punto piu' alto a filo con i cuori, il piu' a destra con
   // lo stesso margine dei cuori a sinistra
-  // Solo i tre tasti Y, A e B; con "Oggetti X, L, R nell'HUD"
-  // (ShowXLRItemsInHud) i tasti sono quattro, a rombo con X blu, e a sinistra
-  // ci sono i dorsali L e R
+  // I tre tasti Y, A e B, piu' quelli a cui si possono assegnare oggetti: con
+  // "Tasto X per gli oggetti" i tasti sono quattro, a rombo con X blu; con
+  // "Tasti L e R per gli oggetti" sopra ci sono i dorsali L (sopra Y) e R
+  // (sopra A) come su un controller SNES
   const int S = HD_BUTTON_SIZE;
   int yx, yy, ax, ay, bx, by;
-  // (come l'HUD classico: senza il cambio oggetti con L e R non ci sono oggetti su X, L e R)
-  if ((enhanced_features0 & kFeatures0_ShowXLRItemsInHud) && (enhanced_features0 & kFeatures0_SwitchLR)) {
-    int gx = W - margin - HD_BUTTONS4_W, gy = top;
+  bool show_x = Hud_ItemOnX(), show_lr = Hud_ItemOnLR();
+  int gy = top;
+  if (show_lr) {
+    int lx = W - margin - HD_BUTTONS4_W, rx = W - margin - HD_SHOULDER_W;
+    DrawImage(&cv, lx, top, kHdShoulderL, HD_SHOULDER_W, HD_SHOULDER_H);
+    DrawImage(&cv, rx, top, kHdShoulderR, HD_SHOULDER_W, HD_SHOULDER_H);
+    DrawButtonItem(&cv, lx + HD_SHOULDER_L_ITEM_X, top + HD_SHOULDER_ITEM_Y, hud_cur_item_l);
+    DrawButtonItem(&cv, rx + HD_SHOULDER_R_ITEM_X, top + HD_SHOULDER_ITEM_Y, hud_cur_item_r);
+    gy = top + HD_SHOULDER_H + 2;
+  }
+  if (show_x) {
+    int gx = W - margin - HD_BUTTONS4_W;
     DrawImage(&cv, gx, gy, kHdButtons4, HD_BUTTONS4_W, HD_BUTTONS4_H);
+    DrawButtonLetter(&cv, gx, gy, kHdButtons4, HD_BUTTONS4_W, HD_BUTTON4_X_X, HD_BUTTON4_X_Y, 'X');
+    DrawButtonLetter(&cv, gx, gy, kHdButtons4, HD_BUTTONS4_W, HD_BUTTON4_Y_X, HD_BUTTON4_Y_Y, 'Y');
+    DrawButtonLetter(&cv, gx, gy, kHdButtons4, HD_BUTTONS4_W, HD_BUTTON4_A_X, HD_BUTTON4_A_Y, 'A');
+    DrawButtonLetter(&cv, gx, gy, kHdButtons4, HD_BUTTONS4_W, HD_BUTTON4_B_X, HD_BUTTON4_B_Y, 'B');
     yx = gx + HD_BUTTON4_Y_X, yy = gy + HD_BUTTON4_Y_Y;
     ax = gx + HD_BUTTON4_A_X, ay = gy + HD_BUTTON4_A_Y;
     bx = gx + HD_BUTTON4_B_X, by = gy + HD_BUTTON4_B_Y;
-    int sx = gx - 10 - HD_SHOULDERS_W, sy = gy;
-    DrawImage(&cv, sx, sy, kHdShoulders, HD_SHOULDERS_W, HD_SHOULDERS_H);
     DrawButtonItem(&cv, gx + HD_BUTTON4_X_X, gy + HD_BUTTON4_X_Y, hud_cur_item_x);
-    DrawButtonItem(&cv, sx + HD_SHOULDER_L_X, sy + HD_SHOULDER_Y, hud_cur_item_l);
-    DrawButtonItem(&cv, sx + HD_SHOULDER_R_X, sy + HD_SHOULDER_Y, hud_cur_item_r);
   } else {
-    int gx = W - margin - HD_BUTTONS_W, gy = top;
+    int gx = W - margin - HD_BUTTONS_W;
     DrawImage(&cv, gx, gy, kHdButtons, HD_BUTTONS_W, HD_BUTTONS_H);
+    DrawButtonLetter(&cv, gx, gy, kHdButtons, HD_BUTTONS_W, HD_BUTTON_Y_X, HD_BUTTON_Y_Y, 'Y');
+    DrawButtonLetter(&cv, gx, gy, kHdButtons, HD_BUTTONS_W, HD_BUTTON_A_X, HD_BUTTON_A_Y, 'A');
+    DrawButtonLetter(&cv, gx, gy, kHdButtons, HD_BUTTONS_W, HD_BUTTON_B_X, HD_BUTTON_B_Y, 'B');
     yx = gx + HD_BUTTON_Y_X, yy = gy + HD_BUTTON_Y_Y;
     ax = gx + HD_BUTTON_A_X, ay = gy + HD_BUTTON_A_Y;
     bx = gx + HD_BUTTON_B_X, by = gy + HD_BUTTON_B_Y;
@@ -553,12 +591,12 @@ void HdHud_Draw(uint8 *pixels, int pitch, int width, int height, int scale) {
   // --- Rupie in basso a sinistra, chiavi del labirinto sopra ---------------
   {
     int ry = H - margin - 8;
-    DrawTile(&cvb, x0, ry, 0x3ca8);
+    DrawTile(&cv, x0, ry, 0x3ca8);
     int max_rupees = (enhanced_features0 & kFeatures0_CarryMoreRupees) ? 9999 : 999;  // come MaxRupees (hud.c)
-    DrawNumberTiles(&cvb, x0 + 10, ry, link_rupees_actual, 3, ShowMaxInYellow(link_rupees_goal, max_rupees));
+    DrawNumberTiles(&cv, x0 + 10, ry, link_rupees_actual, 3, ShowMaxInYellow(link_rupees_goal, max_rupees));
     if (link_num_keys != 0xff) {
-      DrawTile(&cvb, x0, ry - 10, 0x2871);
-      DrawNumberTiles(&cvb, x0 + 10, ry - 10, link_num_keys, 1, false);
+      DrawTile(&cv, x0, ry - 10, 0x2871);
+      DrawNumberTiles(&cv, x0 + 10, ry - 10, link_num_keys, 1, false);
     }
   }
 }

@@ -1217,7 +1217,9 @@ void Intro_PeriodicSwordAndIntroFlash() {  // 8cfe56
   SetBackdropcolorBlack();
   if (intro_times_pal_flash) {
     if ((intro_times_pal_flash & 3) != 0) {
-      (&COLDATA_copy0)[intro_sword_24] |= (enhanced_features0 & kFeatures0_DimFlashes) ? 0x05 : 0x1f;
+      // la GBA ha un altro titolo e non fa questo lampo
+      if (!(enhanced_features0 & kFeatures0_DimFlashesGba))
+        (&COLDATA_copy0)[intro_sword_24] |= (enhanced_features0 & kFeatures0_DimFlashes) ? 0x05 : 0x1f;
       intro_sword_24 = (intro_sword_24 == 2) ? 0 : intro_sword_24 + 1;
     }
     intro_times_pal_flash--;

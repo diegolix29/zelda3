@@ -327,6 +327,7 @@ static bool ParseBoolBit(const char *value, uint32 *data, uint32 mask) {
 static bool g_fx_heat_key_seen;  // l'ini ha gia' FxHeatAndFlames
 // chiavi divise da opzioni piu' vecchie: se mancano prendono il valore di quella
 static bool g_blond_link_seen, g_gba_damage_seen, g_flipper_dive_seen, g_stuck_arrows_seen, g_hurricane_spin_seen;
+static bool g_item_on_x_seen;
 
 static bool HandleIniConfig(int section, const char *key, char *value) {
   if (section == 0) {
@@ -394,6 +395,8 @@ static bool HandleIniConfig(int section, const char *key, char *value) {
       return true;
     } else if (StringEqualsNoCase(key, "DimFlashes")) {
       return ParseBoolBit(value, &g_config.features0, kFeatures0_DimFlashes);
+    } else if (StringEqualsNoCase(key, "DimFlashesGba")) {
+      return ParseBoolBit(value, &g_config.features0, kFeatures0_DimFlashesGba);
     } else if (StringEqualsNoCase(key, "FxHeatAndFlames")) {
       g_fx_heat_key_seen = true;
       return ParseBool(value, &g_config.fx_heat);
@@ -547,6 +550,11 @@ static bool HandleIniConfig(int section, const char *key, char *value) {
     } else if (StringEqualsNoCase(key, "FlipperDive")) {
       g_flipper_dive_seen = true;
       return ParseBool(value, &g_config.flipper_dive);
+    } else if (StringEqualsNoCase(key, "ItemOnX")) {
+      g_item_on_x_seen = true;
+      return ParseBool(value, &g_config.item_on_x);
+    } else if (StringEqualsNoCase(key, "ItemOnLR")) {
+      return ParseBool(value, &g_config.item_on_lr);
     } else if (StringEqualsNoCase(key, "HurricaneSpin")) {
       g_hurricane_spin_seen = true;
       return ParseBool(value, &g_config.hurricane_spin);
@@ -600,7 +608,7 @@ static bool HandleIniConfig(int section, const char *key, char *value) {
     } else if (StringEqualsNoCase(key, "BurnAndFreezeInteraction")) {
       return ParseBoolBit(value, &g_config.features0, kFeatures0_BurnAndFreeze);
     } else if (StringEqualsNoCase(key, "ShowXLRItemsInHud")) {
-      return ParseBoolBit(value, &g_config.features0, kFeatures0_ShowXLRItemsInHud);
+      return true;  // tolta: l'HUD mostra sempre i tasti con gli oggetti
     } else if (StringEqualsNoCase(key, "TextSpeed")) {
       g_config.text_speed = (uint8)strtol(value, (char**)NULL, 10);
       return true;
@@ -646,7 +654,8 @@ static bool ParseOneConfigFile(const char *filename, int depth) {
 }
 
 // Opzioni che funzionano solo insieme a un'altra (come nel launcher):
-// - oggetti X, L, R nell'HUD solo con il cambio oggetti con L e R;
+// - L/R solo sui primi 4 oggetti solo con il cambio con L e R;
+// - cambio oggetti con L e R e tasti L e R per gli oggetti non insieme;
 // - mappa del mondo in HD e schermo largo solo con la PPU ottimizzata (il
 //   vecchio renderer disegna 256 pixel e lascia neri i lati);
 // - anche gli effetti HD, la telecamera fluida, la fluidita' oltre i 60 Hz, il
@@ -667,8 +676,18 @@ static void ApplyConfigRules(void) {
     g_config.hurricane_spin = (g_config.features0 & kFeatures0_SwordAndItems) != 0;
   if (!g_stuck_arrows_seen)
     g_config.stuck_arrows = (g_config.features0 & kFeatures0_BurnAndFreeze) != 0;
+  // un ini di prima: ItemSwitchLR accendeva anche gli oggetti su X, L e R;
+  // L e R restano al cambio rapido
+  if (!g_item_on_x_seen)
+    g_config.item_on_x = (g_config.features0 & kFeatures0_SwitchLR) != 0;
+  // cambio oggetti con L e R oppure oggetti su L e R, non tutti e due
+  if (g_config.item_on_lr)
+    g_config.features0 &= ~kFeatures0_SwitchLR;
   if (!(g_config.features0 & kFeatures0_SwitchLR))
-    g_config.features0 &= ~kFeatures0_ShowXLRItemsInHud;
+    g_config.features0 &= ~kFeatures0_SwitchLRLimit;
+  // meno flash: GBA o Virtual Console, non tutti e due
+  if (g_config.features0 & kFeatures0_DimFlashesGba)
+    g_config.features0 &= ~kFeatures0_DimFlashes;
   if (!g_config.new_renderer) {
     g_config.enhanced_mode7 = false;
     g_config.extended_aspect_ratio = 0;

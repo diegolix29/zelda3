@@ -30,5 +30,10 @@ void HdWater_PrepareAttrs(void);
 // HdWater_IsFlood; c (0xRRGGBB): solo i pixel blu dell'interno sono acqua
 bool HdWater_IsTubCell(int pos);
 bool HdWater_IsTubColor(uint32 c);
+// Sul Monte della Morte (chiaro e oscuro) il vuoto oltre i dirupi e' "acqua
+// profonda" per il gioco, ma sullo schermo e' il cielo con le nuvole (marcate
+// anche loro come layer 7): li' l'acqua HD non si disegna e non si congela.
+// Vale anche per le aree vicine viste col mondo continuo. wx, wy: punto del mondo
+bool HdWater_IsSky(int wx, int wy);
 
 #endif  // ZELDA3_HD_WATER_H_

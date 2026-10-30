@@ -577,8 +577,8 @@ int main(int argc, char** argv) {
         hr_inputs |= g_gamepad_buttons;
         hr_inputs = Hd3d_RotateInput(hr_inputs);
         SDL_LockMutex(g_audio_mutex);
-        bool hr_replay = ZeldaRunFrame(hr_inputs);
-        HdMenu_AfterFrame(hr_replay);
+        ZeldaRunFrame(hr_inputs);
+        HdMenu_AfterFrame();
         SDL_UnlockMutex(g_audio_mutex);
         frameCtr++;
         acc -= kFramePeriod;
@@ -605,7 +605,7 @@ int main(int argc, char** argv) {
 
     SDL_LockMutex(g_audio_mutex);
     bool is_replay = ZeldaRunFrame(inputs);
-    HdMenu_AfterFrame(is_replay);
+    HdMenu_AfterFrame();
     SDL_UnlockMutex(g_audio_mutex);
 
     frameCtr++;
@@ -1163,11 +1163,7 @@ static void LoadAssets() {
     offset += size;
   }
 
-  if (g_config.features0 & kFeatures0_DimFlashes) { // patch dungeon floor palettes
-    kPalette_DungBgMain[0x484] = 0x70;
-    kPalette_DungBgMain[0x485] = 0x95;
-    kPalette_DungBgMain[0x486] = 0x57;
-  }
+  Palette_ApplyDimFlashFloor((g_config.features0 & kFeatures0_DimFlashes) != 0);
 }
 
 // Go some steps up and find zelda3.ini

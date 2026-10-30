@@ -2577,7 +2577,14 @@ void Ancilla18_EtherSpell(int k) {  // 88aaa0
     } else {
       flag = step_counter_for_spin_attack == 11;
     }
-    if (flag) {
+    if (enhanced_features0 & kFeatures0_DimFlashesGba) {
+      // GBA 0x8120a88: lampeggia solo l'equipaggiamento, lo sfondo resta scuro.
+      // La GBA sbianca anche i colori 0x7b e 0x7c, che qui sono il pavimento
+      if (flag)
+        Palette_ElectroThemedGear();
+      else
+        LoadActualGearPalettes();
+    } else if (flag) {
       Palette_ElectroThemedGear();
       Filter_Majorly_Whiten_Bg();
     } else {
@@ -2724,6 +2731,7 @@ void EtherSpell_HandleRadialSpin(int k) {  // 88abef
   byte_7E0325 = 0;
   LoadActualGearPalettes();
   Palette_Restore_BG_And_HUD();
+  g_gba_dim_timer = 0;
 }
 
 OamEnt *AncillaDraw_EtherBlitzBall(OamEnt *oam, const AncillaRadialProjection *arp, int s) {  // 88aced

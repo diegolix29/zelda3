@@ -813,14 +813,6 @@ void Module09_00_PlayerControl() {  // 82a53c
 static bool InstantWorldTransition(void);
 static void ResetAncillaKeepThrown(void);
 
-// Distanza dal bordo destro (meno 0x1c) a cui scatta il cambio d'area verso
-// destra. Il gioco lascia 8 pixel prima del bordo, ma ne bastano 4 (gli altri
-// lati ne hanno 4): Link corre al massimo a 4 pixel per frame e i controlli
-// delle caselle arrivano a 16 pixel dalla sua posizione.
-static int RightTransitionExtra(void) {
-  return 4;
-}
-
 // Mondo unico: il cambio d'area scatta quando il centro di Link passa il
 // bordo (con qualche pixel di margine, per non rimbalzare fra due aree
 // stando sul confine), in qualunque modo ci arrivi. Link non si ferma e non
@@ -902,7 +894,7 @@ void OverworldHandleTransitions() {  // 82a9c4
   if (link_x_vel != 0) {
     dir = link_direction & 3;
     t = link_x_coord - kOverworld_OffsetBaseX[BYTE(current_area_of_player) >> 1];
-    if ((y = 2, x = 2, t < 6) || (y = 0, x = 1, t >= (uint16)(overworld_right_bottom_bound_for_scroll + RightTransitionExtra()))) {
+    if ((y = 2, x = 2, t < 6) || (y = 0, x = 1, t >= (uint16)(overworld_right_bottom_bound_for_scroll + 4))) {
 compare:
       if (x == dir && !Link_CheckForEdgeScreenTransition())
         goto after;
