@@ -512,7 +512,13 @@ typedef struct Ground {
   int source;
   int org_x, org_y;   // kSource_World: world pixel of frame pixel (0, 0)
   Ppu *ppu;
+  bool clip;          // indoors: nothing exists outside x0..x1, y0..y1 (ground pixels, end exclusive)
+  int x0, y0, x1, y1;
 } Ground;
+
+static bool Ground_InRoom(const Ground *g, int wx, int wy) {
+  return !g->clip || (wx >= g->x0 && wx < g->x1 && wy >= g->y0 && wy < g->y1);
+}
 
 // One BG layer pixel from video memory: returns the cgram index (0 = transparent)
 static int VramLayerPixel(Ppu *ppu, int layer, int x, int y, int *prio) {
@@ -611,8 +617,39 @@ static uint32 SampleVram(Ppu *ppu, int fx, int fy) {
   return (main & 0xff000000) | out;
 }
 
+// The tilemaps and the room's cells wrap every 512 px, so past the room's edges
+// a ray would find the same room again, in all 8 directions. Clip to the room.
+// A room is at (index & 0xf, index >> 4) * 512 in the game's coordinates, and on
+// a multiple of 512 in ground pixels (the scroll may have wrapped at 1024).
+static void Ground_SetupClip(Ground *g, Ppu *ppu) {
+  static int last_room = -1;   // the room being left in a door scroll
+  int room = dungeon_room_index, rx = room & 0xf, ry = room >> 4;
+  int x0 = rx, y0 = ry, x1 = rx, y1 = ry;
+  if (main_module_index == 7 && submodule_index == 2 && last_room >= 0) {
+    // scrolling between two rooms: both are on screen
+    int ox = last_room & 0xf, oy = last_room >> 4;
+    if (abs(ox - rx) + abs(oy - ry) == 1) {
+      x0 = ox < rx ? ox : rx, x1 = ox > rx ? ox : rx;
+      y0 = oy < ry ? oy : ry, y1 = oy > ry ? oy : ry;
+    }
+  } else {
+    last_room = room;
+  }
+  int ax = g->org_x + (int16)((x0 << 9) - BG2HOFS_copy2) - ppu->objBiasX + ppu->extraLeftRight;
+  int ay = g->org_y + (int16)((y0 << 9) - BG2VOFS_copy2) - ppu->objBiasY;
+  g->x0 = (ax + 256) & ~511, g->x1 = g->x0 + (x1 - x0 + 1) * 512;
+  g->y0 = (ay + 256) & ~511, g->y1 = g->y0 + (y1 - y0 + 1) * 512;
+  // Link outside it: other transitions move the camera and the room index at
+  // different times; better a frame of copies than a black screen
+  int lx = g->org_x + (int16)(link_x_coord + 8 - BG2HOFS_copy2) - ppu->objBiasX + ppu->extraLeftRight;
+  int ly = g->org_y + (int16)(link_y_coord + 16 - BG2VOFS_copy2) - ppu->objBiasY;
+  g->clip = true;
+  g->clip = Ground_InRoom(g, lx, ly);
+}
+
 static void Ground_Setup(Ground *g, Ppu *ppu, int width) {
   g->ppu = ppu;
+  g->clip = false;
   HdWorld_ViewOrigin(width, &g->org_x, &g->org_y);
   if (player_is_indoors) {
     // indoors: the scroll this frame was really drawn with (the game's camera
@@ -620,6 +657,7 @@ static void Ground_Setup(Ground *g, Ppu *ppu, int width) {
     BgLayer *bg = &ppu->bgLayer[1];
     g->org_x = bg->hScroll + ppu->bgBiasX - ppu->extraLeftRight;
     g->org_y = bg->vScroll + ppu->bgBiasY + 1;
+    Ground_SetupClip(g, ppu);
   }
   if (HdWorld_Active()) {
     g->source = kSource_World;
@@ -904,6 +942,11 @@ static void DrawGround(uint32 *out, int pitch_px, const Cam *cm, const Ground *g
       int ui = (int)floorf(u), vi = (int)floorf(v);
       uv[x] = PackUv(ui, vi);
       uint32 px;
+      if (!Ground_InRoom(gr, gr->org_x + ui, gr->org_y + vi)) {
+        dst[x] = fog;
+        kind[x] = kKind_Sky;
+        continue;
+      }
       if (ui >= 0 && ui < w && vi >= 0 && vi < h) {
         px = g_floor[vi * w + ui];
         kind[x] = kKind_Frame;
@@ -2367,7 +2410,10 @@ static bool CastWalls(const Cam *cm, const Ground *gr, const float *d, float t_e
     float te = nx < ny ? nx : ny;
     if (te > t_end) te = t_end;
     int c = (cy & 63) * 64 + (cx & 63);
-    if (g_hmap[c]) {
+    if (gr->clip && ((cx < gr->x0 >> 3 && sx < 0) || (cx >= gr->x1 >> 3 && sx > 0) ||
+                     (cy < gr->y0 >> 3 && sy < 0) || (cy >= gr->y1 >> 3 && sy > 0)))
+      return false;   // left the room for good
+    if (g_hmap[c] && Ground_InRoom(gr, cx * 8, cy * 8)) {
       bool got;
       if (g_partial[c]) {
         got = CastPixels(cm, d, px0, py0, t, te, cx, cy, entered, &zc, hit);
@@ -2603,7 +2649,7 @@ static void DrawTerrainRow(void *ctx, int y) {
       int pi = (wy & 511) * 512 + (wx & 511);
       if (g_partial[((wy >> 3) & 63) * 64 + ((wx >> 3) & 63)] && g_pcover[pi])
         u += g_pcover[pi] * 16;
-      ok = SampleSurface(gr, u, v, &px);
+      ok = Ground_InRoom(gr, wx, wy) && SampleSurface(gr, u, v, &px);
     } else {
       dst[x] = Sky_Color(sk, cm, x + 0.5f, y + 0.5f, x, y);
       g_depth[i] = 1e9f, g_uv[i] = kUvNone, g_kind[i] = kKind_Sky;
