@@ -1763,6 +1763,19 @@ extern bool g_hd_iris_valid;
 static uint16 g_iris_saved_table[240];
 static bool g_iris_override;
 
+// Preghiera nel deserto con lo schermo largo: la finestra del gioco (ellisse
+// attorno a Link) sta nei 256 pixel originali, quindi le fasce ai lati
+// restavano nere e l'ellisse si vedeva tagliata dritta. Si apre la finestra
+// su tutta la riga e l'ellisse si applica dopo su tutta la larghezza, con i
+// bordi veri calcolati dal gioco (messaging.c); fuori resta nero
+extern int16 g_prayer_iris_l[240], g_prayer_iris_r[240];
+static bool g_prayer_override;
+
+static bool PrayerIrisActive(Ppu *ppu) {
+  return main_module_index == 14 && submodule_index == 5 && subsubmodule_index >= 3 &&
+         (HDMAEN_copy & 0x80) && ppu->extraLeftRight > 0;
+}
+
 static bool IrisActive(void) {
   if (!g_fx_soft_iris || !g_hd_iris_valid)
     return false;
@@ -1775,7 +1788,8 @@ static bool IrisActive(void) {
 
 void HdFx_IrisBeforeRender(Ppu *ppu) {
   g_iris_override = IrisActive();
-  if (!g_iris_override)
+  g_prayer_override = !g_iris_override && PrayerIrisActive(ppu);
+  if (!g_iris_override && !g_prayer_override)
     return;
   memcpy(g_iris_saved_table, hdma_table_dynamic, sizeof(g_iris_saved_table));
   for (int i = 0; i < 240; i++)
@@ -1784,7 +1798,7 @@ void HdFx_IrisBeforeRender(Ppu *ppu) {
 }
 
 void HdFx_IrisAfterRender(Ppu *ppu) {
-  if (!g_iris_override)
+  if (!g_iris_override && !g_prayer_override)
     return;
   memcpy(hdma_table_dynamic, g_iris_saved_table, sizeof(g_iris_saved_table));
   ppu->windowFullSides = false;
@@ -1970,7 +1984,28 @@ void HdFx_Mosaic(uint8 *pixels, int pitch, int width, int height) {
   }
 }
 
+static void PrayerIris(uint8 *pixels, int pitch, int width, int height) {
+  Ppu *ppu = g_zenv.ppu;
+  int ext = (width - 256) / 2;
+  // fuori dalla finestra il gioco taglia a nero (CGWSEL)
+  uint32 back = 5u << 24;
+  // come gli sprite, l'ellisse segue Link se la vista e' spostata
+  for (int y = 0; y < height; y++) {
+    int gy = y + ppu->objBiasY;
+    int l = 1, r = 0;
+    if (gy >= 0 && gy < 240)
+      l = g_prayer_iris_l[gy], r = g_prayer_iris_r[gy];
+    l += ext - ppu->objBiasX, r += ext - ppu->objBiasX;
+    uint32 *row = (uint32 *)(pixels + y * pitch);
+    for (int x = 0; x < width; x++)
+      if (x < l || x > r)
+        row[x] = back;
+  }
+}
+
 void HdFx_SoftIris(uint8 *pixels, int pitch, int width, int height) {
+  if (g_prayer_override)
+    PrayerIris(pixels, pitch, width, height);
   if (!g_iris_override)
     return;
   const float kSoft = 8.0f;

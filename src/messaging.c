@@ -402,6 +402,11 @@ void Module1B_SpawnSelect() {  // 828586
   which_starting_point = bak;
 }
 
+// Bordi veri di ogni riga dell'ellisse della preghiera (anche fuori da 0-255,
+// primo > ultimo = riga chiusa): con lo schermo largo l'ellisse si disegna su
+// tutta la larghezza (hd_fx.c, HdFx_PrayerIris)
+int16 g_prayer_iris_l[240], g_prayer_iris_r[240];
+
 void CleanUpAndPrepDesertPrayerHDMA() {  // 82c7b8
   HdmaSetup(0, 0x2c80c, 0x41, 0, (uint8)WH0, 0);
 
@@ -412,6 +417,8 @@ void CleanUpAndPrepDesertPrayerHDMA() {  // 82c7b8
   TSW_copy = TS_copy;
   HDMAEN_copy = 0x80;
   memset(hdma_table_dynamic, 0, 240 * sizeof(uint16));
+  for (int i = 0; i < 240; i++)
+    g_prayer_iris_l[i] = 1, g_prayer_iris_r[i] = 0;  // righe chiuse
 }
 
 void DesertPrayer_InitializeIrisHDMA() {  // 87ea06
@@ -420,6 +427,19 @@ void DesertPrayer_InitializeIrisHDMA() {  // 87ea06
   BYTE(spotlight_var2) = 0;
   DesertPrayer_BuildIrisHDMATable();
   subsubmodule_index++;
+}
+
+// Righe della finestra: 240 e non 224 perche' con lo schermo alto 240 righe
+// (extend_y) la PPU legge la tabella anche per le ultime 16; rimaste a 0 (da
+// 0 a 0) lasciavano vedere la prima colonna del gioco in basso a sinistra
+enum { kIrisRows = 240 };
+
+static void PrayerIris_SetRow(uint16 k, uint16 r0, uint16 r2) {
+  if (k >= kIrisRows)
+    return;
+  bool closed = r0 == 0x100 && r2 == 0x100;
+  g_prayer_iris_l[k] = closed ? 1 : (int16)r0;
+  g_prayer_iris_r[k] = closed ? 0 : (int16)r2;
 }
 
 void DesertPrayer_BuildIrisHDMATable() {  // 87ea27
@@ -438,7 +458,7 @@ void DesertPrayer_BuildIrisHDMATable() {  // 87ea27
       spotlight_var4 = 1;
       spotlight_y_lower = 0;
       r4 = spotlight_y_upper;
-      if (r4 >= 225)
+      if (r4 >= kIrisRows + 1)
         break;
       k = (r4 - 1);
     } else {
@@ -456,14 +476,16 @@ void DesertPrayer_BuildIrisHDMATable() {  // 87ea27
     uint16 r6 = t7 << 8 | t6;
     if (k < 240)
      hdma_table_dynamic[k] = (r6 == 0xffff) ? 0xff : r6;
+    PrayerIris_SetRow(k, r0, r2);
     if (sign16(spotlight_y_lower) || (r4 >= spotlight_y_lower && r4 < spotlight_y_upper)) {
       k = BYTE(spotlight_var4) - 2 + r14;
       if (k < 240)
         hdma_table_dynamic[k] = (r6 == 0xffff) ? 0xff : r6;
+      PrayerIris_SetRow(k, r0, r2);
       spotlight_var4++;
     }
     r4++;
-  } while (sign16(r4) || r4 < 225);
+  } while (sign16(r4) || r4 < kIrisRows + 1);
 
   if (subsubmodule_index != 4)
     return;
@@ -1762,8 +1784,12 @@ void WorldMap_PlayerControl() {  // 8abae6
     sound_effect_2 = 36;
     BYTE(dung_draw_width_indicator) = 8;
 
+    // prospettiva nuova subito, nello stesso fotogramma della vista nuova:
+    // l'originale la preparava al fotogramma dopo (flag 0x80) e per un
+    // fotogramma la vista ridotta si vedeva con la prospettiva ingrandita
     int t = overworld_map_flags ^ 1;
-    overworld_map_flags = t | 0x80;
+    overworld_map_flags = t;
+    OverworldMap_SetupHdma();
     timer_for_mode7_zoom = kOverworldMap_Timer[t];
     if (timer_for_mode7_zoom == 12) {
       BG1VOFS_copy2 = ((link_y_coord_spexit >> 4) - 0x48 & ~1);

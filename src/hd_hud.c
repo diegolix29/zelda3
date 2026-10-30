@@ -61,7 +61,9 @@ static bool HudContext(bool *in_dialog) {
   // 15 e 16: il cerchio che si chiude e si riapre entrando e uscendo
   if (IsPlayModule(mod) || mod == 15 || mod == 16 || MapFadeShowsGame())
     return true;
-  if (mod == 14 && submodule_index == 2 && IsPlayModule(saved_module_for_menu)) {
+  // dialogo (2) e menu di salvataggio aperto con SELECT (11): l'HUD resta
+  if (mod == 14 && (submodule_index == 2 || submodule_index == 11) &&
+      IsPlayModule(saved_module_for_menu)) {
     *in_dialog = true;
     return true;
   }
@@ -79,7 +81,8 @@ static bool HudContext(bool *in_dialog) {
 }
 
 // Inventario e menu di salvataggio aperti durante il gioco: l'HUD originale
-// scorrerebbe insieme ai riquadri, quindi resta nascosto anche li'
+// scorrerebbe insieme ai riquadri, quindi resta nascosto anche li' (quello
+// moderno si vede nel menu di salvataggio e scende con l'inventario)
 static bool InGameMenu(void) {
   return main_module_index == 14 && (submodule_index == 1 || submodule_index == 11) &&
          IsPlayModule(saved_module_for_menu);
@@ -809,8 +812,10 @@ static bool ModernTextAlphabet(void) {
          StringEqualsNoCase(l, "redux");
 }
 
+// dialoghi (14/2) e menu Continua / Salva ed esci aperto con SELECT (14/11)
 bool HdText_ModernActive(void) {
-  return g_config.modern_text && main_module_index == 14 && submodule_index == 2 && ModernTextAlphabet();
+  return g_config.modern_text && main_module_index == 14 &&
+         (submodule_index == 2 || submodule_index == 11) && ModernTextAlphabet();
 }
 
 static void MtClearLine(int line) {
@@ -895,6 +900,10 @@ void HdText_KeepLines(void) {
 void HdText_Tick(void) {
   MtRebuild();
   g_mt_reveal = fminf(g_mt_reveal + kMtRevealStep, (float)g_mt_written + kMtRevealStep * kMtFadeFrames);
+  // menu di SELECT: compare tutto insieme come l'originale, senza far
+  // aspettare la scelta
+  if (submodule_index == 11)
+    HdText_RevealAll();
 }
 
 bool HdText_Revealing(void) {

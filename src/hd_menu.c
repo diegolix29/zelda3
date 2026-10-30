@@ -1196,7 +1196,8 @@ static void DrawButtonHints(Canvas *cv) {
     Hint left[2] = { { kBtn_Dpad, "Scegli" }, { kBtn_Start, "Chiudi" } };
     Hint right[2];
     int nr = 0;
-    if (sram_progress_indicator)
+    // SELECT salva solo con un oggetto su X (Hud_NormalMenu)
+    if (sram_progress_indicator && hud_cur_item_x != 0)
       right[nr++] = (Hint){ kBtn_Select, "Salva" };
     // Le colonne stanno nelle fasce laterali: in 16:9 (71 px) con il margine
     // interno pieno, in 16:10 (51 px) con un margine piu' stretto. In 4:3 non

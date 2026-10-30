@@ -834,18 +834,25 @@ static void PpuDrawMode7Upsampled(Ppu *ppu, uint y) {
     *(uint32*)dst = (mode ? (color & 0xfefefe) >> 1 : color); \
     xcur += m0, ycur += m2, dst += 4;
 
+    // meta' luminosita' solo se lo SNES la applica davvero: fusione dei colori
+    // attiva su BG1 e, sommando lo schermo secondario, non con il solo sfondo
+    // (il Bosco Perduto lascia acceso il dimezzamento per la nebbia e la mappa
+    // del mondo usciva scura)
+    bool half_bg1 = ppu->halfColor && (ppu->mathEnabled & 1) && ppu->preventMathMode != 3 &&
+                    !(ppu->addSubscreen && !ppu->screenEnabled[1]);
+
     if (ppu->m7CloudFill) {
       // mappa del mondo: oltre i 512 pixel della mappa (anche in negativo) si
       // ripetono le nuvole delle prime 8 righe, con il passo di 512 in orizzontale
       // (anche sopra le aree non ancora visitate, con la mappa progressiva)
-      bool half = ppu->halfColor;
+      bool half = half_bg1;
       const uint8 *fog = ppu->m7Fog;
       uint32 color;
       int fogv;
       do {
         DRAW_PIXEL_CLOUD(half);
       } while (dst != dst_end);
-    } else if (!ppu->halfColor) {
+    } else if (!half_bg1) {
       do {
         DRAW_PIXEL(0);
         DRAW_PIXEL(0);

@@ -694,8 +694,10 @@ void Hud_NormalMenu() {  // 8ddf15
     return;
   }
 
-  // Allow select to open the save/exit thing
-  if (joypad1H_last & kJoypadH_Select && sram_progress_indicator) {
+  // SELECT apre Continua / Salva ed esci solo con un oggetto sul tasto X:
+  // allora durante il gioco SELECT e' il tasto della mappa e il salvataggio
+  // si raggiunge da qui. Senza oggetto su X qui SELECT non fa niente
+  if (hud_cur_item_x != 0 && (joypad1H_last & kJoypadH_Select) && sram_progress_indicator) {
     BG3VOFS_copy2 = -8;
     Hud_CloseMenu();
     DisplaySelectMenu();

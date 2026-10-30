@@ -514,8 +514,6 @@ static bool HandleIniConfig(int section, const char *key, char *value) {
     } else if (StringEqualsNoCase(key, "Language")) {
       g_config.language = value;
       return true;
-    } else if (StringEqualsNoCase(key, "AutosaveOnAreaChange") || StringEqualsNoCase(key, "AutosaveSlots")) {
-      return true;  // vecchio salvataggio automatico ai cambi di area, tolto
     }
   } else if (section == 4) {
     if (StringEqualsNoCase(key, "ItemSwitchLR")) {
@@ -545,8 +543,6 @@ static bool HandleIniConfig(int section, const char *key, char *value) {
     } else if (StringEqualsNoCase(key, "StuckArrows")) {
       g_stuck_arrows_seen = true;
       return ParseBool(value, &g_config.stuck_arrows);
-    } else if (StringEqualsNoCase(key, "CollectItemsWithSword") || StringEqualsNoCase(key, "BreakPotsWithSword")) {
-      return true;  // vecchie opzioni, ora dentro SwordAndItemsInteraction
     } else if (StringEqualsNoCase(key, "GoldPotion")) {
       return ParseBoolBit(value, &g_config.features0, kFeatures0_GoldPotion);
     } else if (StringEqualsNoCase(key, "ItemsRefillResources")) {
@@ -591,8 +587,6 @@ static bool HandleIniConfig(int section, const char *key, char *value) {
       return ParseBoolBit(value, &g_config.features0, kFeatures0_ProgressiveMap);
     } else if (StringEqualsNoCase(key, "BurnAndFreezeInteraction")) {
       return ParseBoolBit(value, &g_config.features0, kFeatures0_BurnAndFreeze);
-    } else if (StringEqualsNoCase(key, "ShowXLRItemsInHud")) {
-      return true;  // tolta: l'HUD mostra sempre i tasti con gli oggetti
     } else if (StringEqualsNoCase(key, "TextSpeed")) {
       g_config.text_speed = (uint8)strtol(value, (char**)NULL, 10);
       return true;
