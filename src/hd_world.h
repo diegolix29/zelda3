@@ -117,6 +117,8 @@ int HdWorld_OverlayColorAt(int sx, int sy);
 // Vista 3D (hd_3d.c): origine della vista nel mondo e terreno di un punto
 void HdWorld_ViewOrigin(int width, int *x, int *y);
 bool HdWorld_SampleGround(int wx, int wy, uint32 *out);
+void HdWorld_SampleBegin(int x0, int y0, int x1, int y1);
+void HdWorld_SampleEnd(void);
 // Vista 3D: strato del tempo atmosferico (pioggia, nebbia) tenuto piatto
 bool HdWorld_OverlayPresent(void);
 void HdWorld_SuppressOverlay(bool on);

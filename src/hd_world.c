@@ -3265,19 +3265,59 @@ void HdWorld_ViewOrigin(int width, int *x, int *y) {
   *y = (int16)BG2VOFS_copy + ppu->bgBiasY + 1;
 }
 
+// Il ray caster legge il terreno da piu' thread, e GetAreaImage disegna un'area
+// sovrascrivendo per un momento la RAM e la memoria video del gioco: le immagini
+// del rettangolo (pixel del mondo) si preparano prima, in questo thread, e fino
+// a SampleEnd HdWorld_SampleGround le legge soltanto
+static AreaImage *g_sample_img[64];
+static bool g_sample_threads;
+
+void HdWorld_SampleBegin(int x0, int y0, int x1, int y1) {
+  memset(g_sample_img, 0, sizeof(g_sample_img));
+  for (int sy = IntMax(y0, 0) >> 9; sy <= IntMin(y1, kWorldBottom - 1) >> 9; sy++) {
+    for (int sx = IntMax(x0, 0) >> 9; sx <= IntMin(x1, 4095) >> 9; sx++) {
+      int head = HeadAt(sx * 512, sy * 512);
+      if (head >= 0)
+        g_sample_img[sy * 8 + sx] = GetAreaImage(head);
+    }
+  }
+  // un'immagine riusata per un'area dopo: non vale piu' per la prima
+  for (int sy = IntMax(y0, 0) >> 9; sy <= IntMin(y1, kWorldBottom - 1) >> 9; sy++) {
+    for (int sx = IntMax(x0, 0) >> 9; sx <= IntMin(x1, 4095) >> 9; sx++) {
+      AreaImage *img = g_sample_img[sy * 8 + sx];
+      int head = HeadAt(sx * 512, sy * 512);
+      if (img && (head < 0 || img->key != AreaKey(head)))
+        g_sample_img[sy * 8 + sx] = NULL;
+    }
+  }
+  g_sample_threads = true;
+}
+
+void HdWorld_SampleEnd(void) {
+  g_sample_threads = false;
+}
+
 // Colore del terreno nel punto del mondo, preso dalle immagini delle aree.
 // false: fuori dalla mappa o immagine non ancora pronta
 bool HdWorld_SampleGround(int wx, int wy, uint32 *out) {
   static int last_head = -2;
   static AreaImage *last_img;
-  int head = HeadAt(wx, wy);
-  if (head < 0)
-    return false;
-  if (head != last_head || !last_img || last_img->key != AreaKey(head)) {
-    last_img = GetAreaImage(head);
-    last_head = last_img ? head : -2;
+  AreaImage *img;
+  if (g_sample_threads) {
+    // dai thread del ray caster: solo le immagini preparate (vedi SampleBegin)
+    if (wx < 0 || wy < 0 || wx >= 4096 || wy >= kWorldBottom)
+      return false;
+    img = g_sample_img[(wy >> 9) * 8 + (wx >> 9)];
+  } else {
+    int head = HeadAt(wx, wy);
+    if (head < 0)
+      return false;
+    if (head != last_head || !last_img || last_img->key != AreaKey(head)) {
+      last_img = GetAreaImage(head);
+      last_head = last_img ? head : -2;
+    }
+    img = last_img;
   }
-  AreaImage *img = last_img;
   if (!img)
     return false;
   int ix = wx - img->x, iy = wy - img->y;

@@ -2307,6 +2307,19 @@ enum { kOw_Floor, kOw_Trunk, kOw_Small, kOw_Canopy, kOw_Arch };
 enum { kForestTreeH = 24, kForestMassH = 32, kForestTreeCells = 40 };   // kinds of trunk mass; one this small is a stump
 static const char kOwLetters[] = ".TbCA";
 enum { kForestPlainFace = 255 };   // g_fband: sides of plain fill, top its own art (a hedge)
+enum { kForestSmallTree = 254 };   // g_fband: a small tree's dome; below its rim, the roots' art
+enum { kSmallTreeR = 16, kSmallTreeRim = 14, kSmallTreeDome = 12, kSmallTreeTrunkR = 10 };
+// a small tree is four map16s around its centre, in a 32 pixel block: where the
+// centre lies from this map16's top left corner, in pixels; false = not one
+static bool SmallTreeCentre(int m, int *cx, int *cy) {
+  switch (m) {
+  case 0x08c: case 0x0ba: *cx = 16, *cy = 16; return true;
+  case 0x08d: case 0x0bb: *cx = 0, *cy = 16; return true;
+  case 0x096: case 0x020: *cx = 16, *cy = 0; return true;
+  case 0x097: case 0x021: *cx = 0, *cy = 0; return true;
+  }
+  return false;
+}
 enum { kForestRim = 28, kForestDome = 16, kForestArchBot = 16, kForestUnderside = 18, kForestOverhang = 10, kForestOutlineD = 10 };
 static uint8 g_ow_cls[kGridMax * kGridMax];
 static int g_ow_cells;
@@ -2535,6 +2548,20 @@ static void BuildForestShapes(const uint8 *mass_h) {
       if (!g_fin[i])
         continue;
       int cx = x >> 3, cy = y >> 3, k = g_ow_cls[cy * kGridMax + cx], d = dist[i];
+      int tx, ty, wpx = g_gx0 * 8 + x, wpy = g_gy0 * 8 + y;
+      int tm = ForestMap16(wpx, wpy);
+      if (tm >= 0 && SmallTreeCentre(tm, &tx, &ty)) {
+        // round whatever its neighbours are: inside a hedge it has no edge of
+        // its own for the distance to find
+        float dx = (float)((wpx & 15) - tx) + 0.5f, dy = (float)((wpy & 15) - ty) + 0.5f;
+        float r2 = dx * dx + dy * dy;
+        if (r2 < kSmallTreeR * kSmallTreeR) {
+          g_ftop[i] = (uint8)(kSmallTreeRim + kSmallTreeDome * sqrtf(1.0f - r2 / (kSmallTreeR * kSmallTreeR)));
+          g_fbot[i] = r2 > kSmallTreeTrunkR * kSmallTreeTrunkR ? kSmallTreeRim - 4 : 0;
+          g_fband[i] = kForestSmallTree;
+          continue;
+        }
+      }
       if (mask[i] || k == kOw_Arch) {
         d = crown_dist[i];
         g_ftop[i] = (uint8)(kForestRim + kForestDome * ForestRound(d, 24));
@@ -2571,7 +2598,9 @@ static void BuildForestShapes(const uint8 *mass_h) {
     int down = 0;
     for (int y = 1023; y >= 0; y--) {
       int i = y * 1024 + x;
-      down = g_ftop[i] ? IntMin(down + 1, 256) : 0;
+      // a small tree's front is its own, not a hedge's it stands in
+      bool tree_starts = g_fband[i] == kForestSmallTree && (y == 1023 || g_fband[i + 1024] != kForestSmallTree);
+      down = !g_ftop[i] ? 0 : tree_starts ? 1 : IntMin(down + 1, 256);
       g_fdown[i] = (uint8)(down ? IntMin(down - 1, 255) : 0);
       if (g_ftop[i]) {
         int c = GridCell(g_gx0 + (x >> 3), g_gy0 + (y >> 3));
@@ -2919,7 +2948,10 @@ static bool ShadeWall(const Ground *gr, const WallHit *h, uint32 *out, float *fu
     int top = g_ftop[h->pix], band = g_fband[h->pix], shade = 256;
     float front = floorf(iy) + g_fdown[h->pix] + 1.0f, d = g_fdown[h->pix] + 0.5f;
     float z = h->z, au = ix, av = iy;
-    if (!band) {
+    if (band == kForestSmallTree && z < kSmallTreeRim) {
+      av = front - 0.5f - z * 10.0f / kSmallTreeRim;
+      shade = h->face == kFace_South ? 208 : h->face == kFace_North ? 150 : 176;
+    } else if (!band || band == kForestSmallTree) {
       float in = (top - z) * 0.5f;
       switch (h->face) {
       case kFace_Top: break;
@@ -2928,7 +2960,7 @@ static bool ShadeWall(const Ground *gr, const WallHit *h, uint32 *out, float *fu
       case kFace_West: au = ix + in, shade = 164; break;
       case kFace_North: av = iy + in, shade = 150; break;
       }
-      if (z < kForestRim)
+      if (!band && z < kForestRim)
         shade = shade * 7 / 16;
     } else if (band == kForestPlainFace) {
       // the fill a little way in: the art of the edge itself, a scalloped
@@ -3195,7 +3227,14 @@ static void DrawTerrain(uint32 *out, int pitch_px, const Cam *cm, const Ground *
   TerrainCtx tc = { out, pitch_px, cm, gr, sk, sk->outdoors ? 3u << 24 | sk->horizon : 5u << 24 };
   SDL_AtomicSet(&tc.outside, 0);
   SDL_AtomicSet(&tc.missing, 0);
+  // the workers only read the area pictures, made ready here
+  bool world = gr->source == kSource_World;
+  if (world)
+    HdWorld_SampleBegin(gr->org_x - (int)kFogEnd - 256, gr->org_y - (int)kFogEnd - 256,
+                        gr->org_x + g_w + (int)kFogEnd + 256, gr->org_y + g_h + (int)kFogEnd + 256);
   ParallelRows(g_h, DrawTerrainRow, &tc);
+  if (world)
+    HdWorld_SampleEnd();
   g_stat_outside += SDL_AtomicGet(&tc.outside), g_stat_missing += SDL_AtomicGet(&tc.missing);
 }
 

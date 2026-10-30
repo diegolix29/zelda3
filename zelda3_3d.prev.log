@@ -1,166 +1,55 @@
 [   0.000] 3D view init: View3D=5 (75 deg), View3DCurve=1 (Light), View3DDrawDistance=2 (3x), View3DWalls=1, View3DCamera=1 (Third person), NewRenderer=1, OutputMethod=2, ExtendedAspectRatio=0, ContinuousWorld=1, shader='shaders/foursword/foursword.glslp'
-[   0.392] not gameplay (module=0 sub=1 saved=0 mode=1 tilt=75.0)
-[   3.914] 3D on (module=7 sub=0 saved=7 mode=1 tilt=75.0)
-[   3.914] buffers 256x224
-[   3.918] ground past the screen: video memory (module=7 area=0x00 indoors=1)
-[   3.956] tile classes seeded from 296 rooms in 38 ms: 465 tile numbers, 78 unsure (hd3d_tiles_seed.txt)
-[   3.956] room 97 built: 123 objects (walls 41, ceiling 11, doors 7, rails 8, furniture 0, small 0, blocks 0, tall 7, torches 8)
-[   3.958] room 97: objects read again (it was not built since launch)
-[   3.959] object masks (room 97): 212 cells, 82 box columns, 0 raised pixels (split), 12 floor colors
-[   3.959] ray caster: 7 worker threads
-[   4.178] object masks (room 97): 212 cells, 82 box columns, 0 raised pixels (split), 12 floor colors
-[   6.048] stats: 300 frames, 3D compose 2.616 ms/frame, sprite groups avg 1.0 max 1, tilt 75.0, camera Third person (yaw 18 pitch 78), curve R=3000, past-screen px/frame 13237 (missing 0), source video memory, far sprites avg 0.0 (draw distance 3x, ok), walls on (wall tiles avg 2628), frame 256x224, module=7 area=0x00
-[   8.130] stats: 300 frames, 3D compose 2.228 ms/frame, sprite groups avg 1.0 max 1, tilt 75.0, camera Third person (yaw 1 pitch 75), curve R=3000, past-screen px/frame 10998 (missing 0), source video memory, far sprites avg 0.0 (draw distance 3x, ok), walls on (wall tiles avg 2628), frame 256x224, module=7 area=0x00
-[  10.214] stats: 300 frames, 3D compose 1.629 ms/frame, sprite groups avg 1.0 max 1, tilt 75.0, camera Third person (yaw 30 pitch 80), curve R=3000, past-screen px/frame 13261 (missing 0), source video memory, far sprites avg 0.0 (draw distance 3x, ok), walls on (wall tiles avg 2628), frame 256x224, module=7 area=0x00
-[  12.325] stats: 300 frames, 3D compose 2.902 ms/frame, sprite groups avg 1.0 max 1, tilt 75.0, camera Third person (yaw 174 pitch 70), curve R=3000, past-screen px/frame 14483 (missing 0), source video memory, far sprites avg 0.0 (draw distance 3x, ok), walls on (wall tiles avg 2628), frame 256x224, module=7 area=0x00
-[  14.402] stats: 300 frames, 3D compose 2.257 ms/frame, sprite groups avg 1.0 max 1, tilt 75.0, camera Third person (yaw -178 pitch 71), curve R=3000, past-screen px/frame 20659 (missing 0), source video memory, far sprites avg 0.0 (draw distance 3x, ok), walls on (wall tiles avg 2628), frame 256x224, module=7 area=0x00
-[  16.485] stats: 300 frames, 3D compose 2.525 ms/frame, sprite groups avg 1.0 max 1, tilt 75.0, camera Third person (yaw -10 pitch 73), curve R=3000, past-screen px/frame 13907 (missing 0), source video memory, far sprites avg 0.0 (draw distance 3x, ok), walls on (wall tiles avg 2628), frame 256x224, module=7 area=0x00
-[  18.569] stats: 300 frames, 3D compose 2.624 ms/frame, sprite groups avg 1.0 max 1, tilt 75.0, camera Third person (yaw -38 pitch 69), curve R=3000, past-screen px/frame 1935 (missing 0), source video memory, far sprites avg 0.0 (draw distance 3x, ok), walls on (wall tiles avg 2628), frame 256x224, module=7 area=0x00
-[  20.651] stats: 300 frames, 3D compose 2.822 ms/frame, sprite groups avg 1.0 max 1, tilt 75.0, camera Third person (yaw -139 pitch 71), curve R=3000, past-screen px/frame 5300 (missing 0), source video memory, far sprites avg 0.0 (draw distance 3x, ok), walls on (wall tiles avg 2628), frame 256x224, module=7 area=0x00
-[  22.134] room 96 built: 94 objects (walls 36, ceiling 9, doors 6, rails 10, furniture 0, small 2, blocks 1, tall 0, torches 2)
-[  22.136] object masks (room 96): 125 cells, 29 box columns, 116 raised pixels (split), 16 floor colors
-[  22.150] object masks (room 96): 125 cells, 29 box columns, 116 raised pixels (split), 16 floor colors
-[  22.171] object masks (room 96): 125 cells, 29 box columns, 116 raised pixels (split), 15 floor colors
-[  22.185] object masks (room 96): 125 cells, 40 box columns, 72 raised pixels (split), 15 floor colors
-[  22.205] object masks (room 96): 125 cells, 40 box columns, 72 raised pixels (split), 15 floor colors
-[  22.219] object masks (room 96): 125 cells, 47 box columns, 44 raised pixels (split), 16 floor colors
-[  22.233] object masks (room 96): 125 cells, 47 box columns, 44 raised pixels (split), 16 floor colors
-[  22.254] object masks (room 96): 125 cells, 48 box columns, 36 raised pixels (split), 17 floor colors
-[  22.268] object masks (room 96): 125 cells, 48 box columns, 36 raised pixels (split), 17 floor colors
-[  22.289] object masks (room 96): 125 cells, 48 box columns, 36 raised pixels (split), 17 floor colors
-[  22.303] object masks (room 96): 125 cells, 48 box columns, 36 raised pixels (split), 17 floor colors
-[  22.317] object masks (room 96): 125 cells, 48 box columns, 36 raised pixels (split), 16 floor colors
-[  22.338] object masks (room 96): 125 cells, 48 box columns, 36 raised pixels (split), 17 floor colors
-[  22.351] object masks (room 96): 125 cells, 48 box columns, 36 raised pixels (split), 16 floor colors
-[  22.372] object masks (room 96): 125 cells, 48 box columns, 36 raised pixels (split), 16 floor colors
-[  22.386] object masks (room 96): 125 cells, 48 box columns, 36 raised pixels (split), 16 floor colors
-[  22.400] object masks (room 96): 125 cells, 48 box columns, 36 raised pixels (split), 16 floor colors
-[  22.421] object masks (room 96): 125 cells, 48 box columns, 36 raised pixels (split), 16 floor colors
-[  22.435] object masks (room 96): 125 cells, 49 box columns, 32 raised pixels (split), 16 floor colors
-[  22.455] object masks (room 96): 125 cells, 49 box columns, 32 raised pixels (split), 16 floor colors
-[  22.469] object masks (room 96): 125 cells, 49 box columns, 32 raised pixels (split), 16 floor colors
-[  22.483] object masks (room 96): 125 cells, 49 box columns, 32 raised pixels (split), 15 floor colors
-[  22.504] object masks (room 96): 125 cells, 50 box columns, 0 raised pixels (split), 15 floor colors
-[  22.518] object masks (room 96): 125 cells, 50 box columns, 0 raised pixels (split), 17 floor colors
-[  22.539] object masks (room 96): 125 cells, 50 box columns, 0 raised pixels (split), 18 floor colors
-[  22.636] object masks (room 96): 125 cells, 50 box columns, 0 raised pixels (split), 19 floor colors
-[  22.734] stats: 300 frames, 3D compose 3.014 ms/frame, sprite groups avg 1.0 max 1, tilt 75.0, camera Third person (yaw -93 pitch 68), curve R=3000, past-screen px/frame 11508 (missing 0), source video memory, far sprites avg 0.0 (draw distance 3x, ok), walls on (wall tiles avg 2559), frame 256x224, module=7 area=0x00
-[  22.845] object masks (room 96): 125 cells, 50 box columns, 0 raised pixels (split), 19 floor colors
-[  24.818] stats: 300 frames, 3D compose 2.311 ms/frame, sprite groups avg 1.0 max 1, tilt 75.0, camera Third person (yaw 171 pitch 67), curve R=3000, past-screen px/frame 15219 (missing 0), source video memory, far sprites avg 0.0 (draw distance 3x, ok), walls on (wall tiles avg 2090), frame 256x224, module=7 area=0x00
-[  26.901] stats: 300 frames, 3D compose 2.717 ms/frame, sprite groups avg 1.0 max 1, tilt 75.0, camera Third person (yaw 76 pitch 67), curve R=3000, past-screen px/frame 10521 (missing 0), source video memory, far sprites avg 0.0 (draw distance 3x, ok), walls on (wall tiles avg 2090), frame 256x224, module=7 area=0x00
-[  27.217] room 97 built: 123 objects (walls 41, ceiling 11, doors 7, rails 8, furniture 0, small 0, blocks 0, tall 7, torches 8)
-[  27.219] object masks (room 97): 185 cells, 45 box columns, 1256 raised pixels (split), 15 floor colors
-[  27.233] object masks (room 97): 187 cells, 45 box columns, 1256 raised pixels (split), 15 floor colors
-[  27.254] object masks (room 97): 188 cells, 46 box columns, 1064 raised pixels (split), 15 floor colors
-[  27.268] object masks (room 97): 188 cells, 46 box columns, 1064 raised pixels (split), 15 floor colors
-[  27.289] object masks (room 97): 188 cells, 56 box columns, 1048 raised pixels (split), 15 floor colors
-[  27.302] object masks (room 97): 188 cells, 56 box columns, 1072 raised pixels (split), 14 floor colors
-[  27.316] object masks (room 97): 188 cells, 62 box columns, 496 raised pixels (split), 14 floor colors
-[  27.337] object masks (room 97): 188 cells, 62 box columns, 496 raised pixels (split), 14 floor colors
-[  27.351] object masks (room 97): 188 cells, 62 box columns, 496 raised pixels (split), 14 floor colors
-[  27.372] object masks (room 97): 200 cells, 74 box columns, 256 raised pixels (split), 14 floor colors
-[  27.386] object masks (room 97): 212 cells, 74 box columns, 256 raised pixels (split), 14 floor colors
-[  27.400] object masks (room 97): 212 cells, 74 box columns, 256 raised pixels (split), 14 floor colors
-[  27.421] object masks (room 97): 212 cells, 74 box columns, 256 raised pixels (split), 14 floor colors
-[  27.434] object masks (room 97): 212 cells, 74 box columns, 256 raised pixels (split), 14 floor colors
-[  27.455] object masks (room 97): 212 cells, 74 box columns, 256 raised pixels (split), 14 floor colors
-[  27.469] object masks (room 97): 212 cells, 76 box columns, 192 raised pixels (split), 14 floor colors
-[  27.483] object masks (room 97): 212 cells, 76 box columns, 192 raised pixels (split), 13 floor colors
-[  27.504] object masks (room 97): 212 cells, 78 box columns, 128 raised pixels (split), 13 floor colors
-[  27.518] object masks (room 97): 212 cells, 78 box columns, 128 raised pixels (split), 14 floor colors
-[  27.539] object masks (room 97): 212 cells, 80 box columns, 64 raised pixels (split), 14 floor colors
-[  27.552] object masks (room 97): 212 cells, 80 box columns, 64 raised pixels (split), 14 floor colors
-[  27.566] object masks (room 97): 212 cells, 82 box columns, 0 raised pixels (split), 14 floor colors
-[  27.587] object masks (room 97): 212 cells, 82 box columns, 0 raised pixels (split), 14 floor colors
-[  27.601] object masks (room 97): 212 cells, 82 box columns, 0 raised pixels (split), 14 floor colors
-[  27.622] object masks (room 97): 212 cells, 82 box columns, 0 raised pixels (split), 14 floor colors
-[  27.636] object masks (room 97): 212 cells, 82 box columns, 0 raised pixels (split), 14 floor colors
-[  27.650] object masks (room 97): 212 cells, 82 box columns, 0 raised pixels (split), 14 floor colors
-[  27.719] object masks (room 97): 212 cells, 82 box columns, 0 raised pixels (split), 12 floor colors
-[  27.927] object masks (room 97): 212 cells, 82 box columns, 0 raised pixels (split), 12 floor colors
-[  28.984] stats: 300 frames, 3D compose 2.759 ms/frame, sprite groups avg 1.0 max 1, tilt 75.0, camera Third person (yaw 109 pitch 61), curve R=3000, past-screen px/frame 15212 (missing 0), source video memory, far sprites avg 0.0 (draw distance 3x, ok), walls on (wall tiles avg 2538), frame 256x224, module=7 area=0x00
-[  30.752] room 96 built: 94 objects (walls 36, ceiling 9, doors 6, rails 10, furniture 0, small 2, blocks 1, tall 0, torches 2)
-[  30.754] object masks (room 96): 125 cells, 29 box columns, 116 raised pixels (split), 16 floor colors
-[  30.768] object masks (room 96): 125 cells, 29 box columns, 116 raised pixels (split), 16 floor colors
-[  30.789] object masks (room 96): 125 cells, 29 box columns, 116 raised pixels (split), 15 floor colors
-[  30.802] object masks (room 96): 125 cells, 40 box columns, 72 raised pixels (split), 15 floor colors
-[  30.816] object masks (room 96): 125 cells, 40 box columns, 72 raised pixels (split), 15 floor colors
-[  30.837] object masks (room 96): 125 cells, 47 box columns, 44 raised pixels (split), 16 floor colors
-[  30.851] object masks (room 96): 125 cells, 47 box columns, 44 raised pixels (split), 16 floor colors
-[  30.872] object masks (room 96): 125 cells, 48 box columns, 36 raised pixels (split), 17 floor colors
-[  30.886] object masks (room 96): 125 cells, 48 box columns, 36 raised pixels (split), 17 floor colors
-[  30.900] object masks (room 96): 125 cells, 48 box columns, 36 raised pixels (split), 17 floor colors
-[  30.920] object masks (room 96): 125 cells, 48 box columns, 36 raised pixels (split), 17 floor colors
-[  30.934] object masks (room 96): 125 cells, 48 box columns, 36 raised pixels (split), 16 floor colors
-[  30.955] object masks (room 96): 125 cells, 48 box columns, 36 raised pixels (split), 17 floor colors
-[  30.969] object masks (room 96): 125 cells, 48 box columns, 36 raised pixels (split), 16 floor colors
-[  30.983] object masks (room 96): 125 cells, 48 box columns, 36 raised pixels (split), 16 floor colors
-[  31.004] object masks (room 96): 125 cells, 48 box columns, 36 raised pixels (split), 16 floor colors
-[  31.018] object masks (room 96): 125 cells, 48 box columns, 36 raised pixels (split), 16 floor colors
-[  31.038] object masks (room 96): 125 cells, 48 box columns, 36 raised pixels (split), 16 floor colors
-[  31.053] object masks (room 96): 125 cells, 49 box columns, 32 raised pixels (split), 16 floor colors
-[  31.066] object masks (room 96): 125 cells, 49 box columns, 32 raised pixels (split), 16 floor colors
-[  31.068] stats: 300 frames, 3D compose 2.584 ms/frame, sprite groups avg 1.0 max 1, tilt 75.0, camera Third person (yaw -106 pitch 65), curve R=3000, past-screen px/frame 20165 (missing 0), source video memory, far sprites avg 0.0 (draw distance 3x, ok), walls on (wall tiles avg 2623), frame 256x224, module=7 area=0x00
-[  31.087] object masks (room 96): 125 cells, 49 box columns, 32 raised pixels (split), 16 floor colors
-[  31.101] object masks (room 96): 125 cells, 49 box columns, 32 raised pixels (split), 15 floor colors
-[  31.122] object masks (room 96): 125 cells, 50 box columns, 0 raised pixels (split), 15 floor colors
-[  31.136] object masks (room 96): 125 cells, 50 box columns, 0 raised pixels (split), 17 floor colors
-[  31.150] object masks (room 96): 125 cells, 50 box columns, 0 raised pixels (split), 18 floor colors
-[  31.254] object masks (room 96): 125 cells, 50 box columns, 0 raised pixels (split), 19 floor colors
-[  31.462] object masks (room 96): 125 cells, 50 box columns, 0 raised pixels (split), 19 floor colors
-[  33.151] stats: 300 frames, 3D compose 2.208 ms/frame, sprite groups avg 1.0 max 1, tilt 75.0, camera Third person (yaw -25 pitch 63), curve R=3000, past-screen px/frame 12595 (missing 0), source video memory, far sprites avg 0.0 (draw distance 3x, ok), walls on (wall tiles avg 2098), frame 256x224, module=7 area=0x00
-[  34.400] object masks (room 96): 125 cells, 48 box columns, 96 raised pixels (split), 19 floor colors
-[  34.608] object masks (room 96): 125 cells, 48 box columns, 96 raised pixels (split), 19 floor colors
-[  35.233] stats: 300 frames, 3D compose 2.163 ms/frame, sprite groups avg 1.7 max 3, tilt 75.0, camera Third person (yaw 52 pitch 63), curve R=3000, past-screen px/frame 19192 (missing 0), source video memory, far sprites avg 0.0 (draw distance 3x, ok), walls on (wall tiles avg 2090), frame 256x224, module=7 area=0x00
-[  37.317] stats: 300 frames, 3D compose 2.484 ms/frame, sprite groups avg 2.0 max 2, tilt 75.0, camera Third person (yaw -166 pitch 63), curve R=3000, past-screen px/frame 20779 (missing 0), source video memory, far sprites avg 0.0 (draw distance 3x, ok), walls on (wall tiles avg 2090), frame 256x224, module=7 area=0x00
-[  39.401] stats: 300 frames, 3D compose 2.830 ms/frame, sprite groups avg 2.0 max 2, tilt 75.0, camera Third person (yaw 175 pitch 73), curve R=3000, past-screen px/frame 17918 (missing 0), source video memory, far sprites avg 0.0 (draw distance 3x, ok), walls on (wall tiles avg 2090), frame 256x224, module=7 area=0x00
-[  41.477] stats: 300 frames, 3D compose 2.588 ms/frame, sprite groups avg 2.1 max 5, tilt 75.0, camera Third person (yaw 170 pitch 65), curve R=3000, past-screen px/frame 22452 (missing 0), source video memory, far sprites avg 0.0 (draw distance 3x, ok), walls on (wall tiles avg 2090), frame 256x224, module=7 area=0x00
-[  43.560] stats: 300 frames, 3D compose 1.821 ms/frame, sprite groups avg 1.0 max 1, tilt 75.0, camera Third person (yaw 173 pitch 60), curve R=3000, past-screen px/frame 17893 (missing 0), source video memory, far sprites avg 0.0 (draw distance 3x, ok), walls on (wall tiles avg 2090), frame 256x224, module=7 area=0x00
-[  45.643] stats: 300 frames, 3D compose 1.463 ms/frame, sprite groups avg 1.0 max 1, tilt 75.0, camera Third person (yaw 1 pitch 59), curve R=3000, past-screen px/frame 9301 (missing 0), source video memory, far sprites avg 0.0 (draw distance 3x, ok), walls on (wall tiles avg 2090), frame 256x224, module=7 area=0x00
-[  47.727] stats: 300 frames, 3D compose 1.823 ms/frame, sprite groups avg 1.0 max 1, tilt 75.0, camera Third person (yaw 1 pitch 71), curve R=3000, past-screen px/frame 12776 (missing 0), source video memory, far sprites avg 0.0 (draw distance 3x, ok), walls on (wall tiles avg 2090), frame 256x224, module=7 area=0x00
-[  49.809] stats: 300 frames, 3D compose 2.031 ms/frame, sprite groups avg 1.0 max 1, tilt 75.0, camera Third person (yaw 1 pitch 60), curve R=3000, past-screen px/frame 15291 (missing 0), source video memory, far sprites avg 0.0 (draw distance 3x, ok), walls on (wall tiles avg 2090), frame 256x224, module=7 area=0x00
-[  51.892] stats: 300 frames, 3D compose 1.715 ms/frame, sprite groups avg 1.0 max 1, tilt 75.0, camera Third person (yaw 1 pitch 60), curve R=3000, past-screen px/frame 11593 (missing 0), source video memory, far sprites avg 0.0 (draw distance 3x, ok), walls on (wall tiles avg 2090), frame 256x224, module=7 area=0x00
-[  53.586] object masks (room 80): 121 cells, 48 box columns, 0 raised pixels (split), 19 floor colors
-[  53.598] room 80 built: 78 objects (walls 27, ceiling 13, doors 2, rails 0, furniture 0, small 2, blocks 0, tall 2, torches 0)
-[  53.600] object masks (room 80): 16 cells, 2 box columns, 240 raised pixels (split), 15 floor colors
-[  53.621] object masks (room 80): 20 cells, 2 box columns, 240 raised pixels (split), 15 floor colors
-[  53.635] object masks (room 80): 20 cells, 2 box columns, 240 raised pixels (split), 15 floor colors
-[  53.656] object masks (room 80): 20 cells, 2 box columns, 240 raised pixels (split), 16 floor colors
-[  53.670] object masks (room 80): 20 cells, 2 box columns, 240 raised pixels (split), 16 floor colors
-[  53.683] object masks (room 80): 20 cells, 2 box columns, 240 raised pixels (split), 16 floor colors
-[  53.704] object masks (room 80): 20 cells, 2 box columns, 240 raised pixels (split), 15 floor colors
-[  53.718] object masks (room 80): 20 cells, 2 box columns, 240 raised pixels (split), 15 floor colors
-[  53.739] object masks (room 80): 20 cells, 2 box columns, 240 raised pixels (split), 15 floor colors
-[  53.753] object masks (room 80): 20 cells, 2 box columns, 240 raised pixels (split), 15 floor colors
-[  53.767] object masks (room 80): 20 cells, 2 box columns, 240 raised pixels (split), 15 floor colors
-[  53.788] object masks (room 80): 20 cells, 2 box columns, 240 raised pixels (split), 15 floor colors
-[  53.801] object masks (room 80): 20 cells, 2 box columns, 240 raised pixels (split), 15 floor colors
-[  53.822] object masks (room 80): 20 cells, 2 box columns, 240 raised pixels (split), 15 floor colors
-[  53.836] object masks (room 80): 20 cells, 2 box columns, 240 raised pixels (split), 15 floor colors
-[  53.850] object masks (room 80): 20 cells, 2 box columns, 240 raised pixels (split), 15 floor colors
-[  53.871] object masks (room 80): 20 cells, 2 box columns, 240 raised pixels (split), 15 floor colors
-[  53.885] object masks (room 80): 20 cells, 2 box columns, 240 raised pixels (split), 15 floor colors
-[  53.906] object masks (room 80): 20 cells, 2 box columns, 240 raised pixels (split), 15 floor colors
-[  53.919] object masks (room 80): 20 cells, 2 box columns, 240 raised pixels (split), 14 floor colors
-[  53.933] object masks (room 80): 20 cells, 2 box columns, 240 raised pixels (split), 14 floor colors
-[  53.954] object masks (room 80): 20 cells, 2 box columns, 240 raised pixels (split), 14 floor colors
-[  53.968] object masks (room 80): 20 cells, 2 box columns, 240 raised pixels (split), 14 floor colors
-[  53.975] stats: 300 frames, 3D compose 1.935 ms/frame, sprite groups avg 1.5 max 4, tilt 75.0, camera Third person (yaw 1 pitch 60), curve R=3000, past-screen px/frame 7172 (missing 0), source video memory, far sprites avg 0.5 (draw distance 3x, ok), walls on (wall tiles avg 2131), frame 256x224, module=7 area=0x00
-[  53.989] object masks (room 80): 20 cells, 2 box columns, 240 raised pixels (split), 14 floor colors
-[  54.003] object masks (room 80): 20 cells, 2 box columns, 240 raised pixels (split), 14 floor colors
-[  54.017] object masks (room 80): 20 cells, 2 box columns, 240 raised pixels (split), 14 floor colors
-[  54.038] object masks (room 80): 20 cells, 2 box columns, 240 raised pixels (split), 14 floor colors
-[  54.100] object masks (room 80): 20 cells, 8 box columns, 0 raised pixels (split), 17 floor colors
-[  54.308] object masks (room 80): 20 cells, 8 box columns, 0 raised pixels (split), 17 floor colors
-[  56.058] stats: 300 frames, 3D compose 1.335 ms/frame, sprite groups avg 4.0 max 4, tilt 75.0, camera Third person (yaw 1 pitch 60), curve R=3000, past-screen px/frame 19638 (missing 0), source video memory, far sprites avg 2.1 (draw distance 3x, ok), walls on (wall tiles avg 2414), frame 256x224, module=7 area=0x00
-[  56.765] room 96 built: 94 objects (walls 36, ceiling 9, doors 6, rails 10, furniture 0, small 2, blocks 1, tall 0, torches 2)
-[  56.767] object masks (room 96): 53 cells, 11 box columns, 0 raised pixels (split), 19 floor colors
-[  56.787] object masks (room 96): 55 cells, 11 box columns, 0 raised pixels (split), 19 floor colors
-[  56.802] object masks (room 96): 67 cells, 11 box columns, 0 raised pixels (split), 19 floor colors
-[  56.822] object masks (room 96): 82 cells, 25 box columns, 0 raised pixels (split), 19 floor colors
-[  56.836] object masks (room 96): 82 cells, 25 box columns, 0 raised pixels (split), 19 floor colors
-[  56.850] object masks (room 96): 97 cells, 40 box columns, 0 raised pixels (split), 19 floor colors
-[  56.871] object masks (room 96): 109 cells, 40 box columns, 0 raised pixels (split), 19 floor colors
-[  56.885] object masks (room 96): 110 cells, 39 box columns, 0 raised pixels (split), 19 floor colors
-[  56.906] object masks (room 96): 110 cells, 39 box columns, 0 raised pixels (split), 18 floor colors
-[  57.303] object masks (room 96): 110 cells, 39 box columns, 0 raised pixels (split), 18 floor colors
+[   0.377] not gameplay (module=0 sub=1 saved=0 mode=1 tilt=75.0)
+[   3.009] 3D on (module=7 sub=0 saved=7 mode=1 tilt=75.0)
+[   3.009] buffers 256x224
+[   3.012] ground past the screen: video memory (module=7 area=0x00 indoors=1)
+[   3.053] tile classes seeded from 296 rooms in 41 ms: 465 tile numbers, 78 unsure (hd3d_tiles_seed.txt)
+[   3.053] room 97 built: 123 objects (walls 41, ceiling 11, doors 7, rails 8, furniture 0, small 0, blocks 0, tall 7, torches 8)
+[   3.055] room 97: objects read again (it was not built since launch)
+[   3.056] object masks (room 97): 212 cells, 82 box columns, 0 raised pixels (split), 12 floor colors
+[   3.056] ray caster: 7 worker threads
+[   3.282] object masks (room 97): 212 cells, 82 box columns, 0 raised pixels (split), 12 floor colors
+[   4.375] room 17 built: 82 objects (walls 31, ceiling 15, doors 3, rails 0, furniture 0, small 9, blocks 1, tall 0, torches 0)
+[   4.375] room 17: objects read again (it was not built since launch)
+[   4.376] object masks (room 17): 40 cells, 20 box columns, 0 raised pixels (split), 12 floor colors
+[   4.574] object masks (room 17): 40 cells, 20 box columns, 0 raised pixels (split), 12 floor colors
+[   5.783] room 97 built: 123 objects (walls 41, ceiling 11, doors 7, rails 8, furniture 0, small 0, blocks 0, tall 7, torches 8)
+[   5.783] room 97: objects read again (it was not built since launch)
+[   5.784] object masks (room 97): 212 cells, 82 box columns, 0 raised pixels (split), 12 floor colors
+[   5.976] object masks (room 97): 212 cells, 82 box columns, 0 raised pixels (split), 12 floor colors
+[   5.991] stats: 300 frames, 3D compose 2.056 ms/frame, sprite groups avg 2.7 max 5, tilt 75.0, camera Third person (yaw -0 pitch 62), curve R=3000, past-screen px/frame 12066 (missing 0), source video memory, far sprites avg 0.1 (draw distance 3x, ok), walls on (wall tiles avg 2490), frame 256x224, module=7 area=0x00
+[   6.708] room 96 built: 94 objects (walls 36, ceiling 9, doors 6, rails 10, furniture 0, small 2, blocks 1, tall 0, torches 2)
+[   6.708] room 96: objects read again (it was not built since launch)
+[   6.710] object masks (room 96): 125 cells, 50 box columns, 0 raised pixels (split), 19 floor colors
+[   6.907] object masks (room 96): 125 cells, 50 box columns, 0 raised pixels (split), 19 floor colors
+[   7.625] room 1 built: 66 objects (walls 24, ceiling 12, doors 2, rails 0, furniture 0, small 0, blocks 0, tall 2, torches 0)
+[   7.625] room 1: objects read again (it was not built since launch)
+[   7.626] object masks (room 1): 24 cells, 8 box columns, 0 raised pixels (split), 14 floor colors
+[   7.823] object masks (room 1): 24 cells, 8 box columns, 0 raised pixels (split), 14 floor colors
+[   8.494] room 65 built: 57 objects (walls 18, ceiling 17, doors 1, rails 0, furniture 0, small 4, blocks 0, tall 0, torches 3)
+[   8.494] room 65: objects read again (it was not built since launch)
+[   8.494] object masks (room 65): 28 cells, 12 box columns, 0 raised pixels (split), 12 floor colors
+[   8.691] object masks (room 65): 28 cells, 12 box columns, 0 raised pixels (split), 12 floor colors
+[   9.442] stats: 300 frames, 3D compose 1.751 ms/frame, sprite groups avg 2.4 max 4, tilt 75.0, camera Third person (yaw -3 pitch 62), curve R=3000, past-screen px/frame 7928 (missing 0), source video memory, far sprites avg 0.3 (draw distance 3x, ok), walls on (wall tiles avg 2573), frame 256x224, module=7 area=0x00
+[   9.782] room 96 built: 94 objects (walls 36, ceiling 9, doors 6, rails 10, furniture 0, small 2, blocks 1, tall 0, torches 2)
+[   9.782] room 96: objects read again (it was not built since launch)
+[   9.784] object masks (room 96): 125 cells, 50 box columns, 0 raised pixels (split), 19 floor colors
+[   9.983] object masks (room 96): 125 cells, 50 box columns, 0 raised pixels (split), 19 floor colors
+[  12.516] room 97 built: 123 objects (walls 41, ceiling 11, doors 7, rails 8, furniture 0, small 0, blocks 0, tall 7, torches 8)
+[  12.516] room 97: objects read again (it was not built since launch)
+[  12.517] object masks (room 97): 212 cells, 82 box columns, 0 raised pixels (split), 12 floor colors
+[  12.712] object masks (room 97): 212 cells, 82 box columns, 0 raised pixels (split), 12 floor colors
+[  13.303] stats: 300 frames, 3D compose 2.438 ms/frame, sprite groups avg 1.7 max 4, tilt 75.0, camera Third person (yaw -3 pitch 62), curve R=3000, past-screen px/frame 9657 (missing 0), source video memory, far sprites avg 0.6 (draw distance 3x, ok), walls on (wall tiles avg 2335), frame 256x224, module=7 area=0x00
+[  15.380] stats: 300 frames, 3D compose 2.330 ms/frame, sprite groups avg 1.0 max 1, tilt 75.0, camera Third person (yaw -178 pitch 62), curve R=3000, past-screen px/frame 15187 (missing 392), source video memory, far sprites avg 0.0 (draw distance 3x, ok), walls on (wall tiles avg 2628), frame 256x224, module=7 area=0x00
+[  17.120] weather layer kept flat over the view (area=0x1b)
+[  17.123] ground past the screen: world pictures (module=16 area=0x1b indoors=0)
+[  17.518] stats: 300 frames, 3D compose 1.506 ms/frame, sprite groups avg 1.6 max 5, tilt 75.0, camera Third person (yaw -179 pitch 62), curve R=3000, past-screen px/frame 24621 (missing 5781), source world pictures, far sprites avg 0.6 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 2119), frame 256x224, module=9 area=0x1b
+[  19.602] stats: 300 frames, 3D compose 1.218 ms/frame, sprite groups avg 7.7 max 9, tilt 75.0, camera Third person (yaw -162 pitch 69), curve R=3000, past-screen px/frame 9676 (missing 0), source world pictures, far sprites avg 5.4 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 0), frame 256x224, module=9 area=0x1b
+[  21.685] stats: 300 frames, 3D compose 1.220 ms/frame, sprite groups avg 9.1 max 11, tilt 75.0, camera Third person (yaw -133 pitch 69), curve R=3000, past-screen px/frame 9564 (missing 0), source world pictures, far sprites avg 5.8 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 0), frame 256x224, module=9 area=0x1b
+[  23.760] stats: 300 frames, 3D compose 1.245 ms/frame, sprite groups avg 8.8 max 9, tilt 75.0, camera Third person (yaw -159 pitch 69), curve R=3000, past-screen px/frame 9404 (missing 0), source world pictures, far sprites avg 6.0 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 0), frame 256x224, module=9 area=0x1b
+[  25.844] stats: 300 frames, 3D compose 1.202 ms/frame, sprite groups avg 7.7 max 9, tilt 75.0, camera Third person (yaw 163 pitch 69), curve R=3000, past-screen px/frame 9565 (missing 0), source world pictures, far sprites avg 5.8 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 0), frame 256x224, module=9 area=0x1b
+[  27.927] stats: 300 frames, 3D compose 1.245 ms/frame, sprite groups avg 7.0 max 7, tilt 75.0, camera Third person (yaw 163 pitch 69), curve R=3000, past-screen px/frame 9575 (missing 0), source world pictures, far sprites avg 5.0 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 0), frame 256x224, module=9 area=0x1b
+[  30.010] stats: 300 frames, 3D compose 1.191 ms/frame, sprite groups avg 6.6 max 7, tilt 75.0, camera Third person (yaw -104 pitch 71), curve R=3000, past-screen px/frame 8907 (missing 0), source world pictures, far sprites avg 5.0 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 0), frame 256x224, module=9 area=0x1b
+[  32.094] stats: 300 frames, 3D compose 1.227 ms/frame, sprite groups avg 6.0 max 6, tilt 75.0, camera Third person (yaw 31 pitch 74), curve R=3000, past-screen px/frame 7181 (missing 0), source world pictures, far sprites avg 5.0 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 0), frame 256x224, module=9 area=0x1b
+[  34.177] stats: 300 frames, 3D compose 1.158 ms/frame, sprite groups avg 6.0 max 6, tilt 75.0, camera Third person (yaw 49 pitch 72), curve R=3000, past-screen px/frame 7163 (missing 0), source world pictures, far sprites avg 5.0 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 0), frame 256x224, module=9 area=0x1b
+[  36.260] stats: 300 frames, 3D compose 1.219 ms/frame, sprite groups avg 6.0 max 6, tilt 75.0, camera Third person (yaw 88 pitch 71), curve R=3000, past-screen px/frame 7498 (missing 0), source world pictures, far sprites avg 5.0 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 0), frame 256x224, module=9 area=0x1b
