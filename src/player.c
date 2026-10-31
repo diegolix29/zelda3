@@ -15,6 +15,8 @@
 #include "sprite_main.h"
 #include "hd_burn.h"
 #include "hd_world.h"
+#include "hd_fx.h"
+#include "hd_rumble.h"
 
 static bool g_ApplyLinksMovementToCamera_called;
 
@@ -219,7 +221,10 @@ void Link_ControlHandler() {  // 87807f
         Ancilla_Sfx2_Near(38);
         number_of_times_hurt_by_sprites++;
         uint8 new_dmg = link_health_current - dmg;
+        // vibrazione: il danno e' in ottavi di cuore
+        HdRumble(dmg >= 16 ? kRumble_HurtBig : dmg >= 8 ? kRumble_HurtMedium : kRumble_HurtSmall);
         if (new_dmg == 0 || new_dmg >= 0xa8) {
+          HdRumble(kRumble_Death);
           mapbak_TM = TM_copy;
           mapbak_TS = TS_copy;
           saved_module_for_menu = main_module_index;
@@ -1390,6 +1395,7 @@ void RepelDash() {  // 8791f1
     Link_ResetSwimmingState();
     AncillaAdd_DashTremor(29, 1);
     Prepare_ApplyRumbleToSprites();
+    HdRumble(kRumble_DashCrash);
     if ((sound_effect_2 & 0x3f) != 27 && (sound_effect_2 & 0x3f) != 50)
       Ancilla_Sfx3_Near(3);
     LinkApplyTileRebound();
@@ -2399,6 +2405,7 @@ void Player_Sword_SpinAttackJerks_HoldDown() {  // 879d9f
           // carica lunga della Giravolta Tornado: secondo suono e scintille
           if (link_spin_attack_step_counter == 96) {
             Ancilla_Sfx2_Near(55);
+            HdRumble(kRumble_SpinReady);
             link_spin_attack_step_counter++;
           }
           if ((frame_counter & 7) == 0)
@@ -2411,6 +2418,7 @@ void Player_Sword_SpinAttackJerks_HoldDown() {  // 879d9f
           link_spin_attack_step_counter = c > lim ? lim : c;
           if (old < 48 && link_spin_attack_step_counter >= 48) {
             Ancilla_Sfx2_Near(55);
+            HdRumble(kRumble_SpinReady);
             AncillaAdd_ChargedSpinAttackSparkle();
           }
         }
@@ -2505,6 +2513,7 @@ void LinkItem_Hammer() {  // 879f7b
   if (player_handler_timer == 1) {
     TileDetect_MainHandler(3);
     Ancilla_AddHitStars(22, 0);
+    HdRumble(kRumble_Hammer);
     if (sound_effect_1 == 0) {
       Ancilla_Sfx2_Near(16);
       SpawnHammerWaterSplash();
@@ -6481,8 +6490,10 @@ void Sprite_Dungeon_DrawSinglePushBlock(int j) {  // 87f0d9
   y -= BG2VOFS_copy2 + 1;
   x -= BG2HOFS_copy2;
   uint8 ch = kPushedblock_Char[kPushedBlock_Tab1[pushedblocks_some_index]];
-  if (ch != 0xff)
+  if (ch != 0xff) {
+    HdFx_OamAsBackground(oam, 1);  // dipinto dallo shader come da fermo
     SetOamPlain(oam, x, y, ch, 0x20, 2);
+  }
 }
 
 void Link_Initialize() {  // 87f13c

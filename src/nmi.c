@@ -6,6 +6,7 @@
 #include "snes/ppu.h"
 #include "assets.h"
 #include "audio.h"
+#include "hd_rumble.h"
 
 static const uint8 kNmiVramAddrs[] = {
   0, 0, 4, 8, 12, 8, 12, 0, 4, 0, 8, 4, 12, 4, 12, 0,
@@ -128,6 +129,7 @@ static void Interrupt_NMI_AudioParts_Locked() {
     zelda_apu_write(APUI01, sound_effect_ambient);
     sound_effect_ambient = 0;
   }
+  HdRumble_Sound(sound_effect_1);
   zelda_apu_write(APUI02, sound_effect_1);
   zelda_apu_write(APUI03, sound_effect_2);
   sound_effect_1 = 0;

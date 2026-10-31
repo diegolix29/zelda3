@@ -80,6 +80,7 @@ typedef struct Config {
   // Migliorie HD
   uint8 smooth_camera;      // 0 = spenta, 1-3 = intensita'
   bool hd_text;
+  bool modern_text;         // dialoghi con la fascia trasparente e il carattere del contatore
   bool high_refresh;
   bool dynamic_light;
   // Effetti visivi aggiuntivi
@@ -105,6 +106,7 @@ typedef struct Config {
   uint8 view3d_dist;        // distanza di disegno degli sprite: 0 = schermo, 1 = 2x, 2 = 3x
   uint8 view3d_walls;       // muri in rilievo al chiuso nella vista 3D: 0 / 1
   uint8 view3d_cam;         // telecamera 3D: 0 = classica, 1 = terza persona (stick destro)
+  uint8 rumble;             // vibrazione del controller: 0 spenta, 1 leggera, 2 media, 3 forte
 
   const char *link_graphics;
   char *memory_buffer;

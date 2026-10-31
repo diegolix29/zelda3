@@ -173,6 +173,30 @@ static void ClearAll(void) {
   g_num_pending = g_num_burning = 0;
 }
 
+// Il fuoco resta nell'area in cui e' nato; col mondo unico si spegne solo
+// passando all'altro mondo
+static bool FireInOtherArea(void) {
+  return Seamless() ? ((g_burn_area ^ overworld_area_index) & 0x40) != 0 : g_burn_area != overworld_area_index;
+}
+
+// Aggiunge in fondo a una lista piena a max togliendo il piu' vecchio
+#define PushDropOldest(arr, n, max, item) do {     if ((n) == (max))       memmove((arr), (arr) + 1, --(n) * sizeof((arr)[0]));     (arr)[(n)++] = (item);   } while (0)
+
+// Cambia una tile dell'area caricata (attributi, mappa, schermo)
+static void SetAreaTile(int pos, uint16 m16) {
+  overworld_tileattr[pos >> 1] = m16;
+  Overworld_Memorize_Map16_Change(pos, m16);
+  Overworld_DrawMap16(pos, m16);
+  nmi_load_bg_from_vram = 1;
+}
+
+static int FindPending(uint16 x, uint16 y) {
+  for (int i = 0; i < g_num_pending; i++)
+    if (g_pending[i].x == x && g_pending[i].y == y)
+      return i;
+  return -1;
+}
+
 static int FindBurning(uint16 x, uint16 y) {
   for (int i = 0; i < g_num_burning; i++)
     if (g_burning[i].x == x && g_burning[i].y == y)
@@ -208,10 +232,13 @@ static void RemoveFrozen(int i) {
 }
 
 static void AddFrozen(HdBurnTile t) {
-  if (g_num_frozen == kMaxFrozen)
-    memmove(g_frozen, g_frozen + 1, --g_num_frozen * sizeof(g_frozen[0]));
-  g_frozen[g_num_frozen++] = t;
+  PushDropOldest(g_frozen, g_num_frozen, kMaxFrozen, t);
   g_frozen_ver++;
+}
+
+// Tile bruciata: annerita (remote: in un'area vicina, segreto da scoprire)
+static void AddScorched(HdBurnTile t) {
+  PushDropOldest(g_scorched, g_num_scorched, kMaxScorched, t);
 }
 
 static bool IsWet(uint16 x, uint16 y) {
@@ -225,17 +252,14 @@ static bool IsWet(uint16 x, uint16 y) {
 static void Melt(int f) {
   HdBurnTile t = g_frozen[f];
   RemoveFrozen(f);
-  if (g_num_wet == kMaxWet)
-    memmove(g_wet, g_wet + 1, --g_num_wet * sizeof(g_wet[0]));
-  g_wet[g_num_wet++] = (Pending){ t.x, t.y, kWetTime };
+  PushDropOldest(g_wet, g_num_wet, kMaxWet, ((Pending){ t.x, t.y, kWetTime }));
 }
 
 static void Queue(uint16 x, uint16 y, uint8 timer) {
   if (FindBurning(x, y) >= 0)
     return;
-  for (int i = 0; i < g_num_pending; i++)
-    if (g_pending[i].x == x && g_pending[i].y == y)
-      return;
+  if (FindPending(x, y) >= 0)
+    return;
   if (g_num_pending < kMaxPending)
     g_pending[g_num_pending++] = (Pending){ x, y, timer };
 }
@@ -250,9 +274,7 @@ static bool StartBurning(uint16 x, uint16 y, bool spread) {
     Melt(f);
     return false;
   }
-  // senza mondo unico il fuoco resta nell'area in cui e' nato; col mondo
-  // unico si spegne solo passando all'altro mondo
-  if (Seamless() ? ((g_burn_area ^ overworld_area_index) & 0x40) != 0 : g_burn_area != overworld_area_index)
+  if (FireInOtherArea())
     ClearAll();
   g_burn_area = overworld_area_index;
   int i = g_num_burning++;
@@ -333,9 +355,7 @@ static void BurnOut(uint16 x, uint16 y) {
       return;
     BYTE(dung_secrets_unk1) = 0;
     Sprite_SpawnImmediatelySmashedTerrain(what, x, y);
-    if (g_num_scorched == kMaxScorched)
-      memmove(g_scorched, g_scorched + 1, --g_num_scorched * sizeof(g_scorched[0]));
-    g_scorched[g_num_scorched++] = (HdBurnTile){ x, y, 0, (uint8)Rand(256), AreaOf(x, y), 1 };
+    AddScorched((HdBurnTile){ x, y, 0, (uint8)Rand(256), AreaOf(x, y), 1 });
     return;
   }
   if (!Burnable(overworld_tileattr[pos >> 1], &repl, &what))
@@ -343,14 +363,9 @@ static void BurnOut(uint16 x, uint16 y) {
   uint16 secret = Overworld_RevealSecret(pos);
   if (secret != 0)
     repl = secret;
-  overworld_tileattr[pos >> 1] = repl;
-  Overworld_Memorize_Map16_Change(pos, repl);
-  Overworld_DrawMap16(pos, repl);
-  nmi_load_bg_from_vram = 1;
+  SetAreaTile(pos, repl);
   Sprite_SpawnImmediatelySmashedTerrain(what, x, y);
-  if (g_num_scorched == kMaxScorched)
-    memmove(g_scorched, g_scorched + 1, --g_num_scorched * sizeof(g_scorched[0]));
-  g_scorched[g_num_scorched++] = (HdBurnTile){ x, y, 0, (uint8)Rand(256), (uint8)overworld_area_index };
+  AddScorched((HdBurnTile){ x, y, 0, (uint8)Rand(256), (uint8)overworld_area_index });
 }
 
 // La tile (gia' allineata a 16) si congela; se bruciava il fuoco si spegne.
@@ -381,12 +396,9 @@ static bool StartFreezing(uint16 x, uint16 y, uint8 water, bool only_water) {
     g_burning[b] = g_burning[g_num_burning];
     g_spread_at[b] = g_spread_at[g_num_burning];
   }
-  for (int i = 0; i < g_num_pending; i++) {
-    if (g_pending[i].x == x && g_pending[i].y == y) {
-      g_pending[i] = g_pending[--g_num_pending];
-      break;
-    }
-  }
+  int p = FindPending(x, y);
+  if (p >= 0)
+    g_pending[p] = g_pending[--g_num_pending];
   AddFrozen((HdBurnTile){ x, y, 0, (uint8)Rand(256), AreaOf(x, y) });
   return true;
 }
@@ -515,10 +527,7 @@ static void RevealRemoteSecrets(void) {
     BYTE(dung_secrets_unk1) = 0;
     if (secret == 0)
       continue;
-    overworld_tileattr[pos >> 1] = secret;
-    Overworld_Memorize_Map16_Change(pos, secret);
-    Overworld_DrawMap16(pos, secret);
-    nmi_load_bg_from_vram = 1;
+    SetAreaTile(pos, secret);
   }
 }
 
@@ -528,7 +537,7 @@ void HdBurn_Update(void) {
     return;
   }
   // Il fuoco si ferma durante menu e transizioni
-  if (main_module_index != 9 || submodule_index != 0)
+  if (!HdFx_LiveOverworld())
     return;
   if (g_seen_area != overworld_area_index) {
     g_seen_area = overworld_area_index;
@@ -574,7 +583,7 @@ void HdBurn_Update(void) {
   if (g_num_pending + g_num_burning == 0)
     return;
   // Il fuoco resta nell'area in cui e' nato (col mondo unico: nel suo mondo)
-  if (seamless ? ((g_burn_area ^ overworld_area_index) & 0x40) != 0 : g_burn_area != overworld_area_index) {
+  if (FireInOtherArea()) {
     ClearAll();
     return;
   }
@@ -633,9 +642,7 @@ int HdBurn_GetBurning(const HdBurnTile **tiles) {
   *tiles = g_burning;
   if (player_is_indoors)
     return 0;
-  if (Seamless())
-    return ((g_burn_area ^ overworld_area_index) & 0x40) ? 0 : g_num_burning;
-  return g_burn_area != overworld_area_index ? 0 : g_num_burning;
+  return FireInOtherArea() ? 0 : g_num_burning;
 }
 
 int HdBurn_GetScorched(const HdBurnTile **tiles) {

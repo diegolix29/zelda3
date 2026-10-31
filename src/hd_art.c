@@ -20,6 +20,7 @@
 #include "variables.h"
 #include "zelda_rtl.h"
 #include "load_gfx.h"
+#include "hd_fx.h"
 #include "hd_art_data.h"
 
 static bool g_art_link_on;
@@ -61,7 +62,7 @@ void HdArt_Apply(void) {
   }
   g_art_link_on = on;
   // palette di Link subito, se si sta giocando (il coniglio non cambia)
-  if ((main_module_index == 7 || main_module_index == 9 || main_module_index == 14) && !link_is_bunny)
+  if (HdFx_GameLoaded() && !link_is_bunny)
     LoadActualGearPalettes();
 }
 

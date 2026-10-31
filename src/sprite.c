@@ -18,6 +18,7 @@
 #include "overlord.h"
 #include "tile_detect.h"
 #include "sprite_main.h"
+#include "hd_rumble.h"
 #include "assets.h"
 #include "hd_3d.h"
 static const uint16 kOamGetBufferPos_Tab0[6] = {0x171, 0x201, 0x31, 0xc1, 0x141, 0x1d1};
@@ -1204,6 +1205,19 @@ void Sprite_Main() {  // 868328
       memcpy(far_saved_alloc, oam_alloc_arr1, sizeof(far_saved_alloc));
       far_saved_cur = oam_cur_ptr, far_saved_ext_cur = oam_ext_cur_ptr;
     }
+    // Chi resta fuori dalla vista non consuma posti: col mondo continuo i
+    // nemici lontani restano attivi e prenotavano lo stesso i loro posti nelle
+    // regioni dell'OAM. Piene, le regioni ricominciano da uno di 8 punti a
+    // rotazione e i pezzi di chi si vede venivano sovrascritti ogni 8
+    // fotogrammi (soldato accanto a Link con la pietra pesante sollevata)
+    static OamEnt full[128];
+    static uint8 ext[128], real_f0[128];
+    uint16 region_base[6], region_wrap[6];
+    memcpy(full, oam_buf, sizeof(full));
+    memcpy(ext, g_ram + 0xa20, sizeof(ext));
+    memcpy(real_f0, g_oam_real_f0, sizeof(real_f0));
+    memcpy(region_base, oam_region_base, sizeof(region_base));
+    memcpy(region_wrap, oam_alloc_arr1, sizeof(region_wrap));
     uint16 saved[128];
     for (int j = 0; j < 128; j++)
       saved[j] = WORD(oam_buf[j].charnum), WORD(oam_buf[j].charnum) = 0xffff;
@@ -1218,6 +1232,10 @@ void Sprite_Main() {  // 868328
     bool hide = g_sprite_offscreen[i] != 0;
     if (hide || g_sprite_far[i])
       sound_effect_1 = sfx1, sound_effect_2 = sfx2;
+    if (hide) {
+      memcpy(oam_region_base, region_base, sizeof(region_base));
+      memcpy(oam_alloc_arr1, region_wrap, sizeof(region_wrap));
+    }
     if (far_mode && g_sprite_far[i] && !hide) {
       // posizione vera di ogni pezzo (rispetto alla telecamera del gioco):
       // resta entro ~128 pixel dal nemico, x con giri di 512 e y di 256
@@ -1226,11 +1244,11 @@ void Sprite_Main() {  // 868328
       for (int j = 0; j < 128; j++) {
         if (WORD(oam_buf[j].charnum) == 0xffff)
           continue;
-        uint8 ext = bytewise_extended_oam[j];
-        int x = oam_buf[j].x + (ext & 1) * 256, y = oam_buf[j].y;
+        uint8 ex = bytewise_extended_oam[j];
+        int x = oam_buf[j].x + (ex & 1) * 256, y = oam_buf[j].y;
         x += ((ox - x + 256) >> 9) * 512;   // giro di 512 piu' vicino al nemico
         y += ((oy - y + 128) >> 8) * 256;   // giro di 256 piu' vicino
-        Hd3d_FarPiece(i, x, y, WORD(oam_buf[j].charnum), (ext >> 1) & 1);
+        Hd3d_FarPiece(i, x, y, WORD(oam_buf[j].charnum), (ex >> 1) & 1);
       }
       memcpy(oam_buf, far_saved_oam, sizeof(far_saved_oam));
       memcpy(bytewise_extended_oam, far_saved_ext, sizeof(far_saved_ext));
@@ -1243,8 +1261,8 @@ void Sprite_Main() {  // 868328
     for (int j = 0; j < 128; j++) {
       if (WORD(oam_buf[j].charnum) == 0xffff)
         WORD(oam_buf[j].charnum) = saved[j];
-      else if (hide)
-        oam_buf[j].y = 0xf0, g_oam_real_f0[j] = 0;
+      else if (hide)  // le voci tornano com'erano prima di lui
+        oam_buf[j] = full[j], g_ram[0xa20 + j] = ext[j], g_oam_real_f0[j] = real_f0[j];
       else
         g_sprite_oam_owner[j] = i;
     }
@@ -2740,6 +2758,7 @@ if_3:
     return true;
   }
   SpriteSfx_QueueSfx2WithPan(k, 6);
+  HdRumble(kRumble_Shield);
   Sprite_PlaceRupulseSpark_2(k);
   if (sprite_type[k] == 0x95) {
     SpriteSfx_QueueSfx3WithPan(k, 0x26);

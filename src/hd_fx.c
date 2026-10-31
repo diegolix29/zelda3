@@ -30,10 +30,6 @@ static float Rand01() {
   return (g_rng >> 8) * (1.0f / 16777216.0f);
 }
 
-static int ClampByte(int v) {
-  return v < 0 ? 0 : v > 255 ? 255 : v;
-}
-
 static inline bool IsHud(uint32 c) {
   return (c >> 24) == 2;
 }
@@ -45,21 +41,13 @@ static inline bool IsSprite(uint32 c) {
 
 // Somma un colore al pixel (luce additiva); l'HUD resta intatto
 static inline void AddColor(uint32 *p, float r, float g, float b, float a) {
-  uint32 c = *p;
-  if (IsHud(c))
-    return;
-  int cr = ClampByte(((c >> 16) & 0xff) + (int)(r * a));
-  int cg = ClampByte(((c >> 8) & 0xff) + (int)(g * a));
-  int cb = ClampByte((c & 0xff) + (int)(b * a));
-  *p = (c & 0xff000000) | cr << 16 | cg << 8 | cb;
+  if (!IsHud(*p))
+    *p = HdFx_AddRgb(*p, r, g, b, a);
 }
 
 // Sposta il pixel verso un colore, tenendo il layer
 static inline void MixPixel(uint32 *p, int r, int g, int b, float a) {
-  uint32 c = *p;
-  int cr = (c >> 16) & 0xff, cg = (c >> 8) & 0xff, cb = c & 0xff;
-  cr += (int)((r - cr) * a), cg += (int)((g - cg) * a), cb += (int)((b - cb) * a);
-  *p = (c & 0xff000000) | ClampByte(cr) << 16 | ClampByte(cg) << 8 | ClampByte(cb);
+  *p = HdFx_MixRgb(*p, r, g, b, a);
 }
 
 // Segna il pixel come "sprite": lo shader four sword non lo dipinge (lo
@@ -151,11 +139,9 @@ static void ClassifyCells(const uint8 *pixels, int pitch, int width, int height,
 
 uint32 g_fx_frames;  // contatore dei frame di gioco che non si azzera (frame_counter e' a 8 bit)
 
+// (k 0-1: il risultato sta fra i due colori)
 static inline uint32 MixColor(uint32 a, uint32 b, float k) {
-  int ra = (a >> 16) & 0xff, ga = (a >> 8) & 0xff, ba = a & 0xff;
-  int rb = (b >> 16) & 0xff, gb = (b >> 8) & 0xff, bb = b & 0xff;
-  return (a & 0xff000000) | (uint32)(ra + (int)((rb - ra) * k)) << 16 |
-         (uint32)(ga + (int)((gb - ga) * k)) << 8 | (uint32)(ba + (int)((bb - ba) * k));
+  return HdFx_MixRgb(a, (b >> 16) & 0xff, (b >> 8) & 0xff, b & 0xff, k);
 }
 
 static void ApplyHeatHaze(uint8 *pixels, int pitch, int width, int height, int cam_y) {
@@ -759,10 +745,18 @@ int HdFx_SceneModule(void) {
   // cerchio che si chiude (15) o si riapre (16): la scena dentro o fuori
   if (m == 15 || m == 16)
     return player_is_indoors ? 7 : 9;
-  // caduta in un labirinto (buche, Module11): dalla fase 3 la stanza nuova e'
-  // gia' caricata e si vede mentre Link cade (acqua e shader subito)
-  if (m == 17 && subsubmodule_index >= 3)
+  // caduta all'ingresso di un labirinto (Module11: buche all'aperto, Link preso
+  // dalla Mano): nelle fasi 0-1 si scurisce ancora la scena di prima, dalla
+  // fase 3 la stanza nuova e' gia' caricata e si vede mentre Link cade
+  if (m == 17)
+    return subsubmodule_index >= 3 || player_is_indoors ? 7 : 9;
+  // vittoria su un boss (19 pendente, 22 cristallo): la stanza resta in vista
+  // mentre si riempiono cuori e magia, Link gira e lo schermo si scurisce
+  if ((m == 19 || m == 22) && player_is_indoors)
     return 7;
+  // Salva ed esci (23): il gioco si scurisce fermo
+  if (m == 23)
+    return player_is_indoors ? 7 : 9;
   // morte di Link (18): finche' si vede il mondo e' la scena di prima
   if (HdFx_DeathShowsWorld())
     return saved_module_for_menu;
@@ -777,6 +771,33 @@ int HdFx_SceneModule(void) {
 // largo e mondo continuo seguono il mondo: niente salti
 bool HdFx_DeathShowsWorld(void) {
   return main_module_index == 18 && (TM_copy & 3) != 0;
+}
+
+// Il gioco e' in vista ma fermo sotto qualcos'altro (menu, dialoghi, pozioni,
+// preghiera, cerchio che si chiude, Mano e buche che si scuriscono, vittorie,
+// Salva ed esci): la vista resta dov'e'. Non vale quando arriva una scena
+// nuova (cerchio che si apre, 17 dalla fase 3): li' la vista riparte
+bool HdFx_GameHeldInView(void) {
+  int m = main_module_index, scene = HdFx_SceneModule();
+  if (m == 7 || m == 9 || m == 11 || m == 16 || (m == 17 && subsubmodule_index >= 3))
+    return false;
+  return scene == 7 || scene == 9 || scene == 11;
+}
+
+bool HdFx_LiveOverworld(void) {
+  return main_module_index == 9 && submodule_index == 0;
+}
+
+bool HdFx_GameLoaded(void) {
+  return main_module_index > 5 && main_module_index != 20;
+}
+
+bool HdFx_DungeonPassing(void) {
+  return main_module_index == 7 && submodule_index != 0;
+}
+
+bool HdFx_RoomScroll(void) {
+  return main_module_index == 7 && (submodule_index == 1 || submodule_index == 2);
 }
 
 // Allagamento della diga: l'acqua del piano di sopra si vede solo dentro la
@@ -957,10 +978,7 @@ static void ApplyRain(uint8 *pixels, int pitch, int width, int height, int cam_x
       if (!IsHud(*c)) {
         // la goccia schiarisce verso un azzurro chiaro: si vede su ogni fondo
         float k = 0.62f * (1.0f - (float)j / d->len);
-        uint32 v = *c;
-        int r = (v >> 16) & 0xff, g = (v >> 8) & 0xff, b = v & 0xff;
-        r += (int)((205 - r) * k), g += (int)((220 - g) * k), b += (int)((245 - b) * k);
-        *c = (v & 0xff000000) | ClampByte(r) << 16 | ClampByte(g) << 8 | ClampByte(b);
+        *c = HdFx_MixRgb(*c, 205, 220, 245, k);
         MarkSharp(c);
       }
     }
@@ -1011,11 +1029,7 @@ static void LightningFlash(uint8 *pixels, int pitch, int width, int height) {
     for (int x = 0; x < width; x++) {
       if (IsHud(row[x]))
         continue;
-      uint32 c = row[x];
-      int r = (c >> 16) & 0xff, g = (c >> 8) & 0xff, b = c & 0xff;
-      float a = g_flash * 0.40f;
-      r += (int)((235 - r) * a), g += (int)((240 - g) * a), b += (int)((255 - b) * a);
-      row[x] = (c & 0xff000000) | ClampByte(r) << 16 | ClampByte(g) << 8 | ClampByte(b);
+      row[x] = HdFx_MixRgb(row[x], 235, 240, 255, g_flash * 0.40f);
     }
   }
 }
@@ -1307,7 +1321,7 @@ static void ApplyBurning(uint8 *pixels, int pitch, int width, int height, int ca
     }
   }
   n = HdBurn_GetScorched(&tiles);
-  bool live = main_module_index == 9 && submodule_index == 0;
+  bool live = HdFx_LiveOverworld();
   for (int i = 0; i < n; i++) {
     const HdBurnTile *s = &tiles[i];
     if (!HdBurn_TileShown(s))
@@ -1425,16 +1439,18 @@ static int g_fog_shade[3], g_fog_mid[3], g_fog_light[3];
 // densita' calcolata ogni kFogCell pixel e poi interpolata
 enum { kFogCell = 4, kFogMaxW = 160, kFogMaxH = 72 };
 static float g_fog_alpha[kFogMaxH][kFogMaxW];
+// quanto si schiariscono in piu' le nuvole chiare nel Bosco d'Ossa
+static const float kFogDarkWorldLight = 1.8f;
 
 // La nebbia del bosco (del gioco) e' sullo schermo
 static bool ForestFogScene(Ppu *ppu) {
   if (player_is_indoors || ppu->mode == 7)
     return false;
-  // 0x9d: Bosco Perduto prima della Spada Suprema (dopo e' 0x9e, le chiome);
-  // nella Foresta Maledetta (0x40) e' la stessa nebbia, che resta del gioco.
-  // 0x97: bosco della Spada Suprema
+  // 0x9d: Bosco Perduto prima della Spada Suprema (dopo e' 0x9e, le chiome)
+  // e Bosco d'Ossa (0x40, stessa nebbia con i colori del Mondo delle Tenebre,
+  // presi dallo strato come nel Bosco Perduto). 0x97: bosco della Spada Suprema
   uint8 oi = BYTE(overlay_index);
-  if (!(oi == 0x9d && !(overworld_screen_index & 0x40)) && oi != 0x97)
+  if (oi != 0x9d && oi != 0x97)
     return false;
   // come OverlayBegin (hd_world.c): lo strato e' davvero sommato a meta'
   return (ppu->screenEnabled[1] & 1) && !(ppu->screenEnabled[0] & 1) && ppu->addSubscreen &&
@@ -1561,7 +1577,7 @@ static inline uint32 FogBlend(uint32 v, float a) {
   int r = ((int)(v >> 16 & 255) + (int)(g_fog_cmid[0] + dir[0] * a)) >> 1;
   int g = ((int)(v >> 8 & 255) + (int)(g_fog_cmid[1] + dir[1] * a)) >> 1;
   int b = ((int)(v & 255) + (int)(g_fog_cmid[2] + dir[2] * a)) >> 1;
-  return (v & 0xff000000) | ClampByte(r) << 16 | ClampByte(g) << 8 | ClampByte(b);
+  return (v & 0xff000000) | HdFx_ClampByte(r) << 16 | HdFx_ClampByte(g) << 8 | HdFx_ClampByte(b);
 }
 
 void HdFx_Fog(uint8 *pixels, int pitch, int width, int height, int bias_x, int bias_y) {
@@ -1590,10 +1606,13 @@ void HdFx_Fog(uint8 *pixels, int pitch, int width, int height, int bias_x, int b
       g_fog_alpha[gy][gx] = FogDensity((float)(gx * kFogCell), (float)(gy * kFogCell));
   // colori della nebbia a 8 bit, con la luminosita' del gioco: densita' 0 =
   // medio, verso 1 il chiaro, verso -1 lo scuro
+  // nel Bosco d'Ossa (Mondo delle Tenebre) il chiaro dello strato e' poco
+  // distante dal medio: le nuvole chiare si fanno un po' piu' evidenti
   float mid[3], up[3], down[3];
+  float up_k = (overworld_screen_index & 0x40) ? kFogDarkWorldLight : 1.0f;
   for (int c = 0; c < 3; c++) {
     mid[c] = g_fog_mid[c] * 8.25f * bri / 15;
-    up[c] = g_fog_light[c] * 8.25f * bri / 15 - mid[c];
+    up[c] = (g_fog_light[c] * 8.25f * bri / 15 - mid[c]) * up_k;
     down[c] = mid[c] - g_fog_shade[c] * 8.25f * bri / 15;
     g_fog_cmid[c] = mid[c], g_fog_cup[c] = up[c], g_fog_cdown[c] = down[c];
   }
@@ -1609,7 +1628,10 @@ void HdFx_Fog(uint8 *pixels, int pitch, int width, int height, int bias_x, int b
       int gx = x / kFogCell;
       if (gx + 1 >= gw)
         break;
-      if (IsHud(row[x]))
+      // solo dove la PPU somma lo strato: non l'HUD ne' gli sprite con le
+      // palette 0-3 (layer 6), che nell'originale restano fuori dalla nebbia
+      uint32 l = row[x] >> 24;
+      if (l == 2 || l == 6 || (l < 6 && !(g_fog_saved_math >> l & 1)))
         continue;
       float fx = (float)(x - gx * kFogCell) * (1.0f / kFogCell);
       float top = a0[gx] + (a0[gx + 1] - a0[gx]) * fx, bot = a1[gx] + (a1[gx + 1] - a1[gx]) * fx;
@@ -1733,7 +1755,7 @@ static void DialogGlass(uint8 *pixels, int pitch, int width, int height) {
         continue;
       // strato 2 (interfaccia): lo shader lascia il riquadro sfocato com'e',
       // senza pennellate e ombre nitide sopra
-      row[x] = 2u << 24 | ClampByte(b[0] / b[3]) << 16 | ClampByte(b[1] / b[3]) << 8 | ClampByte(b[2] / b[3]);
+      row[x] = 2u << 24 | HdFx_ClampByte(b[0] / b[3]) << 16 | HdFx_ClampByte(b[1] / b[3]) << 8 | HdFx_ClampByte(b[2] / b[3]);
     }
   }
 }
@@ -1804,7 +1826,7 @@ void HdFx_MenuBlur(uint8 *pixels, int pitch, int width, int height) {
       int r = (int)((((c >> 16) & 0xff) * keep + b[0] * inv) * dark);
       int g = (int)((((c >> 8) & 0xff) * keep + b[1] * inv) * dark);
       int bl = (int)(((c & 0xff) * keep + b[2] * inv) * dark);
-      row[x] = (c & 0xff000000) | ClampByte(r) << 16 | ClampByte(g) << 8 | ClampByte(bl);
+      row[x] = (c & 0xff000000) | HdFx_ClampByte(r) << 16 | HdFx_ClampByte(g) << 8 | HdFx_ClampByte(bl);
     }
   }
 }
@@ -1825,6 +1847,19 @@ extern bool g_hd_iris_valid;
 static uint16 g_iris_saved_table[240];
 static bool g_iris_override;
 
+// Preghiera nel deserto con lo schermo largo: la finestra del gioco (ellisse
+// attorno a Link) sta nei 256 pixel originali, quindi le fasce ai lati
+// restavano nere e l'ellisse si vedeva tagliata dritta. Si apre la finestra
+// su tutta la riga e l'ellisse si applica dopo su tutta la larghezza, con i
+// bordi veri calcolati dal gioco (messaging.c); fuori resta nero
+extern int16 g_prayer_iris_l[240], g_prayer_iris_r[240];
+static bool g_prayer_override;
+
+static bool PrayerIrisActive(Ppu *ppu) {
+  return main_module_index == 14 && submodule_index == 5 && subsubmodule_index >= 3 &&
+         (HDMAEN_copy & 0x80) && ppu->extraLeftRight > 0;
+}
+
 static bool IrisActive(void) {
   if (!g_fx_soft_iris || !g_hd_iris_valid)
     return false;
@@ -1837,7 +1872,8 @@ static bool IrisActive(void) {
 
 void HdFx_IrisBeforeRender(Ppu *ppu) {
   g_iris_override = IrisActive();
-  if (!g_iris_override)
+  g_prayer_override = !g_iris_override && PrayerIrisActive(ppu);
+  if (!g_iris_override && !g_prayer_override)
     return;
   memcpy(g_iris_saved_table, hdma_table_dynamic, sizeof(g_iris_saved_table));
   for (int i = 0; i < 240; i++)
@@ -1846,7 +1882,7 @@ void HdFx_IrisBeforeRender(Ppu *ppu) {
 }
 
 void HdFx_IrisAfterRender(Ppu *ppu) {
-  if (!g_iris_override)
+  if (!g_iris_override && !g_prayer_override)
     return;
   memcpy(hdma_table_dynamic, g_iris_saved_table, sizeof(g_iris_saved_table));
   ppu->windowFullSides = false;
@@ -2032,6 +2068,25 @@ void HdFx_Mosaic(uint8 *pixels, int pitch, int width, int height) {
   }
 }
 
+static void PrayerIris(uint8 *pixels, int pitch, int width, int height) {
+  Ppu *ppu = g_zenv.ppu;
+  int ext = (width - 256) / 2;
+  // fuori dalla finestra il gioco taglia a nero (CGWSEL)
+  uint32 back = 5u << 24;
+  // come gli sprite, l'ellisse segue Link se la vista e' spostata
+  for (int y = 0; y < height; y++) {
+    int gy = y + ppu->objBiasY;
+    int l = 1, r = 0;
+    if (gy >= 0 && gy < 240)
+      l = g_prayer_iris_l[gy], r = g_prayer_iris_r[gy];
+    l += ext - ppu->objBiasX, r += ext - ppu->objBiasX;
+    uint32 *row = (uint32 *)(pixels + y * pitch);
+    for (int x = 0; x < width; x++)
+      if (x < l || x > r)
+        row[x] = back;
+  }
+}
+
 // Cerchio dell'iride sullo schermo: centro e raggio
 static void IrisCircle(int width, int height, float *cx, float *cy, float *r, float *far) {
   const float kSoft = 8.0f;
@@ -2068,6 +2123,8 @@ static inline uint32 IrisDim(uint32 c, float k) {
 }
 
 void HdFx_SoftIris(uint8 *pixels, int pitch, int width, int height) {
+  if (g_prayer_override)
+    PrayerIris(pixels, pitch, width, height);
   if (!g_iris_override)
     return;
   float cx, cy, r, far;
@@ -2131,6 +2188,7 @@ static uint8 g_hidden_idx[128];
 static int g_num_hidden;
 
 extern uint8 g_link_oam_mask[128], g_sprite_oam_owner[128];
+extern uint8 g_link_dive_timer;  // player.c
 
 // Ombra del gioco (SpriteDraw_Shadow): casella 0x6c (grande) o 0x38 (piccola)
 // della prima tabella, palette 4
@@ -2229,7 +2287,7 @@ void HdFx_ShadowsBeforeRender(Ppu *ppu, int width, int height) {
     int o = g_sprite_oam_owner[i];
     uint8 cast = 0;
     if (g_link_oam_mask[i]) {
-      cast = !shadow && link_on_ground;
+      cast = !shadow && link_on_ground && !(g_link_dive_timer && player_is_indoors);  // sott'acqua al chiuso niente ombra, come su GBA
     } else if (o < 16 && ground[o]) {
       if (shadow) {
         g_hidden_idx[g_num_hidden] = i;
@@ -2286,6 +2344,34 @@ void HdFx_IceBeforeRender(Ppu *ppu) {
     else
       ppu->objIce[i] = (oam1 & 0x1ff) == 0x48 || (oam1 & 0x1ff) == 0x58;
   }
+}
+
+// Oggetti spinti che da fermi sono caselle del fondale: il blocco dei
+// labirinti (Sprite_HandlePushedBlocks_One, Sprite_Dungeon_DrawSinglePushBlock)
+// e la lapide (Ancilla24_Gravestone) mentre si muovono sono sprite, e lo
+// shader Four Swords smetteva di dipingerli fino a quando si fermavano.
+// Chi li disegna segna le voci OAM con il fotogramma (frame_counter | 0x100):
+// valgono solo per il fotogramma in cui sono state scritte
+static uint16 g_oam_as_bg[128];
+
+void HdFx_OamAsBackground(const void *oam, int n) {
+  int i = (int)((const uint8 *)oam - &g_ram[0x800]) >> 2;
+  for (; n > 0 && i >= 0 && i < 128; n--, i++)
+    g_oam_as_bg[i] = frame_counter | 0x100;
+}
+
+void HdFx_AsBgBeforeRender(Ppu *ppu) {
+  for (int i = 0; i < 128; i++)
+    ppu->objAsBg[i] = g_oam_as_bg[i] == (frame_counter | 0x100);
+}
+
+// Immersione al chiuso come su GBA (0x80a5298): Link resta sopra il fondale
+// della vasca ma la PPU lo mescola a meta' con l'acqua (BG1 sullo schermo
+// secondario nelle stanze allagate); prima spariva sotto il fondale
+void HdFx_DiveBeforeRender(Ppu *ppu) {
+  bool on = g_link_dive_timer && player_is_indoors;
+  for (int i = 0; i < 128; i++)
+    ppu->objUnderWater[i] = on && g_link_oam_mask[i];
 }
 
 // Super bomba come su GBA (0x8116afc, sprite affine a doppia dimensione):

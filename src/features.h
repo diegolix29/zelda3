@@ -25,8 +25,8 @@ enum {
   kFeatures0_SwitchLR = 2,
   kFeatures0_TurnWhileDashing = 4,
   kFeatures0_MirrorToDarkworld = 8,
-  // Spade e oggetti come su GBA, che interagiscono con l'ambiente (prima
-  // CollectItemsWithSword): ogni spada raccoglie gli oggetti, dalla Spada
+  // Spade e oggetti come su GBA, che interagiscono con l'ambiente: ogni
+  // spada raccoglie gli oggetti, dalla Spada
   // Suprema rompe i cartelli, la Spada d'Oro rompe i vasi; le frecce rompono
   // i vasi (quelle d'argento tutti quelli sul percorso), il martello rompe
   // cespugli e rocce piccole chiare; la Lanterna ferisce i nemici davanti a
@@ -35,8 +35,7 @@ enum {
   // sono opzioni a parte (g_config.gba_damage, g_config.flipper_dive)
   kFeatures0_SwordAndItems = 16,
   // Punto di volo 9 dell'uccello: in cima al Monte della Morte a est, sulla
-  // piattaforma dei pioli della Roccia della Tartaruga (prima era
-  // BreakPotsWithSword, ora dentro SwordAndItems)
+  // piattaforma dei pioli della Roccia della Tartaruga
   kFeatures0_BirdTravel9 = 32,
   kFeatures0_DisableLowHealthBeep = 64,
   kFeatures0_SkipIntroOnKeypress = 128,
@@ -63,8 +62,7 @@ enum {
   // caricamento si fanno in un frame, Link si disegna mentre cammina a
   // velocita' costante e la telecamera parte e frena dolcemente (hd_trans.c)
   kFeatures0_FastTransitions = 1 << 17,
-  // 1 << 18 era "Oggetti X, L, R nell'HUD" (ShowXLRItemsInHud), tolta: l'HUD
-  // mostra sempre i tasti a cui si possono dare oggetti (ItemOnX, ItemOnLR)
+  // 1 << 18 libero
   // Pozione d'oro, da BS Zelda - Le Antiche Tavole di Pietra: quarto calderone
   // nella bottega della strega, con i calderoni a 32 pixel l'uno dall'altro
   // (sprite_main.c, Sprite_GoldCauldron). Prima 1 << 19 era la transizione

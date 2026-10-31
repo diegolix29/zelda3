@@ -256,6 +256,7 @@
     <ClCompile Include="src\hd_fx.c" />
     <ClCompile Include="src\hd_water.c" />
     <ClCompile Include="src\hd_par.c" />
+    <ClCompile Include="src\hd_rumble.c" />
     <ClCompile Include="src\hd_art.c" />
     <ClCompile Include="src\hd_hud.c" />
     <ClCompile Include="src\hd_world.c" />

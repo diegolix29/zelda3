@@ -16,6 +16,8 @@
 #include "hd_world.h"
 #include "zelda_rtl.h"
 #include "snes/ppu.h"
+#include "hd_fx.h"
+#include "hd_rumble.h"
 
 // Con il mondo continuo la vista e' piu' larga della telecamera del gioco e
 // spostata rispetto a lei (fino al bordo dell'area la telecamera del gioco
@@ -1711,6 +1713,7 @@ label1:
   if (!--ancilla_arr3[k]) {
     if (++ancilla_item_to_link[k] == 1) {
       Ancilla_Sfx2_Pan(k, 0xc);
+      HdRumble_At(kRumble_Explosion, Ancilla_GetX(k), Ancilla_GetY(k));
       if (k + 1 == flag_is_ancilla_to_pick_up) {
         flag_is_ancilla_to_pick_up = 0;
         if (link_state_bits & 0x80) {
@@ -5560,6 +5563,7 @@ void Ancilla24_Gravestone(int k) {  // 88ee01
   Ancilla_PrepAdjustedOamCoord(k, &pt);
   Oam_AllocateFromRegionB(16);
   OamEnt *oam = GetOamCurPtr();
+  HdFx_OamAsBackground(oam, 4);  // dipinta dallo shader come da ferma
   uint16 x = pt.x, y = pt.y;
   for (int i = 0; i < 4; i++, oam++) {
     Ancilla_SetOam(oam, x, y, kAncilla_Gravestone_Char[i], kAncilla_Gravestone_Flags[i] | 0x3d, 2);
@@ -5662,8 +5666,10 @@ void Ancilla3A_BigBombExplosion(int k) {  // 88f18d
   static const int8 kSuperBombExplode_Y[9] = {0, -16, -24, -16, 0, 0, 16, 24, 16};
 
   if (!submodule_index && !--ancilla_arr3[k]) {
-    if (++ancilla_item_to_link[k] == 2)
+    if (++ancilla_item_to_link[k] == 2) {
       Ancilla_Sfx2_Pan(k, 0xc);
+      HdRumble_At(kRumble_Explosion, Ancilla_GetX(k), Ancilla_GetY(k));
+    }
     if (ancilla_item_to_link[k] == 11) {
       ancilla_type[k] = 0;
       return;

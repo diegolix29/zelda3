@@ -219,19 +219,13 @@ static int DrawChar(Canvas *cv, int x, int y, uint32 c, uint32 color) {
   int g = Font_GlyphFor(c);
   if (g >= 0 && g < g_font_count && g_font_data) {
     int w = g_font_width[g];
-    int tile = (g & 0x70) * 2 + (g & 0xf);
-    for (int half = 0; half < 2; half++) {
-      const uint8 *t = g_font_data + (tile + half * 16) * 16;
-      for (int row = 0; row < 8; row++) {
-        uint8 d0 = t[row * 2], d1 = t[row * 2 + 1];
-        for (int col = 0; col < 8; col++) {
-          int bit = 7 - col;
-          int v = (d0 >> bit & 1) | (d1 >> bit & 1) << 1;
-          if (v == 1)
-            Canvas_Pixel(cv, x + col, y + half * 8 + row, 0x101018);
-          else if (v >= 2)
-            Canvas_Pixel(cv, x + col, y + half * 8 + row, color);
-        }
+    for (int row = 0; row < 16; row++) {
+      for (int col = 0; col < 8; col++) {
+        int v = HdFx_GameGlyphPixel(g_font_data, g, row, col);
+        if (v == 1)
+          Canvas_Pixel(cv, x + col, y + row, 0x101018);
+        else if (v >= 2)
+          Canvas_Pixel(cv, x + col, y + row, color);
       }
     }
     return w;
@@ -420,6 +414,7 @@ static const char *Tr(const char *it) {
     { "Mappa del mondo in HD", "HD world map" },
     { "Mostra FPS", "Show FPS" },
     { "Testo nitido nei dialoghi", "Sharp dialogue text" },
+    { "Testo moderno", "Modern text" },
     { "Fluidit\xc3\xa0 oltre i 60 Hz", "Smoothness above 60 Hz" },
     { "Illuminazione dinamica", "Dynamic lighting" },
     { "Effetto calore e fiamme", "Heat and flames effect" },
@@ -450,6 +445,7 @@ static const char *Tr(const char *it) {
     { "(al riavvio)", "(on restart)" },
     { "Menu opzioni", "Options menu" },
     { "Ripristina tasti predefiniti", "Restore default keys" },
+    { "Vibrazione del controller", "Controller rumble" },
     { "Azione sugli slot", "Slot action" },
     { "Salva", "Save" },
     { "Carica", "Load" },
@@ -539,6 +535,7 @@ static void SaveSettings() {
     AddIni(v, &n, "[Graphics]", "FxWhirlpoolGlow", "%d", g_config.fx_whirlpool);
   }
   AddIni(v, &n, "[Graphics]", "HdText", "%d", g_config.hd_text);
+  AddIni(v, &n, "[Graphics]", "ModernText", "%d", g_config.modern_text);
   AddIni(v, &n, "[Graphics]", "OfficialArtwork", "%d", g_config.official_artwork);
   AddIni(v, &n, "[Graphics]", "BlondLink", "%d", g_config.blond_link);
   AddIni(v, &n, "[Graphics]", "DimFlashes", "%d", (g_config.features0 & kFeatures0_DimFlashes) != 0);
@@ -561,6 +558,7 @@ static void SaveSettings() {
     AddIni(v, &n, "[Features]", kFeatureOptions[i].ini_key, "%d", (g_config.features0 & kFeatureOptions[i].bit) != 0);
   }
   AddIni(v, &n, "[Features]", "TextSpeed", "%d", g_config.text_speed);
+  AddIni(v, &n, "[Features]", "Rumble", "%d", g_config.rumble);
   if (g_msu_dirty) {
     v[n].section = "[Sound]", v[n].key = "EnableMSU";
     const char *mode = "true";
@@ -645,6 +643,7 @@ static void BuildItems() {
     AddItem(2, "Mappa del mondo in HD", buf);
     AddItem(3, "Mostra FPS", YesNo(Host_GetDisplayPerf()));
     AddItem(4, "Testo nitido nei dialoghi", YesNo(g_config.hd_text));
+    AddItem(22, "Testo moderno", YesNo(g_config.modern_text));
     AddItem(5, "Fluidit\xc3\xa0 oltre i 60 Hz", YesNo(g_config.high_refresh));
     AddItem(6, "Illuminazione dinamica", YesNo(g_config.dynamic_light));
     AddItem(7, "Effetto calore e fiamme", YesNo(g_config.fx_heat));
@@ -699,6 +698,7 @@ static void BuildItems() {
     Config_KeyName(Config_GetKeyForCmd(kKeys_HdMenu), buf2, sizeof(buf2));
     snprintf(buf, sizeof(buf), "%s   -   %s", buf2, Config_PadButtonName(Config_GetPadButtonForCmd(kKeys_HdMenu)));
     AddItem(12, "Menu opzioni", buf);
+    AddItem(14, "Vibrazione del controller", kSmoothCameraNames[g_config.rumble & 3]);
     AddItem(13, "Ripristina tasti predefiniti", NULL);
     break;
   case kPage_Saves:
@@ -742,8 +742,12 @@ static void Activate(int id, int dir) {
         Host_SetPpuRenderFlags(Host_GetPpuRenderFlags() ^ kPpuRenderFlags_4x4Mode7);
     } else if (id == 3) {
       Host_SetDisplayPerf(!Host_GetDisplayPerf());
-    } else if (id == 4) {
-      g_config.hd_text = !g_config.hd_text;
+    } else if (id == 4 || id == 22) {
+      // testo nitido e testo moderno: accenderne uno spegne l'altro
+      bool *opt = id == 4 ? &g_config.hd_text : &g_config.modern_text;
+      *opt = !*opt;
+      if (*opt)
+        *(id == 4 ? &g_config.modern_text : &g_config.hd_text) = false;
     } else if (id == 5) {
       g_config.high_refresh = !g_config.high_refresh;
     } else if (id == 6) {
@@ -832,6 +836,12 @@ static void Activate(int id, int dir) {
       g_msu_on = !g_msu_on, g_msu_dirty = true;
     break;
   case kPage_Controls:
+    if (id == 14) {
+      // spenta, leggera, media, forte; una vibrazione di prova con la nuova forza
+      g_config.rumble = (g_config.rumble + (dir < 0 ? 3 : 1)) & 3;
+      Host_Rumble(1.0f, 1.0f, 300);
+      return;
+    }
     if (dir != 0)
       return;
     if (id == 13) {
@@ -1213,7 +1223,8 @@ static void DrawButtonHints(Canvas *cv) {
     Hint left[2] = { { kBtn_Dpad, "Scegli" }, { kBtn_Start, "Chiudi" } };
     Hint right[2];
     int nr = 0;
-    if (sram_progress_indicator)
+    // SELECT salva solo con un oggetto su X (Hud_NormalMenu)
+    if (sram_progress_indicator && hud_cur_item_x != 0)
       right[nr++] = (Hint){ kBtn_Select, "Salva" };
     // Le colonne stanno nelle fasce laterali: in 16:9 (71 px) con il margine
     // interno pieno, in 16:10 (51 px) con un margine piu' stretto. In 4:3 non
@@ -1244,15 +1255,37 @@ static void DrawButtonHints(Canvas *cv) {
   }
 }
 
+// Labirinti per indice (cur_palace_index_x2 / 2): nome (sulla mappa del
+// labirinto e, se banner, all'ingresso) e livello dei labirinti del Mondo
+// delle Tenebre (0 = senza livello). Come su GBA (tabella dei messaggi
+// 0x814e498) fogne, Castello di Hyrule e torre di Agahnim non hanno la
+// scritta all'ingresso.
+typedef struct DungeonEntry {
+  const char *name;
+  uint8 level;
+  bool banner;
+} DungeonEntry;
+
+static const DungeonEntry kDungeons[14] = {
+  { "Fogne del castello", 0, false },
+  { "Castello di Hyrule", 0, false },
+  { "Palazzo dell'Est", 0, true },
+  { "Castello di Sabbia", 0, true },
+  { "Sala superiore del castello", 0, false },  // torre di Agahnim
+  { "Dedalo d'Acqua", 2, true },
+  { "Palazzo Cupo", 1, true },
+  { "Malapalude", 6, true },
+  { "Bosco d'Ossa", 3, true },
+  { "Forte Ghiaccio", 5, true },
+  { "Torre sul Monte", 0, true },
+  { "Tana dei Ladroni", 4, true },
+  { "Rocca Tartaruga", 7, true },
+  { "Torre di Ganon", 8, true },
+};
+
 // Nome del labirinto mostrato sulla mappa del dungeon, in alto al centro
 // (parte della mappa dei labirinti migliorata, ImprovedDungeonMap)
 static void DrawDungeonMapStatus(Canvas *cv) {
-  static const char *const kDungeonNames[14] = {
-    "Fogne del castello", "Castello di Hyrule", "Palazzo dell'Est", "Castello di Sabbia",
-    "Sala superiore del castello", "Dedalo d'Acqua", "Palazzo Cupo", "Malapalude",
-    "Bosco d'Ossa", "Forte Ghiaccio", "Torre sul Monte", "Tana dei Ladroni",
-    "Rocca Tartaruga", "Torre di Ganon",
-  };
   if (!(enhanced_features0 & kFeatures0_ImprovedDungeonMap))
     return;
   if (main_module_index != 14 || submodule_index != 3 || overworld_map_state < 2 || overworld_map_state > 4)
@@ -1260,7 +1293,7 @@ static void DrawDungeonMapStatus(Canvas *cv) {
   int dung = cur_palace_index_x2 >> 1;
   if (dung < 0 || dung >= 14)
     return;
-  const char *name = Tr(kDungeonNames[dung]);
+  const char *name = Tr(kDungeons[dung].name);
   int w = TextWidth(name);
   int x = (cv->width - w) / 2;
   Canvas_Rect(cv, x - 8, 4, w + 16, 18, 0x101830);
@@ -1378,31 +1411,6 @@ static void GbaText(Canvas *cv, int x, int y, const char *s, int pass) {
   }
 }
 
-// Nomi dei dungeon per indice (cur_palace_index_x2 / 2), con il livello dei
-// dungeon del Mondo delle Tenebre (0 = senza livello). Come su GBA (tabella dei
-// messaggi 0x814e498) fogne, Castello di Hyrule e torre di Agahnim non ne hanno.
-typedef struct DungeonEntry {
-  uint8 level;
-  const char *name;
-} DungeonEntry;
-
-static const DungeonEntry kDungeonEntries[14] = {
-  { 0, NULL },                       // fogne
-  { 0, NULL },                       // Castello di Hyrule
-  { 0, "Palazzo dell'Est" },
-  { 0, "Castello di Sabbia" },
-  { 0, NULL },                       // torre di Agahnim
-  { 2, "Dedalo d'Acqua" },
-  { 1, "Palazzo Cupo" },
-  { 6, "Malapalude" },
-  { 3, "Bosco d'Ossa" },
-  { 5, "Forte Ghiaccio" },
-  { 0, "Torre sul Monte" },
-  { 4, "Tana dei Ladroni" },
-  { 7, "Rocca Tartaruga" },
-  { 8, "Torre di Ganon" },
-};
-
 static const DungeonEntry *g_dungeon_name;
 static bool g_dungeon_name_armed;
 static uint16 g_dungeon_name_x, g_dungeon_name_y;
@@ -1420,8 +1428,8 @@ void HdMenu_ShowDungeonName(void) {
   g_dungeon_name_tick = 0;
   g_dungeon_name_held = false;
   uint16 i = cur_palace_index_x2 >> 1;
-  if (cur_palace_index_x2 != 0xff && i < countof(kDungeonEntries) && kDungeonEntries[i].name)
-    g_dungeon_name = &kDungeonEntries[i];
+  if (cur_palace_index_x2 != 0xff && i < countof(kDungeons) && kDungeons[i].banner)
+    g_dungeon_name = &kDungeons[i];
 }
 
 static int GbaTextWidth(const char *s) {
@@ -1549,6 +1557,7 @@ static void DrawDungeonEntryName(Canvas *cv) {
 
 void HdMenu_Draw(uint8 *pixels, int pitch, int width, int height, int scale) {
   Canvas cv = { pixels, pitch, width / scale, height / scale, scale };
+  HdText_Draw(pixels, pitch, width, height, scale);
   if (!g_menu_open) {
     if (!g_font_data)
       Font_Load();
@@ -1623,7 +1632,8 @@ void HdMenu_Draw(uint8 *pixels, int pitch, int width, int height, int scale) {
 // Testo nitido
 
 bool HdText_GetRect(int frame_w, int frame_h, int *x, int *y, int *w, int *h) {
-  if (!g_config.hd_text || main_module_index != 14 || submodule_index != 2)
+  // con il testo moderno il riquadro originale non c'e'
+  if (!g_config.hd_text || main_module_index != 14 || submodule_index != 2 || HdText_ModernActive())
     return false;
   int off = (text_msgbox_topleft - 0x6000) & 0x3ff;
   int col = off & 31, row = off >> 5;

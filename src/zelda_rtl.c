@@ -15,6 +15,7 @@
 #include "hd_light.h"
 #include "hd_fx.h"
 #include "hd_water.h"
+#include "hd_rumble.h"
 #include "hd_hud.h"
 #include "hd_menu.h"
 #include "hd_3d.h"
@@ -191,14 +192,14 @@ static int SeamTileAddr(BgLayer *bg, int row, int col) {
 }
 
 static bool RoomSeamActive(void) {
-  return main_module_index == 7 && submodule_index == 2 && g_seam_prev_room >= 0 &&
+  return HdFx_RoomScroll() && submodule_index == 2 && g_seam_prev_room >= 0 &&
          g_seam_prev_room != dungeon_room_index;
 }
 
 // Scorrimento della vista: verso un'altra stanza (7/2) o verso l'altra meta'
 // della stessa stanza (7/1)
 static bool RoomScrollActive(void) {
-  return RoomSeamActive() || (main_module_index == 7 && submodule_index == 1 &&
+  return RoomSeamActive() || (HdFx_RoomScroll() && submodule_index == 1 &&
                               g_seam_prev_room == dungeon_room_index);
 }
 
@@ -326,17 +327,10 @@ static void ConfigurePpuSideSpace() {
   int extra_right = 0, extra_left = 0, extra_bottom = 0;
   bool room_scroll = false;
 //  printf("main %d, sub %d  (%d, %d, %d)\n", main_module_index, submodule_index, BG2HOFS_copy2, room_bounds_x.v[2 | (quadrant_fullsize_x >> 1)], quadrant_fullsize_x >> 1);
-  int mod = main_module_index;
+  // la scena in vista (HdFx_SceneModule: cerchio, cadute, vittorie, morte...);
+  // sotto le mappe e gli altri menu quella da cui si e' aperto
+  int mod = HdFx_SceneModule();
   if (mod == 14)
-    mod = saved_module_for_menu;
-  // cerchio che si chiude (15) o si riapre (16): come dentro o fuori
-  if (mod == 15 || mod == 16)
-    mod = player_is_indoors ? 7 : 9;
-  // caduta in un labirinto (Module11): dalla fase 3 la stanza nuova e' gia' caricata
-  if (mod == 17 && subsubmodule_index >= 3)
-    mod = 7;
-  // morte di Link: come la scena di prima finche' si vede il mondo
-  if (HdFx_DeathShowsWorld())
     mod = saved_module_for_menu;
   // mappa del mondo e mappa dell'Ocarina: nuvole anche oltre il bordo della mappa
   g_zenv.ppu->m7CloudFill = main_module_index == 14 && (submodule_index == 7 || submodule_index == 10);
@@ -406,10 +400,12 @@ static bool SmoothCamera_IsGameplay() {
     return true;
   if (mod == 7 || mod == 9)
     return submodule_index == 0;
-  // Dialogo aperto durante il gioco: il fondale resta dov'e'
-  if (mod == 14 && submodule_index == 2)
-    return saved_module_for_menu == 7 || saved_module_for_menu == 9;
-  // Morte di Link: Link e' fermo, la vista non riparte da capo (salto)
+  // Gioco fermo in vista (dialoghi, menu, pozioni, dissolvenze...): il
+  // fondale resta dov'e' invece di riallinearsi di colpo
+  if (HdFx_GameHeldInView())
+    return true;
+  // Morte di Link: Link e' fermo, la vista non riparte da capo (salto),
+  // anche sullo schermo rosso
   if (mod == 18)
     return saved_module_for_menu == 7 || saved_module_for_menu == 9;
   return false;
@@ -670,9 +666,13 @@ void ZeldaDrawPpuFrame(uint8 *pixel_buffer, size_t pitch, uint32 render_flags) {
   RoomSeamPatch(g_zenv.ppu, 256 + 2 * g_zenv.ppu->extraLeftRight, height);
   HdLight_BeforeRender(g_zenv.ppu);
   HdHud_BeforeRender(g_zenv.ppu);
+  HdText_BeforeRender(g_zenv.ppu);
   HdFx_IrisBeforeRender(g_zenv.ppu);
   HdFx_ShadowsBeforeRender(g_zenv.ppu, 256 + 2 * g_zenv.ppu->extraLeftRight, height);
+  HdWater_BeforeRender(g_zenv.ppu, 256 + 2 * g_zenv.ppu->extraLeftRight, height);
   HdFx_IceBeforeRender(g_zenv.ppu);
+  HdFx_DiveBeforeRender(g_zenv.ppu);
+  HdFx_AsBgBeforeRender(g_zenv.ppu);
   HdFx_SuperBombBeforeRender(g_zenv.ppu);
   HdFx_FogBeforeRender(g_zenv.ppu);
   HdWorld_BeforeRender(256 + 2 * g_zenv.ppu->extraLeftRight, height);
@@ -715,9 +715,11 @@ void ZeldaDrawPpuFrame(uint8 *pixel_buffer, size_t pitch, uint32 render_flags) {
   HdFx_FadeAfterRender(g_zenv.ppu);
   if (g_zenv.ppu->bg3MaxDigits)
     g_zenv.ppu->cgram[0x10] = cg10;
+  HdText_AfterRender(g_zenv.ppu);
   HdLight_AfterRender(g_zenv.ppu);
   HdFx_IrisAfterRender(g_zenv.ppu);
   HdFx_ShadowsAfterRender(g_zenv.ppu);
+  HdWater_AfterRender(g_zenv.ppu);
   HdFx_FogAfterRender(g_zenv.ppu);
   HdWorld_Composite(pixel_buffer, (int)pitch, 256 + 2 * g_zenv.ppu->extraLeftRight, height);
   HdWorld_WarpMask(pixel_buffer, (int)pitch, 256 + 2 * g_zenv.ppu->extraLeftRight, height);
@@ -828,6 +830,8 @@ void ZeldaRunFrameInternal(uint16 input, int run_what) {
   if (run_what & 1)
     ZeldaRunGameLoop();
   Interrupt_NMI(input);
+  if (run_what & 1)
+    HdRumble_Tick();
 }
 
 

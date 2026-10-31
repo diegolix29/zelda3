@@ -6,6 +6,7 @@
 #include "overworld.h"
 #include "messaging.h"
 #include "sprite.h"
+#include "hd_rumble.h"
 
 #define selectfile_R16 g_ram[0xc8]
 #define selectfile_R17 g_ram[0xc9]
@@ -137,6 +138,7 @@ void SelectFile_Func16() {
     if (selectfile_R16 == 0) {
       sound_effect_2 = 0x22;
       sound_effect_1 = 0x0;
+      HdRumble(kRumble_MenuErase);
       int k = subsubmodule_index;
       selectfile_arr1[k] = 0;
       memset(g_zenv.sram + k * 0x500, 0, 0x500);
@@ -354,6 +356,7 @@ void FileSelect_Main() {  // 8ccebd
         submodule_index = 0;
         subsubmodule_index = 0;
       } else {
+        HdRumble(kRumble_MenuConfirm);
         music_control = 0xf1;
         srm_var1 = selectfile_R16 * 2 + 2;
         WORD(g_ram[0]) = selectfile_R16 * 0x500;
@@ -366,6 +369,7 @@ void FileSelect_Main() {  // 8ccebd
       subsubmodule_index = 0;
     } else {
       sound_effect_1 = 0x3c;
+      HdRumble(kRumble_MenuError);
     }
   }
 }
@@ -610,6 +614,7 @@ void CopyFile_HandleConfirmation() {  // 8cd371
   } else if (a != 0) {
     sound_effect_1 = 0x2c;
     if (selectfile_R16 == 0) {
+      HdRumble(kRumble_MenuConfirm);
       memcpy(g_zenv.sram + (selectfile_R18 >> 1) * 0x500, g_zenv.sram + (selectfile_R20 >> 1) * 0x500, 0x500);
       selectfile_arr1[(selectfile_R18 >> 1)] = 1;
       ZeldaWriteSram();
@@ -761,6 +766,69 @@ void NameFile_EraseSave() {  // 8cd89c
   name[0] = name[1] = name[2] = name[3] = name[4] = name[5] = 0xa9;
 }
 
+// Nome con la tastiera: le lettere premute si scrivono nella casella del
+// cursore come se si scegliessero nella griglia, Backspace cancella l'ultima.
+// Valori della griglia (kNamePlayer_Tab3): la I maiuscola e la l minuscola
+// usano la casella 0x5f, la i minuscola la 0x60, il ! la 0x61, le cifre
+// 0x76-0x7f; il resto e' come l'alfabeto dei dialoghi
+static char g_name_typed[16];
+static int g_name_typed_n;
+
+bool NameFile_IsTyping(void) {
+  return main_module_index == 4 && submodule_index == 3;
+}
+
+void NameFile_TypeChar(char c) {
+  if (NameFile_IsTyping() && g_name_typed_n < (int)sizeof(g_name_typed))
+    g_name_typed[g_name_typed_n++] = c;
+}
+
+static int NameFile_GridValue(char c) {
+  if (c == 'I') return 0x5f;
+  if (c == 'i') return 0x60;
+  if (c == 'l') return 0x5f;
+  if (c >= 'A' && c <= 'Z') return c - 'A';
+  if (c >= 'a' && c <= 'z') return 0x1a + c - 'a';
+  if (c >= '0' && c <= '9') return 0x76 + c - '0';
+  switch (c) {
+  case ' ': return 0x59;
+  case '-': return 0x40;
+  case '.': return 0x41;
+  case ',': return 0x42;
+  case '!': return 0x61;
+  case '?': return 0x3f;
+  case '(': return 0x45;
+  case ')': return 0x46;
+  }
+  return -1;
+}
+
+// Un carattere per fotogramma: il disegno usa un solo caricamento in VRAM,
+// gli altri tasti aspettano in coda
+static void NameFile_HandleTyped(void) {
+  while (g_name_typed_n) {
+    char c = g_name_typed[0];
+    memmove(g_name_typed, g_name_typed + 1, --g_name_typed_n);
+    int t = NameFile_GridValue(c);
+    if (c == '\b') {
+      // indietro di una casella e la si svuota
+      selectfile_var4 = selectfile_var4 ? selectfile_var4 - 1 : 5;
+      t = 0x59;
+    } else if (t < 0) {
+      sound_effect_1 = 0x3c;  // carattere che il gioco non ha
+      continue;
+    }
+    int p = selectfile_var4 * 2 + attract_legend_ctr;
+    uint16 chr = (t & 0xfff0) * 2 + (t & 0xf);
+    WORD(g_zenv.sram[p + kSrmOffs_Name]) = chr;
+    NameFile_DrawSelectedCharacter(selectfile_var4, chr);
+    if (c != '\b' && ++selectfile_var4 == 6)
+      selectfile_var4 = 0;
+    sound_effect_1 = 0x2b;
+    break;
+  }
+}
+
 void NameFile_DoTheNaming() {  // 8cda4d
   static const int16 kNamePlayer_Tab1[26] = {
     -1, 1, -1, 1, -1, 1, -1, 1, -1, 1, -1, 1, -1, 1, -1, 1,
@@ -782,6 +850,7 @@ void NameFile_DoTheNaming() {  // 8cda4d
     0x44, 0x59, 0x6f, 0x6f, 0x59, 0x59, 0x59, 0x59, 0x59, 0x59, 0x59, 0x5a, 0x44, 0x59, 0x6f, 0x6f,
     0x59, 0x59, 0x5a, 0x44, 0x59, 0x6f, 0x6f, 0x59, 0x59, 0x59, 0x59, 0x59, 0x59, 0x59, 0x59, 0x5a,
   };
+  NameFile_HandleTyped();
   for (;;) {
     int j = selectfile_var9;
     if (j == 0) {
@@ -859,6 +928,7 @@ void NameFile_DoTheNaming() {  // 8cda4d
       break;
     if (++i == 6) {
       sound_effect_1 = 0x3c;
+      HdRumble(kRumble_MenuError);
       return;
     }
   }
@@ -881,6 +951,7 @@ void NameFile_DoTheNaming() {  // 8cda4d
   ReturnToFileSelect();
   irq_flag = 0xff;
   sound_effect_1 = 0x2c;
+  HdRumble(kRumble_MenuConfirm);
 }
 
 void NameFile_CheckForScrollInputX() {  // 8cdc8c

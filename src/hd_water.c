@@ -43,13 +43,15 @@ static uint32 *g_pre;     // l'immagine prima di ombre e luci
 static bool g_pre_valid;
 static uint16 *g_dist;
 // Che cosa e' ogni pixel: 0 altro, 1 acqua, 2 cascata, 3 riva (terreno), 6 sprite
-// sopra la cascata o il getto (non la interrompono). Valori di passaggio
+// sopra la cascata o il getto (non la interrompono), 7 sprite sopra l'acqua
+// (acqua per i calcoli, ma lo sprite non si ridipinge). Valori di passaggio
 // dentro i singoli passi: 4, 5 e 9 (segni da riempire o da scartare) e i bit
 // 0x20 e 0x40 (IslandCells)
 static uint8 *g_kind;
 static uint8 *g_depth;    // 0 = non si sa, 1 = acqua alta (0x08), 2 = acqua bassa (0x09)
 static uint8 *g_fixed;    // 1 = onda animata dello SNES: acqua in ogni fase (AnimWaterPixel)
-static uint32 *g_sum;     // somme per la media, impacchettate (vedi BlurRows)
+static uint8 *g_spr;      // 1 = pixel di uno sprite: un buco per l'acqua (FillSpriteHoles)
+static uint32 *g_sum;    // somme per la media, impacchettate (vedi BlurRows)
 static uint32 *g_sum2;
 static int g_buf_cap;
 
@@ -119,7 +121,7 @@ void HdWater_PrepareAttrs(void) {
 uint8 HdWater_DungAttr(int i, int wx, int wy) {
   i &= 0x1fff;
   int room = (wy >> 9 & 15) << 4 | (wx >> 9 & 15);
-  if (main_module_index == 7 && submodule_index != 0 && room == (g_attr_prev_room & 0xff) &&
+  if (HdFx_DungeonPassing() && room == (g_attr_prev_room & 0xff) &&
       room != (dungeon_room_index & 0xff))
     return g_attr_prev[i];
   return g_attr_cached ? g_attr_cache[i] : dung_bg2_attr_table[i];
@@ -247,14 +249,50 @@ static bool EnsureBuffers(int n) {
   if (depth) g_depth = depth;
   uint8 *fixed = realloc(g_fixed, n);
   if (fixed) g_fixed = fixed;
+  uint8 *spr = realloc(g_spr, n);
+  if (spr) g_spr = spr;
   uint32 *sum = realloc(g_sum, n * kSumCh * sizeof(uint32));
   if (sum) g_sum = sum;
   uint32 *sum2 = realloc(g_sum2, n * kSumCh * sizeof(uint32));
   if (sum2) g_sum2 = sum2;
-  if (!pre || !dist || !kind || !depth || !fixed || !sum || !sum2)
+  if (!pre || !dist || !kind || !depth || !fixed || !spr || !sum || !sum2)
     return false;
   g_buf_cap = n;
   return true;
+}
+
+// Sprite trasparenti sull'acqua (la regina delle fate che sale dalla vasca,
+// la fata grassa della Piramide): la PPU li somma allo schermo secondario,
+// cioe' all'acqua del gioco, e attraverso lo sprite si vedeva l'acqua
+// originale. La PPU scrive qui il colore dello sprite da solo (objMathOut):
+// sotto questi pixel l'acqua HD si dipinge (KeepSpritesOverWater) e poi lo
+// sprite si somma all'acqua nuova come fa la PPU (AddSeeThroughSprites)
+static uint32 *g_obj_math;
+static int g_obj_math_cap;
+static bool g_obj_math_valid;
+static int g_num_see_through;
+
+void HdWater_BeforeRender(Ppu *ppu, int width, int height) {
+  int mod;
+  ppu->objMathOut = NULL;
+  g_obj_math_valid = false;
+  if (!InScene(&mod) || ppu->mode == 7)
+    return;
+  int n = width * height;
+  if (n > g_obj_math_cap) {
+    uint32 *p = realloc(g_obj_math, n * sizeof(uint32));
+    if (!p)
+      return;
+    g_obj_math = p, g_obj_math_cap = n;
+  }
+  memset(g_obj_math, 0, n * sizeof(uint32));
+  ppu->objMathOut = g_obj_math;
+  ppu->objMathStride = width;
+}
+
+void HdWater_AfterRender(Ppu *ppu) {
+  g_obj_math_valid = ppu->objMathOut != NULL;
+  ppu->objMathOut = NULL;
 }
 
 void HdWater_BeforeEffects(uint8 *pixels, int pitch, int width, int height) {
@@ -710,8 +748,9 @@ static int LipTop(int x, int y, int cam_x, int cam_y, int ext) {
 // ---------------------------------------------------------------------------
 // Distanza in pixel (trasformata a due passate, 3 in orizzontale e verticale,
 // 4 in diagonale) dai pixel con g_kind fra seed_lo e seed_hi (dalla riva:
-// terreno e cascate, cosi' c'e' schiuma anche alla base delle cascate). HUD e
-// personaggi sono "trasparenti"; fuori dall'immagine non c'e' riva.
+// terreno e cascate, cosi' c'e' schiuma anche alla base delle cascate). L'HUD
+// e' "trasparente", gli sprite valgono come lo sfondo sotto (ClassifyRows);
+// fuori dall'immagine non c'e' riva.
 
 static inline int MinI(int a, int b) {
   return a < b ? a : b;
@@ -820,13 +859,22 @@ static bool SameTint(uint32 a, uint32 b) {
   return g_ok && b_ok;
 }
 
-static void FindWaterColors(int n, int n_water) {
+// Nei labirinti l'acqua e' sempre azzurra o verde: le caselle che il gioco
+// segna come acqua ma che sullo schermo sono asciutte (la cima della scala che
+// scende nell'acqua del Palazzo della Palude, stanza 0x28) non danno i colori
+// dell'acqua. Col loro grigio viola l'acqua si allargava sui muri vicini
+// (ShorePixels arriva a 48 pixel) con un alone di schiuma bianca
+static bool IsWaterTint(uint32 c);
+
+static void FindWaterColors(int n, int n_water, bool tint_only) {
   uint32 col[kMaxColors];
   int cnt[kMaxColors], inner[kMaxColors], nc = 0, last = -1;
   for (int i = 0; i < n; i++) {
-    if (g_kind[i] != 1 || g_fixed[i])
+    if (g_kind[i] != 1 || g_fixed[i] || g_spr[i])
       continue;  // le onde animate non contano: hanno i colori della fase
     uint32 c = g_pre[i] & 0xffffff;
+    if (tint_only && !IsWaterTint(c))
+      continue;
     if (last < 0 || col[last] != c) {
       last = -1;
       for (int j = 0; j < nc; j++)
@@ -898,9 +946,7 @@ static float g_bright = 1.0f;
 // colore BGR555 dello SNES in 0xRRGGBB con la luminosita' bri (0-15), come la
 // PPU (ppu.c, brightnessMult): prima qui c<<3, fino a 7 piu' scuro dello schermo
 static inline uint32 SnesColor(uint16 c15, int bri) {
-  uint32 r = c15 & 31, g = c15 >> 5 & 31, b = c15 >> 10 & 31;
-  r = (r << 3 | r >> 2) * bri / 15, g = (g << 3 | g >> 2) * bri / 15, b = (b << 3 | b >> 2) * bri / 15;
-  return r << 16 | g << 8 | b;
+  return HdFx_DimRgb(HdFx_Bgr15ToRgb(c15), bri);
 }
 
 // Azzurro o blu: la fascia scura lungo la riva, le sue onde animate (gli
@@ -922,6 +968,12 @@ static inline bool IsFallEdgeColor(uint32 c) {
     return true;
   int cr = c >> 16 & 0xff, cg = c >> 8 & 0xff, cb = c & 0xff;
   return (overworld_screen_index & 0x40) && cg >= cr + 40 * g_bri / 15 && cg >= cb;
+}
+
+// Azzurro, blu o verde: i colori dell'acqua nei labirinti (FindWaterColors)
+static bool IsWaterTint(uint32 c) {
+  int cr = c >> 16 & 0xff, cg = c >> 8 & 0xff, cb = c & 0xff;
+  return IsBluish(c) || (cg >= cr + 40 * g_bri / 15 && cg + 16 * g_bri / 15 >= cb);
 }
 
 // Colore simile a uno dei colori dell'acqua (somma delle differenze <= tol) e
@@ -1017,15 +1069,18 @@ static void BlurRows(void *ctx, int part, int y0, int y1) {
     // le onde animate contano col colore dell'acqua, non con quello della
     // fase (gli archi scuri facevano una macchia che cambiava ogni 9 fotogrammi)
     uint32 wc = g_num_water_colors ? g_water_colors[0] : 0;
+    // gli sprite sopra l'acqua (7) contano come l'acqua accanto
+    // (FillSpriteHoles): senza, il confine fra acqua alta e bassa si spostava
+    // vicino a loro
     for (int x = -r; x < w + r; x++) {
       int xin = x + r, xout = x - r - 1;
-      if (xin < w && k[xin] == 1) {
+      if (xin < w && (k[xin] == 1 || k[xin] == 7)) {
         uint32 c = fx[xin] && wc ? wc : pre[xin];
         acc[0] += (c >> 16 & 0xff) | (c >> 8 & 0xff) << 16;
         acc[1] += (c & 0xff) | 1 << 16 | (uint32)(dp[xin] == 2) << 24;
         acc[2] += dp[xin] != 0;
       }
-      if (xout >= 0 && k[xout] == 1) {
+      if (xout >= 0 && (k[xout] == 1 || k[xout] == 7)) {
         uint32 c = fx[xout] && wc ? wc : pre[xout];
         acc[0] -= (c >> 16 & 0xff) | (c >> 8 & 0xff) << 16;
         acc[1] -= (c & 0xff) | 1 << 16 | (uint32)(dp[xout] == 2) << 24;
@@ -1098,10 +1153,7 @@ static inline void LightRatio(uint32 lit, uint32 pre, float *k) {
 }
 
 static inline uint32 PackColor(float r, float g, float b, uint32 layer) {
-  int ir = (int)(r + 0.5f), ig = (int)(g + 0.5f), ib = (int)(b + 0.5f);
-  ir = ir < 0 ? 0 : ir > 255 ? 255 : ir;
-  ig = ig < 0 ? 0 : ig > 255 ? 255 : ig;
-  ib = ib < 0 ? 0 : ib > 255 ? 255 : ib;
+  int ir = HdFx_ClampByte((int)(r + 0.5f)), ig = HdFx_ClampByte((int)(g + 0.5f)), ib = HdFx_ClampByte((int)(b + 0.5f));
   return layer << 24 | ir << 16 | ig << 8 | ib;
 }
 
@@ -1220,6 +1272,8 @@ static bool SpoutWaterBelow(int x, int y, int w, int cam_y) {
   return false;
 }
 
+static bool DungeonWaterUnderSprite(int x, int y, int ext);
+
 static void ClassifyRows(void *ctx, int part, int y0, int y1) {
   ClassJob *j = (ClassJob *)ctx;
   int w = j->w, cam_x = j->cam_x, cam_y = j->cam_y, ext = j->ext;
@@ -1231,17 +1285,27 @@ static void ClassifyRows(void *ctx, int part, int y0, int y1) {
     uint8 *k = g_kind + y * w, *dp = g_depth + y * w;
     for (int x = 0; x < w; x++) {
       uint32 l = row[x] >> 24;
+      // l'acqua ignora gli sprite: per lei un pixel di uno sprite e' lo sfondo
+      // che c'e' sotto (acqua o terreno, dalla casella; il colore e' gia' quello
+      // dello sfondo in g_pre, SpritesShowBackground). Restano sprite (l) solo
+      // per i getti e le cascate, che passano dietro senza interrompersi
+      uint32 sl = l;
+      if (l == 4 || l == 6) {
+        bool under = outdoors ? IsWaterCell(CellAt(x, y, cam_x, cam_y, ext)) : DungeonWaterUnderSprite(x, y, ext);
+        l = under ? kLayerWater : 1;
+      }
       int cell = outdoors && (l <= 1 || l == 5 || l == kLayerWater) ? CellAt(x, y, cam_x, cam_y, ext) : kCellUnknown;
       dp[x] = cell == kCellShallow ? 2 : cell == kCellWater ? 1 : 0;
       if (!outdoors && l == kLayerWater)
         dp[x] = DungeonDepthAt(x - ext + cam_x, y + cam_y);
       g_fixed[y * w + x] = 0;
-      int spout = !outdoors && j->falls ? SpoutAt(x - ext + cam_x, y + cam_y) : 0;
+      g_spr[y * w + x] = (sl == 4 || sl == 6) && x >= g_vis_x0 && x < g_vis_x1 && y < g_vis_y1;
+      int spout =!outdoors && j->falls ? SpoutAt(x - ext + cam_x, y + cam_y) : 0;
       if (x < g_vis_x0 || x >= g_vis_x1 || y >= g_vis_y1) {
         k[x] = 0;  // fasce nere: non e' una riva
       } else if (cell == kCellWarp) {
         k[x] = 0;  // portale fra i mondi: ne' acqua ne' riva (e' azzurro)
-      } else if (spout && (l == kLayerHud || l == 4 || l == 6)) {
+      } else if (spout && (sl == kLayerHud || sl == 4 || sl == 6)) {
         k[x] = 6;  // sprite sopra il getto: non lo interrompono
       } else if ((spout && (l <= 1 || l == 5 || (spout == 3 && l == kLayerWater)) && (spout >= 2 || SpoutWaterBelow(x, y, w, cam_y))) || (j->stream && l == kLayerWater)) {
         uint32 c = g_pre[y * w + x];  // getto della bocca: piccola cascata
@@ -1252,7 +1316,7 @@ static void ClassifyRows(void *ctx, int part, int y0, int y1) {
                  AnimWaterPixel(x, y, cam_x, cam_y, ext)) {
         k[x] = 1, n_water++;  // onda animata della riva: acqua in ogni fase
         g_fixed[y * w + x] = 1;
-      } else if (j->falls && (cell == kCellFall || cell == kCellFallEdge) && (l == kLayerHud || l == 4 || l == 6)) {
+      } else if (j->falls && (cell == kCellFall || cell == kCellFallEdge) && (sl == kLayerHud || sl == 4 || sl == 6)) {
         k[x] = 6;  // cuori, Link, nemici sopra la cascata: non la interrompono
       } else if (j->falls && (cell == kCellFall || (cell == kCellFallEdge && IsFallEdgeColor(g_pre[y * w + x]))) && l != 0) {
         uint32 c = g_pre[y * w + x];
@@ -1706,7 +1770,7 @@ static void DarkShoreToWater(int w, int h, int cam_x, int cam_y, int ext) {
 
 // Fondale sotto uno sprite: il pixel del primo strato acceso (BG1, poi BG2)
 // che non e' trasparente, colore BGR555; -1 se trasparente
-static int BgUnderSprite(int x, int y, int ext) {
+static int BgUnderSprite(int x, int y, int ext, int *layer, int *wx, int *wy) {
   Ppu *ppu = g_zenv.ppu;
   static const uint8 kTm[2] = { 1, 2 };
   for (int n = 0; n < 2; n++) {
@@ -1725,37 +1789,187 @@ static int BgUnderSprite(int x, int y, int ext) {
     int bit = (e & 0x4000) ? (px & 7) : 7 - (px & 7);
     const uint16 *t = &ppu->vram[(bg->tileAdr + (e & 0x3ff) * 16) & 0x7fff];
     int v = HdFx_Pixel4bpp(t[row], t[row + 8], bit);
-    if (v)
+    if (v) {
+      if (layer)
+        *layer = n, *wx = (x - ext + hofs + ppu->bgBiasX) & 0xffff, *wy = (y + 1 + vofs + ppu->bgBiasY) & 0xffff;
       return HdFx_RealBg(ppu->cgram, (e >> 10 & 7) * 16 + v);
+    }
   }
   return -1;
 }
 
-// Sprite sopra la riva (la trappola a spuntoni che scorre lungo il bordo
-// della vasca, nemici e Link sulla sponda): sotto c'e' la riva, non un buco.
-// Prima la schiuma si piegava attorno allo sprite e lo seguiva. Sopra
-// l'acqua lo sprite resta com'era (chi nuota non ha la schiuma attorno)
-typedef struct SpriteShoreJob {
-  int w, ext;
-  bool outdoors;
-} SpriteShoreJob;
+// Nei labirinti: c'e' acqua sotto lo sprite? Come HdFx_MarkWater, dallo
+// strato che c'e' davvero sotto: il piano di sopra (BG1, attributi da 0x1000
+// e acqua della chiusa) o il pavimento (BG2, piu' il piano di sopra quando e'
+// sommato in trasparenza). Lo strato spento non conta: nella stanza 0x28 il
+// piano di sopra e' tutto acqua alta anche quando non si vede, e attorno a
+// Link il pavimento diventava acqua
+static bool IsWaterAttrByte(uint8 a) {
+  return a == 0x08 || a == 0x09;
+}
 
-static void SpriteShoreRows(void *ctx, int part, int y0, int y1) {
-  const SpriteShoreJob *j = (const SpriteShoreJob *)ctx;
-  int w = j->w;
-  for (int y = y0; y < y1 && y < g_vis_y1; y++)
-    for (int x = g_vis_x0; x < g_vis_x1; x++) {
+static bool DungeonWaterUnderSprite(int x, int y, int ext) {
+  int n, wx, wy;
+  if (BgUnderSprite(x, y, ext, &n, &wx, &wy) < 0)
+    return false;
+  int i = ((wy & 0x1f8) << 3) + ((wx & 0x1f8) >> 3);
+  bool upper = HdWater_IsFlood(i) || IsWaterAttrByte(HdWater_DungAttr(i + 0x1000, wx, wy));
+  if (n == 0)
+    return upper;
+  bool bg1_sub = (TS_copy & 1) && !(TM_copy & 1);
+  return IsWaterAttrByte(HdWater_DungAttr(i, wx, wy)) || HdWater_IsTubCell(i) || (bg1_sub && upper);
+}
+
+// L'acqua ignora gli sprite (Link, nemici, oggetti, la trappola che scorre
+// lungo la vasca): per tutti i calcoli dell'acqua (riva, colori, schiuma) il
+// pixel di uno sprite ha il colore dello sfondo che c'e' sotto, e il suo posto
+// e' acqua o terreno come la casella (ClassifyRows). Prima i colori dello
+// sprite contavano: un soldato blu nella palude diventava acqua e veniva
+// ridipinto, e attorno a chi stava nell'acqua c'era la schiuma della riva
+static void SpriteRowsShowBackground(void *ctx, int part, int y0, int y1) {
+  int w = *(const int *)ctx, ext = ((const int *)ctx)[1];
+  for (int y = y0; y < y1; y++)
+    for (int x = 0; x < w; x++) {
       int i = y * w + x;
       uint32 l = g_pre[i] >> 24;
-      if (g_kind[i] != 0 || (l != 4 && l != 6))
+      if (l != 4 && l != 6)
         continue;
-      int c15 = BgUnderSprite(x, y, j->ext);
-      if (c15 < 0)
-        continue;
-      uint32 c = SnesColor((uint16)c15, g_bri);
-      if (!IsNearWaterColor(c, 24) && !(j->outdoors && IsBluish(c)))
-        g_kind[i] = 3;
+      int c15 = BgUnderSprite(x, y, ext, NULL, NULL, NULL);
+      if (c15 >= 0)
+        g_pre[i] = (g_pre[i] & 0xff000000) | SnesColor((uint16)c15, g_bri);
     }
+}
+
+static void SpritesShowBackground(int w, int h, int ext) {
+  int ctx[2] = { w, ext };
+  HdPar_For(SpriteRowsShowBackground, ctx, h);
+}
+
+// Regola per tutti gli sprite: per l'acqua sono buchi. Il colore dello sfondo
+// sotto (SpritesShowBackground) non sempre c'e' (col mondo continuo il fondale
+// viene dalle immagini delle aree, non dalla VRAM) e allora restava il colore
+// dello sprite: il contorno nero di fuochi, rane e nemici diventava riva e
+// attorno nasceva la fascia nera della schiuma (palude oscura, area 0x73).
+// Ogni pixel di uno sprite prende tipo, profondita' e colore dal pixel vero
+// piu' vicino (nelle 4 direzioni, fino a 64 pixel): la riva continua sotto lo
+// sprite com'e' attorno, e lo sprite non fa mai da riva ne' da acqua. Si rifa'
+// dopo ogni passo che cambia la riva, prima delle distanze
+static void FillSpriteRows(void *ctx, int part, int y0, int y1) {
+  int w = ((const int *)ctx)[0], h = ((const int *)ctx)[1];
+  static const int kDx[4] = { -1, 1, 0, 0 }, kDy[4] = { 0, 0, -1, 1 };
+  for (int y = y0; y < y1; y++)
+    for (int x = 0; x < w; x++) {
+      int i = y * w + x;
+      if (!g_spr[i] || g_kind[i] == 2 || g_kind[i] == 6)
+        continue;  // sopra cascate e getti restano 6 (non le interrompono)
+      int best = -1, best_d = 65;
+      for (int d = 0; d < 4; d++) {
+        int xx = x, yy = y;
+        for (int s = 1; s < best_d; s++) {
+          xx += kDx[d], yy += kDy[d];
+          if (xx < 0 || xx >= w || yy < 0 || yy >= h)
+            break;
+          int r = yy * w + xx;
+          if (!g_spr[r]) {
+            best = r, best_d = s;
+            break;
+          }
+        }
+      }
+      if (best < 0)
+        continue;
+      g_kind[i] = g_kind[best] == 2 ? 6 : g_kind[best], g_depth[i] = g_depth[best], g_fixed[i] = g_fixed[best];
+      g_pre[i] = (g_pre[i] & 0xff000000) | (g_pre[best] & 0xffffff);
+    }
+}
+
+static void FillSpriteHoles(int w, int h) {
+  int ctx[2] = { w, h };
+  HdPar_For(FillSpriteRows, ctx, h);
+}
+
+// Alla fine: l'acqua sotto gli sprite resta acqua per le distanze dalla riva,
+// ma non si dipinge (7): lo sprite resta com'e'. Gli sprite trasparenti
+// (g_obj_math) restano acqua da dipingere: si sommano dopo. Solo se lo strato
+// sommato e' quello sotto lo sprite: con la pioggia e le nebbie il gioco
+// somma lo strato della pioggia, e lo sprite deve restare com'e'
+static bool SeeThroughWater(int i, int w, int ext) {
+  int n, wx, wy;
+  return BgUnderSprite(i % w, i / w, ext, &n, &wx, &wy) >= 0 && n == (int)(g_obj_math[i] >> 24 & 7);
+}
+
+static void KeepSpritesOverWater(int w, int h, int ext) {
+  g_num_see_through = 0;
+  for (int i = 0; i < w * h; i++) {
+    uint32 l = g_pre[i] >> 24;
+    if (g_kind[i] != 1 || (l != 4 && l != 6))
+      continue;
+    if (g_obj_math_valid && (g_obj_math[i] >> 31) && SeeThroughWater(i, w, ext))
+      g_num_see_through++;
+    else if (g_obj_math_valid)
+      g_obj_math[i] = 0, g_kind[i] = 7;
+    else
+      g_kind[i] = 7;
+  }
+}
+
+static inline bool SeeThrough(int i) {
+  return g_obj_math_valid && (g_obj_math[i] >> 31) && g_kind[i] == 1;
+}
+
+// Prima di dipingere gli sprite trasparenti: il pixel illuminato era sprite
+// piu' acqua, e la luce (LightRatio) si prende dall'acqua accanto sulla
+// stessa riga applicata al colore dell'acqua sotto lo sprite (g_pre)
+static void SeeThroughLight(uint8 *pixels, int pitch, int w, int h) {
+  for (int y = 0; y < h; y++) {
+    uint32 *row = (uint32 *)(pixels + y * pitch);
+    const uint32 *pre = g_pre + y * w;
+    int ref = -1;
+    for (int x = 0; x < w; x++) {
+      int i = y * w + x;
+      uint32 l = pre[x] >> 24;
+      if (!SeeThrough(i)) {
+        if (g_kind[i] == 1 && l != 4 && l != 6)
+          ref = x;
+        continue;
+      }
+      int r = ref;
+      for (int xx = x + 1; r < 0 && xx < w; xx++) {
+        uint32 ll = pre[xx] >> 24;
+        if (g_kind[i - x + xx] == 1 && ll != 4 && ll != 6)
+          r = xx;
+      }
+      uint32 out = pre[x] & 0xff000000;
+      for (int sh = 0; sh <= 16; sh += 8) {
+        float b = (float)(pre[x] >> sh & 0xff), v = b;
+        if (r >= 0)
+          v = (b + 6) * ((row[r] >> sh & 0xff) + 6.0f) / ((pre[r] >> sh & 0xff) + 6.0f) - 6;
+        int iv = v < 0 ? 0 : v > 255 ? 255 : (int)(v + 0.5f);
+        out |= (uint32)iv << sh;
+      }
+      row[x] = out;
+    }
+  }
+}
+
+// Dopo l'acqua: lo sprite si somma all'acqua HD come nella PPU (a meta' se il
+// gioco somma a meta'); il pixel torna sprite per gli effetti dopo
+static void AddSeeThroughSprites(uint8 *pixels, int pitch, int w, int h) {
+  for (int y = 0; y < h; y++) {
+    uint32 *row = (uint32 *)(pixels + y * pitch);
+    for (int x = 0; x < w; x++) {
+      int i = y * w + x;
+      if (!SeeThrough(i))
+        continue;
+      uint32 o = g_obj_math[i], out = 4u << 24;
+      for (int sh = 0; sh <= 16; sh += 8) {
+        int a = row[x] >> sh & 0xff, s = o >> sh & 0xff;
+        int v = (o & 0x40000000) ? (a + s) >> 1 : a + s;
+        out |= (uint32)(v > 255 ? 255 : v) << sh;
+      }
+      row[x] = out;
+    }
+  }
 }
 
 // La riva vera, pixel per pixel (i due passi di HdWater_Apply)
@@ -1787,6 +2001,10 @@ static void ShorePixels(void *ctx, int part, int i0, int i1) {
     for (int i = i0; i < i1; i++)
       if (g_kind[i] == 3 && g_dist[i] <= j->reach &&
           (IsNearWaterColor(g_pre[i], j->tol) || outdoors && IsBluish(g_pre[i]))) {
+        // nei labirinti l'acqua e' azzurra o verde (IsWaterTint): i muri grigio
+        // azzurri accanto alla vasca della stanza 0x28 diventavano acqua
+        if (!outdoors && !IsWaterTint(g_pre[i]))
+          continue;
         if (!outdoors && j->tol && IsPlainFloorPixel(j, i) &&
             (g_dist[i] > 12 * kDistUnit || !IsNearWaterColor(g_pre[i], 0)))
           continue;
@@ -2198,8 +2416,10 @@ void HdWater_Apply(uint8 *pixels, int pitch, int width, int height, int bias_x, 
   // leva che accende l'acqua (Module07_0C, fase 10): la finestra dell'acqua
   // e' una colonna stretta che scende dalla bocca fino al fondo della vasca
   bool stream = !outdoors && main_module_index == 7 && submodule_index == 12 && subsubmodule_index == 10;
+  SpritesShowBackground(w, h, ext);
   ClassJob cj = { pixels, pitch, w, cam_x, cam_y, ext, outdoors, falls, outside_area, stream };
   HdPar_For(ClassifyRows, &cj, h);
+  FillSpriteHoles(w, h);
   int n_water = 0, n_fall = 0;
   float fall_sum[3] = { 0 };
   for (int p = 0; p < kHdParMaxParts; p++) {
@@ -2229,7 +2449,7 @@ void HdWater_Apply(uint8 *pixels, int pitch, int width, int height, int bias_x, 
     MarkDarkShoreCells();
   if (n_water) {
     ComputeDistance(w, h, 2, 3, 5);
-    FindWaterColors(w * h, n_water);
+    FindWaterColors(w * h, n_water, !outdoors && !see_floor);
   }
   if (n_water && !see_floor) {
     // nelle caselle d'acqua della riva i pixel che non sono acqua (linee della
@@ -2240,13 +2460,15 @@ void HdWater_Apply(uint8 *pixels, int pitch, int width, int height, int bias_x, 
     // scogliere resta coperta dall'acqua, come prima
     if (outdoors && (overworld_screen_index & 0x40))
       AnimShorePixels(w, h, cam_x, cam_y, ext);
-    SpriteShoreJob spj = { w, ext, outdoors };
-    HdPar_For(SpriteShoreRows, &spj, h);
-    ComputeDistance(w, h, 2, 3, 5);  // con la riva sotto gli sprite
+    if (outdoors && (overworld_screen_index & 0x40)) {
+      FillSpriteHoles(w, h);
+      ComputeDistance(w, h, 2, 3, 5);  // con la riva cambiata da AnimShorePixels
+    }
     ShoreJob sj = { 0, 0, 0, outdoors, w, cam_x, cam_y, ext };
     HdPar_For(ShorePixels, &sj, w * h);
     if (outdoors)
       GrowShore(w, h);
+    FillSpriteHoles(w, h);
     // nella stanza della diga pareti, pilastri e muri hanno colori vicini a
     // quelli dell'acqua: la riva si cerca solo vicino e con i colori giusti
     bool near = outdoors || FloodRoom();
@@ -2270,13 +2492,19 @@ void HdWater_Apply(uint8 *pixels, int pitch, int width, int height, int bias_x, 
         g_kind[i] &= ~0x40;
     }
   }
+  FillSpriteHoles(w, h);
+  KeepSpritesOverWater(w, h, ext);
   // fino a 27 pixel: piu' in la' l'acqua e' gia' "al largo" (deep = 1)
   ComputeDistance(w, h, 2, 3, 27);
   BlurWater(w, h, kBlurRadius);
 
   // 1 e 2: acqua
+  if (g_num_see_through)
+    SeeThroughLight(pixels, pitch, w, h);
   PaintJob pj = { pixels, pitch, w, h, cam_x, cam_y, ext, t, outdoors, see_floor, dark_shore };
   HdPar_For(PaintWaterRows, &pj, h);
+  if (g_num_see_through)
+    AddSeeThroughSprites(pixels, pitch, w, h);
 
   // 3: cascate
   g_num_bases = 0;
@@ -2299,7 +2527,7 @@ void HdWater_Apply(uint8 *pixels, int pitch, int width, int height, int bias_x, 
         // il piede vero: sotto la colonna c'e' acqua. Ai bordi diagonali la
         // colonna finisce contro la roccia: niente schiuma ne' nebbia (prima
         // la nebbia copriva la roccia accanto alla cima, dietro i cuori)
-        bool foot = bottom < h - 1 && g_kind[(bottom + 1) * w + x] == 1;
+        bool foot = bottom < h - 1 && (g_kind[(bottom + 1) * w + x] == 1 || g_kind[(bottom + 1) * w + x] == 7);
         for (int yy = top; yy <= bottom; yy++) {
           int i = yy * w + x;
           if (g_kind[i] != 2)

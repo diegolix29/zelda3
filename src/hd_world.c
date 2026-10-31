@@ -48,12 +48,14 @@ static bool FeatureOn(void) {
 
 // Dialoghi, inventario, pozioni e menu di salvataggio aperti all'aperto: il
 // mondo resta visibile dietro e la vista libera resta ferma dov'era
+static bool InFluteArrival(void);
+
 static bool InMenuOverWorld(void) {
-  int sub = submodule_index;
-  // mappa (7) e Ocarina (10): nella fase 0 il mondo si scurisce ancora visibile
-  return main_module_index == 14 && saved_module_for_menu == 9 &&
-         (sub == 1 || sub == 2 || sub == 4 || sub == 8 || sub == 9 || sub == 11 ||
-          ((sub == 7 || sub == 10) && overworld_map_state == 0));
+  // il mondo fermo in vista (HdFx_SceneModule) sotto menu, dialoghi, pozioni,
+  // preghiera, mappa e Ocarina che si scuriscono (fase 0), Salva ed esci e
+  // caduta in una buca. L'arrivo con l'Ocarina e' InFluteArrival
+  int m = main_module_index;
+  return (m == 14 || m == 17 || m == 23) && HdFx_SceneModule() == 9 && !InFluteArrival();
 }
 
 // Arrivo con l'Ocarina: dalla fase 7 l'area di arrivo e' caricata e compare
@@ -163,8 +165,7 @@ static inline uint32 Dim(uint32 c) {
   }
   if (g_bright >= 15)
     return c;
-  uint32 r = (c >> 16 & 255) * g_bright / 15, g = (c >> 8 & 255) * g_bright / 15, b = (c & 255) * g_bright / 15;
-  return (c & 0xff000000) | r << 16 | g << 8 | b;
+  return HdFx_DimRgb(c, g_bright);
 }
 
 // Passaggio con mosaico e dissolvenza (aree con la nebbia, come il Bosco
@@ -543,11 +544,17 @@ static bool SightOn(int k) {
          main_module_index == 9 && IsAreaEnemy(k);
 }
 
-// Punto di partenza (centro) del nemico, dalla tabella dell'area caricata
+// Punto di partenza di un nemico dell'area caricata dal suo blocco nella
+// tabella (sprite_N_word): angolo in alto a sinistra della casella 16x16
+static void BlkHome(uint16 blk, int *hx, int *hy) {
+  *hx = (sprcoll_x_base & 0xff00) + ((blk >> 8 & 3) << 8) + (blk << 4 & 0xf0);
+  *hy = (sprcoll_y_base & 0xff00) + ((blk >> 10) << 8) + (blk & 0xf0);
+}
+
+// Punto di partenza (centro) del nemico k
 static void HomeOf(int k, int *hx, int *hy) {
-  uint16 blk = sprite_N_word[k];
-  *hx = (sprcoll_x_base & 0xff00) + ((blk >> 8 & 3) << 8) + (blk << 4 & 0xf0) + 8;
-  *hy = (sprcoll_y_base & 0xff00) + ((blk >> 10) << 8) + (blk & 0xf0) + 8;
+  BlkHome(sprite_N_word[k], hx, hy);
+  *hx += 8, *hy += 8;
 }
 
 // Distanza "a rettangolo": vale kSightLimit sul bordo della schermata
@@ -583,8 +590,8 @@ bool HdWorld_HoldReload(uint16 blk) {
   uint8 *hold = &g_hold[BYTE(overworld_screen_index) & 0x7f][blk >> 3], bit = 0x80 >> (blk & 7);
   if (!(*hold & bit))
     return false;
-  int hx = (sprcoll_x_base & 0xff00) + ((blk >> 8 & 3) << 8) + (blk << 4 & 0xf0);
-  int hy = (sprcoll_y_base & 0xff00) + ((blk >> 10) << 8) + (blk & 0xf0);
+  int hx, hy;
+  BlkHome(blk, &hx, &hy);
   int ext = g_zenv.ppu->extraLeftRight;
   if (hx + 16 + 32 > g_view_wx - ext && hx - 32 < g_view_wx + 256 + ext &&
       hy + 16 + 32 > g_view_wy && hy - 32 < g_view_wy + 240)
@@ -636,7 +643,13 @@ void HdWorld_SpriteBegin(int k) {
       }
       spr_disturbed[k] &= ~2;
     } else {
+      // gli altri si fermano per questo passo e poi tornano a fare quello che
+      // facevano senza Link. Prima il segno restava: chi aveva visto Link
+      // veniva rimesso al suo posto a ogni passo e restava fermo per sempre
+      // appena oltre la vista (i granchi del Lago Hylia sul bordo dello
+      // schermo largo)
       g_sight_lost = true;
+      spr_disturbed[k] &= ~2;
     }
   }
   g_sight_alert = sprite_alert_flag;
@@ -759,14 +772,14 @@ static void ResetFarEnemies(int lx, int ly, const uint8 *main_ram) {
     if (spr_disturbed[k] && IsAreaEnemy(k) && FarFromLink(SpriteWorldX(k) + 8, SpriteWorldY(k) + 8, lx, ly))
       ResetEnemy(k);
   int area = BYTE(overworld_screen_index) & 0x7f;
-  int bx = sprcoll_x_base & 0xff00, by = sprcoll_y_base & 0xff00;
   uint8 *revived = g_revived[area];
   for (int blk = 0; blk < 0x1000; blk++) {
     uint8 t = sprite_where_in_overworld[blk], bit = 0x80 >> (blk & 7);
     if (!t || t >= 0xf4)
       continue;
-    int hx = bx + ((blk >> 8 & 3) << 8) + (blk << 4 & 0xf0) + 8;
-    int hy = by + ((blk >> 10) << 8) + (blk & 0xf0) + 8;
+    int hx, hy;
+    BlkHome(blk, &hx, &hy);
+    hx += 8, hy += 8;
     if (!FarFromLink(hx, hy, lx, ly)) {
       revived[blk >> 3] &= ~bit;
       continue;
@@ -793,14 +806,14 @@ static void ResetFarEnemies(int lx, int ly, const uint8 *main_ram) {
 // scambio per frame, dopo Sprite_OverworldLoadAllEnemies.
 static void MakeRoomNearLink(void) {
   int lx = link_x_coord + 8, ly = link_y_coord + 12;
-  int bx = sprcoll_x_base & 0xff00, by = sprcoll_y_base & 0xff00;
   int best = -1, best_d = kSightLimit + 1;
   for (int blk = 0; blk < 0x1000; blk++) {
     uint8 t = sprite_where_in_overworld[blk];
     if (!t || t >= 0xf4 || (overworld_sprite_was_loaded[blk >> 3] & (0x80 >> (blk & 7))))
       continue;
-    int hx = bx + ((blk >> 8 & 3) << 8) + (blk << 4 & 0xf0) + 8;
-    int hy = by + ((blk >> 10) << 8) + (blk & 0xf0) + 8;
+    int hx, hy;
+    BlkHome(blk, &hx, &hy);
+    hx += 8, hy += 8;
     int d = Dist2(hx, hy, lx, ly);
     if (d < best_d)
       best = blk, best_d = d;
@@ -1098,12 +1111,10 @@ static bool RememberExtraIn(AreaState *st, uint16 pos, uint16 value) {
   return true;
 }
 
-// Il gioco mostra la stanza: dungeon, o dialoghi e menu aperti sopra di essa
+// Il gioco mostra la stanza: labirinto, o menu, dialoghi e dissolvenze sopra
+// di essa (HdFx_SceneModule)
 static bool ShowsRoom(void) {
-  int sub = submodule_index;
-  return main_module_index == 7 ||
-         (main_module_index == 14 && saved_module_for_menu == 7 &&
-          (sub == 1 || sub == 2 || sub == 4 || sub == 8 || sub == 9 || sub == 11));
+  return HdFx_SceneModule() == 7;
 }
 
 // Le frecce piantate restano solo con "Frecce piantate nei muri" (StuckArrows,
@@ -1374,25 +1385,17 @@ void HdWorld_UpdateCamera(int *cam_x, int *cam_y) {
   if (main_module_index <= 7) {
     HdWorld_ResetStates();
     memset(carried_area, 0, 16);  // nessuno segue piu' Link
-  } else if (main_module_index == 9 && submodule_index == 0 && PersistOn())
+  } else if (HdFx_LiveOverworld() && PersistOn())
     SnapshotArea();
-  // Mappa del mondo aperta: la vista si conserva per il ritorno, cosi' alla
-  // chiusura l'inquadratura e' la stessa di prima
-  if (main_module_index == 14 && submodule_index == 7 && saved_module_for_menu == 9 && g_vis_valid) {
-    *cam_x = gx + g_world_dx;
-    *cam_y = gy + g_world_dy;
-    return;
-  }
-  // morte di Link: la vista resta dov'era, anche sullo schermo rosso, e
-  // tornato il gioco riprende a seguire Link da li'
-  if (main_module_index == 18 && saved_module_for_menu == 9 && g_vis_valid) {
-    *cam_x = gx + g_world_dx;
-    *cam_y = gy + g_world_dy;
-    return;
-  }
-  if (HdWorld_Active() && InMenuOverWorld() && g_vis_valid) {
-    // menu o dialogo aperto: la vista non si muove (e alla chiusura riprende
-    // a seguire Link da dove era)
+  // La vista resta dov'era e alla fine riprende a seguire Link da li':
+  // - mappa del mondo aperta (anche mentre la mappa copre tutto), cosi' alla
+  //   chiusura l'inquadratura e' la stessa di prima;
+  // - morte di Link, anche sullo schermo rosso;
+  // - mondo fermo in vista sotto menu, dialoghi, pozioni... (InMenuOverWorld)
+  bool held = (main_module_index == 14 && submodule_index == 7 && saved_module_for_menu == 9) ||
+              (main_module_index == 18 && saved_module_for_menu == 9) ||
+              (HdWorld_Active() && InMenuOverWorld());
+  if (held && g_vis_valid) {
     *cam_x = gx + g_world_dx;
     *cam_y = gy + g_world_dy;
     return;
@@ -1642,8 +1645,7 @@ static uint32 AreaKey(int head) {
 }
 
 static inline uint32 Bgr15ToPixel(uint16 c, uint32 layer) {
-  uint32 r = c & 31, g = c >> 5 & 31, b = c >> 10 & 31;
-  return layer << 24 | (r << 3 | r >> 2) << 16 | (g << 3 | g >> 2) << 8 | (b << 3 | b >> 2);
+  return layer << 24 | HdFx_Bgr15ToRgb(c);
 }
 
 // Disegna il terreno (BG2) dell'area caricata in questo momento. Come fa il
@@ -2009,13 +2011,12 @@ static inline uint32 OverlayBlend(const OverlayCtx *o, uint32 c, int sx, int sy)
   int col = OverlayColor(o, sx, sy);
   if (col < 0)
     return c;  // trasparente: il terreno resta com'e'
-  int r = col & 31, g = col >> 5 & 31, b = col >> 10 & 31;
-  r = r << 3 | r >> 2, g = g << 3 | g >> 2, b = b << 3 | b >> 2;
+  uint32 oc = HdFx_Bgr15ToRgb((uint16)col);
   // anche lo strato segue la luminosita' del gioco (dissolvenze): senza, con la
   // pioggia le colonne oltre il bordo dell'area restavano chiare mentre il
   // resto dello schermo andava al nero (aprendo e chiudendo la mappa)
-  uint32 oc = Dim((uint32)r << 16 | g << 8 | b);
-  r = oc >> 16 & 255, g = oc >> 8 & 255, b = oc & 255;
+  oc = Dim(oc);
+  int r = oc >> 16 & 255, g = oc >> 8 & 255, b = oc & 255;
   return (c & 0xff000000) | (((c >> 16 & 255) + r) >> 1) << 16 | (((c >> 8 & 255) + g) >> 1) << 8 | ((c & 255) + b) >> 1;
 }
 
@@ -2403,6 +2404,8 @@ static void RenderApart(const bool *sel, const GuestGfx *gfx, int width, int hei
   if (gfx) {
     LoadGfx(p, gfx);
     memset(p->objIce, 0, sizeof(p->objIce));
+    memset(p->objUnderWater, 0, sizeof(p->objUnderWater));
+    memset(p->objAsBg, 0, sizeof(p->objAsBg));
   }
   p->brightness = 15;  // la luminosita' del gioco si applica dopo (Dim)
   p->forcedBlank = false;
@@ -2682,7 +2685,7 @@ bool HdWorld_SetWorldTile(int px, int py, uint16 value) {
 // Gli sprite delle copie si vedono solo mentre si gioca all'aperto o con un
 // menu aperto sopra il mondo (fermi)
 static bool LiveVisibleNow(void) {
-  return (main_module_index == 9 && submodule_index == 0) || InMenuOverWorld();
+  return HdFx_LiveOverworld() || InMenuOverWorld();
 }
 
 static bool LiveShown(int a) {
@@ -2858,7 +2861,7 @@ void HdWorld_TickNeighbors(void) {
     LiveDropAll();
     return;
   }
-  if (main_module_index != 9 || submodule_index != 0 || !HdWorld_Active())
+  if (!HdFx_LiveOverworld() || !HdWorld_Active())
     return;
   TrackMain();
   GuestsFromCopies();
@@ -2999,6 +3002,8 @@ static void LiveRender(LiveArea *la, int width, int height) {
   p->objShadowOut = NULL;
   memset(p->objCastShadow, 0, sizeof(p->objCastShadow));
   memset(p->objIce, 0, sizeof(p->objIce));
+  memset(p->objUnderWater, 0, sizeof(p->objUnderWater));
+  memset(p->objAsBg, 0, sizeof(p->objAsBg));
   memset(p->objScale, 0, sizeof(p->objScale));
   for (int i = 0; i <= height; i++)
     ppu_runLine(p, i);
@@ -3148,7 +3153,7 @@ void HdWorld_Composite(uint8 *pixels, int pitch, int width, int height) {
   bool mosaic = InMosaicTransition();
   bool all = mosaic;
   // aspetto dei nemici, anche quando la vista coincide con quella del gioco
-  if (main_module_index == 9 && submodule_index == 0 && PersistOn())
+  if (HdFx_LiveOverworld() && PersistOn())
     CaptureEnemies(pixels, pitch, width, height);
   int ext = (width - 256) / 2;
   int cam_x = (int16)BG2HOFS_copy + ppu->bgBiasX - ext;  // la PPU tiene solo 10 bit
