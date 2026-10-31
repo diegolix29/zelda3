@@ -463,21 +463,32 @@ void ZeldaUpdateCamera() {
   // per frame, a ritmo regolare, puntando dritto a dove deve arrivare: con il
   // rallentamento graduale i pixel arrivavano a intervalli irregolari (1, 2, 3
   // frame) e con i passettini di Link la vista sembrava scattare.
+  // Link lento (spada carica in diagonale nell'erba: 1 pixel ogni 2 frame)
+  // nei frame senza passo non e' fermo: se la vista recuperasse il pixel
+  // proprio li', Link sullo schermo vibrerebbe di un pixel a ogni frame.
+  // Fermo = nessun passo da kStillFrames frame.
+  enum { kStillFrames = 6 };
+  static int still_x, still_y;
   {
     int tx = (int)floorf(g_cam_vx + 0.5f), ty = (int)floorf(g_cam_vy + 0.5f);
     int mx = link_x_coord - g_cam_last_x, my = link_y_coord - g_cam_last_y;
+    still_x = mx ? 0 : IntMin(still_x + 1, kStillFrames);
+    still_y = my ? 0 : IntMin(still_y + 1, kStillFrames);
+    bool stop_x = still_x >= kStillFrames, stop_y = still_y >= kStillFrames;
     if (!g_cam_valid || abs(tx - g_cam_int_x) > 64 || abs(ty - g_cam_int_y) > 64) {
       g_cam_int_x = tx, g_cam_int_y = ty;
     } else {
       int dx = tx - g_cam_int_x, dy = ty - g_cam_int_y;
       if (mx) dx = (dx * mx < 0) ? 0 : (abs(dx) > abs(mx) ? mx : dx);
+      else if (!stop_x) dx = 0;
       else dx = lx > g_cam_int_x ? 1 : lx < g_cam_int_x ? -1 : 0;
       if (my) dy = (dy * my < 0) ? 0 : (abs(dy) > abs(my) ? my : dy);
+      else if (!stop_y) dy = 0;
       else dy = ly > g_cam_int_y ? 1 : ly < g_cam_int_y ? -1 : 0;
       g_cam_int_x += dx, g_cam_int_y += dy;
       // da fermo la posizione fluida riparte da quella disegnata
-      if (!mx) g_cam_vx = (float)g_cam_int_x;
-      if (!my) g_cam_vy = (float)g_cam_int_y;
+      if (stop_x) g_cam_vx = (float)g_cam_int_x;
+      if (stop_y) g_cam_vy = (float)g_cam_int_y;
       // sempre entro il margine di caselle caricate
       if (g_cam_int_x < lx - kMaxDelta) g_cam_int_x = lx - kMaxDelta;
       if (g_cam_int_x > lx + kMaxDelta) g_cam_int_x = lx + kMaxDelta;
