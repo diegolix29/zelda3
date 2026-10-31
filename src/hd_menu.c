@@ -643,7 +643,7 @@ static void BuildItems() {
     AddItem(2, "Mappa del mondo in HD", buf);
     AddItem(3, "Mostra FPS", YesNo(Host_GetDisplayPerf()));
     AddItem(4, "Testo nitido nei dialoghi", YesNo(g_config.hd_text));
-    AddItem(22, "Testo moderno", YesNo(g_config.modern_text));
+    AddItem(27, "Testo moderno", YesNo(g_config.modern_text));
     AddItem(5, "Fluidit\xc3\xa0 oltre i 60 Hz", YesNo(g_config.high_refresh));
     AddItem(6, "Illuminazione dinamica", YesNo(g_config.dynamic_light));
     AddItem(7, "Effetto calore e fiamme", YesNo(g_config.fx_heat));
@@ -742,7 +742,7 @@ static void Activate(int id, int dir) {
         Host_SetPpuRenderFlags(Host_GetPpuRenderFlags() ^ kPpuRenderFlags_4x4Mode7);
     } else if (id == 3) {
       Host_SetDisplayPerf(!Host_GetDisplayPerf());
-    } else if (id == 4 || id == 22) {
+    } else if (id == 4 || id == 27) {
       // testo nitido e testo moderno: accenderne uno spegne l'altro
       bool *opt = id == 4 ? &g_config.hd_text : &g_config.modern_text;
       *opt = !*opt;

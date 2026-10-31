@@ -410,8 +410,8 @@
 1c1 torch     #   attr 27, 100%: torch 58
 1c2 tall      #   attr 00, 100%: tall 300
 1c3 tall      #   attr 27, 100%: tall 300
-1c4 floor     #   attr 60, 100%: floor 153
-1c5 floor     #   attr 60, 100%: floor 153
+1c4 small     #   attr 60, 100%: small 153
+1c5 small     #   attr 60, 100%: small 153
 1c6 wall      #   attr 01, 100%: wall 248
 1c7 wall      #   attr 01, 97%: wall 148 door 4
 1c8 wall      #   attr 01, 98%: wall 244 door 4
