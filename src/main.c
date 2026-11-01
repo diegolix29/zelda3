@@ -205,8 +205,104 @@ static uint8 *g_audiobuffer, *g_audiobuffer_cur, *g_audiobuffer_end;
 static int g_frames_per_block;
 static uint8 g_audio_channels;
 
+// Turbo: l'audio avanza insieme ai frame del gioco (non a richiesta della
+// scheda audio), cosi' musica, effetti e attese del chip audio accelerano
+// con tutto il resto. Il tono resta normale: i campioni in piu' si saltano.
+enum { kTurboRingFrames = 1 << 16 };  // campioni stereo nell'anello (potenza di 2)
+static int16 *g_turbo_ring;
+static int16 *g_turbo_out;
+static int g_turbo_out_len;
+static int64 g_turbo_wr;     // campioni scritti dal gioco
+static double g_turbo_rd;    // posizione di lettura della scheda audio
+static bool g_turbo_audio;
+
+// Da chiamare con g_audio_mutex preso
+static void TurboAudio_Set(bool on) {
+  if (on == g_turbo_audio)
+    return;
+  if (on && !g_turbo_ring) {
+    g_turbo_ring = (int16 *)malloc(kTurboRingFrames * 2 * sizeof(int16));
+    if (!g_turbo_ring)
+      return;
+  }
+  g_turbo_audio = on;
+  g_turbo_wr = 0, g_turbo_rd = 0;
+  g_audiobuffer_cur = g_audiobuffer_end;  // il pezzo lasciato a meta' si scarta
+}
+
+// Un frame di audio per ogni frame di gioco (con g_audio_mutex preso)
+static void TurboAudio_Frame(void) {
+  if (!g_turbo_audio)
+    return;
+  int ch = g_audio_channels, n = g_frames_per_block;
+  int16 *src = (int16 *)g_audiobuffer;
+  ZeldaRenderAudio(src, n, ch);
+  for (int i = 0; i < n; i++) {
+    uint32 p = (uint32)(g_turbo_wr + i) & (kTurboRingFrames - 1);
+    g_turbo_ring[p * 2] = src[i * ch];
+    g_turbo_ring[p * 2 + 1] = src[i * ch + (ch > 1)];
+  }
+  g_turbo_wr += n;
+  // Anello pieno (gioco molto piu' veloce del massimo): si salta avanti
+  if (g_turbo_wr - (int64)g_turbo_rd > kTurboRingFrames - 2 * n)
+    g_turbo_rd = (double)(g_turbo_wr - kTurboRingFrames / 4);
+}
+
+// Riempie l'uscita a tono normale, un campione alla volta. Quando il gioco
+// ha prodotto molto piu' audio di quanto si ascolta, si salta in avanti agli
+// ultimi campioni (l'audio va "a pezzi"), con una breve dissolvenza
+// incrociata fra il vecchio punto e il nuovo per non sentire click
+static void TurboAudio_Fill(int16 *out, int frames) {
+  enum { kFade = 256 };
+  int ch = g_audio_channels;
+  int64 rd = (int64)g_turbo_rd, old = -1;
+  int64 keep = 2 * (int64)g_frames_per_block + frames;
+  if (g_turbo_wr - rd > 2 * keep) {
+    old = rd;
+    rd = g_turbo_wr - keep;
+  }
+  for (int i = 0; i < frames; i++) {
+    int l = 0, r = 0;
+    if (rd < g_turbo_wr) {
+      uint32 p = (uint32)rd & (kTurboRingFrames - 1);
+      l = g_turbo_ring[p * 2], r = g_turbo_ring[p * 2 + 1];
+      rd++;
+    }
+    if (old >= 0 && i < kFade) {
+      uint32 p = (uint32)old & (kTurboRingFrames - 1);
+      l = (g_turbo_ring[p * 2] * (kFade - i) + l * i) / kFade;
+      r = (g_turbo_ring[p * 2 + 1] * (kFade - i) + r * i) / kFade;
+      old++;
+    }
+    int16 *o = out + i * ch;
+    o[0] = (int16)l;
+    if (ch > 1) o[1] = (int16)r;
+    for (int c = 2; c < ch; c++) o[c] = 0;
+  }
+  g_turbo_rd = (double)rd;
+}
+
 static void SDLCALL AudioCallback(void *userdata, Uint8 *stream, int len) {
   if (SDL_LockMutex(g_audio_mutex)) Die("Mutex lock failed!");
+  if (g_turbo_audio) {
+    int frames = len / (g_audio_channels * (int)sizeof(int16));
+    if (g_sdl_audio_mixer_volume == SDL_MIX_MAXVOLUME) {
+      TurboAudio_Fill((int16 *)stream, frames);
+    } else {
+      if (g_turbo_out_len < len) {
+        int16 *t = (int16 *)realloc(g_turbo_out, len);
+        if (t)
+          g_turbo_out = t, g_turbo_out_len = len;
+      }
+      SDL_memset(stream, 0, len);
+      if (g_turbo_out_len >= len) {
+        TurboAudio_Fill(g_turbo_out, frames);
+        SDL_MixAudioFormat(stream, (Uint8 *)g_turbo_out, AUDIO_S16, len, g_sdl_audio_mixer_volume);
+      }
+    }
+    SDL_UnlockMutex(g_audio_mutex);
+    return;
+  }
   while (len != 0) {
     if (g_audiobuffer_end - g_audiobuffer_cur == 0) {
       ZeldaRenderAudio((int16*)g_audiobuffer, g_frames_per_block, g_audio_channels);
@@ -569,6 +665,7 @@ int main(int argc, char** argv) {
           g_gamepad_buttons = 0;
         hr_inputs |= g_gamepad_buttons;
         SDL_LockMutex(g_audio_mutex);
+        TurboAudio_Set(false);
         ZeldaRunFrame(hr_inputs);
         HdMenu_AfterFrame();
         SDL_UnlockMutex(g_audio_mutex);
@@ -595,7 +692,9 @@ int main(int argc, char** argv) {
     inputs |= g_gamepad_buttons;
 
     SDL_LockMutex(g_audio_mutex);
+    TurboAudio_Set(g_turbo && g_audiobuffer != NULL);
     bool is_replay = ZeldaRunFrame(inputs);
+    TurboAudio_Frame();
     HdMenu_AfterFrame();
     SDL_UnlockMutex(g_audio_mutex);
 
@@ -646,6 +745,8 @@ int main(int argc, char** argv) {
 
   SDL_DestroyMutex(g_audio_mutex);
   free(g_audiobuffer);
+  free(g_turbo_ring);
+  free(g_turbo_out);
 
   g_renderer_funcs.Destroy();
 

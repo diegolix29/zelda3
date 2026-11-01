@@ -5617,8 +5617,11 @@ uint8 ThievesAttic_DrawLightenedHole(uint16 pos6, uint16 a, Point16U *pt) {  // 
 uint8 HandleItemTileAction_Dungeon(uint16 x, uint16 y) {  // 81dabb
   if (!(link_item_in_hand & 2)) {
     // Con la Spada d'Oro (livello 4) i vasi si rompono come su GBA
-    // (0x8082618): solo con Link a terra, con ogni azione sulla casella
-    if (!(enhanced_features0 & kFeatures0_SwordAndItems) || link_sword_type != 4 || link_position_mode != 0)
+    // (0x8082618): solo con Link a terra, con ogni azione sulla casella.
+    // Anche la Polvere Magica (0x40) li rompe, con qualsiasi spada (GBA)
+    if (!(enhanced_features0 & kFeatures0_SwordAndItems))
+      return 0;
+    if (!(link_item_in_hand & 0x40) && (link_sword_type != 4 || link_position_mode != 0))
       return 0;
   }
   uint16 pos = (y & 0x1f8) * 8 + x + (link_is_on_lower_level ? 0x1000 : 0);

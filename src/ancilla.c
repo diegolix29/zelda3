@@ -6618,6 +6618,10 @@ void AncillaAdd_DwarfPoof(uint8 ain, uint8 yin) {  // 89915f
 void AncillaAdd_BushPoof(uint16 x, uint16 y) {  // 8991c3
   if (!(link_item_in_hand & 0x40))
     return;
+  // Spada e oggetti: come su GBA la Polvere Magica rompe cespugli e vasi
+  // come la spada, con i soli resti e senza la nuvola
+  if (enhanced_features0 & kFeatures0_SwordAndItems)
+    return;
   int k = Ancilla_AddAncilla(0x3f, 4);
   if (k >= 0) {
     ancilla_item_to_link[k] = 0;

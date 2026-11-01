@@ -2758,6 +2758,39 @@ void LinkItem_ShovelAndFlute() {  // 87a313
     LinkItem_Flute();
 }
 
+// Spada e oggetti: oggetto che esce dalla terra scavata, come la GBA
+// (0x80a30b0): nasce sulla casella davanti a Link e salta verso dove guarda
+static void Shovel_GbaSpawnPrize(uint8 type) {
+  static const int8 kVel[2] = { -22, 22 };                     // 0x816a896
+  static const int8 kDx[4] = { 8, 8, -2, 20 };                 // 0x81699a0
+  static const int8 kDy[4] = { -2, 22, 20, 20 };               // 0x8169948
+  SpriteSpawnInfo info;
+  int j = Sprite_SpawnDynamically(0, type, &info);
+  if (j < 0)
+    return;
+  int d = link_direction_facing >> 1 & 3;
+  if (d > 1)
+    sprite_x_vel[j] = kVel[d - 2], sprite_y_vel[j] = 0;
+  else
+    sprite_x_vel[j] = 0, sprite_y_vel[j] = kVel[d];
+  sprite_z_vel[j] = (type == 0xd8) ? 12 : 24;
+  sprite_stunned[j] = 255;
+  sprite_delay_aux4[j] = 48;
+  Sprite_SetX(j, (link_x_coord + kDx[d]) & ~0xf);
+  Sprite_SetY(j, (link_y_coord + kDy[d]) & ~0xf);
+  sprite_floor[j] = 0;
+  SpriteSfx_QueueSfx3WithPan(j, 0x30);
+}
+
+// GBA 0x80a34c8: scavando la terra fuori dal gioco della pala, 6 volte su 32
+// esce un oggetto (tabella 0x816a89c: cuore x3, magia piccola x2, rupia verde)
+static void Shovel_GbaRandomPrize(void) {
+  static const uint8 kItems[6] = { 0xd8, 0xd8, 0xd8, 0xdf, 0xdf, 0xd9 };
+  int r = GetRandomNumber() & 0x1f;
+  if (r <= 5)
+    Shovel_GbaSpawnPrize(kItems[r]);
+}
+
 void LinkItem_Shovel() {  // 87a32c
   static const uint8 kShovelAnimDelaySnes[] = { 7, 18, 16, 7, 18, 16 };
   // Correzioni minori GBA: pala veloce come su GBA (0x80a3358, tabella 0x816a8a2)
@@ -2798,6 +2831,8 @@ void LinkItem_Shovel() {  // 87a32c
       AncillaAdd_ShovelDirt(23, 0); // shovel dirt
       if (is_archer_or_shovel_game)
         DiggingGameGuy_AttemptPrizeSpawn();
+      else if (enhanced_features0 & kFeatures0_SwordAndItems)
+        Shovel_GbaRandomPrize();
       Ancilla_Sfx2_Near(18);
     }
   }
