@@ -314,9 +314,12 @@ static const LakeTile kLakeClearing22[] = {
   // la scogliera scende di un passo in piu' (stessi blocchi della diagonale)
   // e finisce all'altezza della fascia sotto il muretto dell'area 0x1b
   {31, 21, 0x2f7}, {31, 22, 0x1f2}, {30, 23, 0x126}, {31, 23, 0x11e},
+  // un palo della staccionata in piu' sul bordo, attaccato a quella
+  // dell'area 0x1b: senza mondo continuo Link non resta incastrato nell'angolo
+  {31, 24, 0x338},
 };
 static const LakeTile kLakeClearing1b[] = {
-  {0, 53, 0x399}, {0, 54, 0x39a}, {0, 55, 0x290}, {1, 55, 0x233},
+  {0, 53, 0x399}, {0, 54, 0x39a}, {0, 55, 0x290}, {1, 55, 0x39b},
   {0, 56, 0x338}, {1, 56, 0x338}, {2, 56, 0x338},
   {0, 57, 0x34}, {1, 57, 0x34}, {2, 57, 0x34},
   {0, 58, 0xaf}, {1, 58, 0x7e},
@@ -333,11 +336,13 @@ static void Overworld_LakeClearing(bool live) {
   uint8 area = overworld_screen_index & ~0x40;
   if (area == 0x22) {
     p = kLakeClearing22, n = countof(kLakeClearing22);
-    if (dung_bg2[XY(22, 26)] == 0xae)
+    // il palo e' l'ultimo aggiunto: cosi' arriva anche nei salvataggi rapidi
+    // fatti quando c'era gia' il resto
+    if (dung_bg2[XY(22, 26)] == 0xae && dung_bg2[XY(31, 24)] == 0x338)
       return;
   } else if (area == 0x1b) {
     p = kLakeClearing1b, n = countof(kLakeClearing1b);
-    if (dung_bg2[XY(2, 56)] == 0x338)
+    if (dung_bg2[XY(2, 56)] == 0x338 && dung_bg2[XY(1, 55)] == 0x39b)
       return;
   } else {
     return;

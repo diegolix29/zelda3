@@ -122,6 +122,10 @@ void HdFx_FadeAfterRender(Ppu *ppu);
 bool HdFx_FadeActive(void);
 // colore della palette per gli effetti: durante la dissolvenza quello vero
 uint16 HdFx_RealBg(const uint16 *pal, int i);
+// all'aperto senza mondo continuo: casella map8 che la PPU mostra nel punto del
+// mondo fuori dall'area corrente (nel cambio d'area e' la parte vecchia, che
+// la mappa del gioco non ha piu'); -1 se il punto e' nell'area o non si usa
+int HdFx_OwShownEntry(int wx, int wy);
 void HdFx_FadeMask(uint8 *pixels, int pitch, int width, int height);
 void HdFx_FadePost(uint8 *pixels, int pitch, int width, int height);
 // Mosaico del gioco anche sulle aggiunte HD (stessi quadrati della PPU)

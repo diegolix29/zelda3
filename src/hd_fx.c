@@ -11,6 +11,7 @@
 #include "variables.h"
 #include "snes/ppu.h"
 #include "hd_world.h"
+#include "overworld.h"
 #include "hd_burn.h"
 #include "hd_water.h"
 #include "tagalong.h"
@@ -97,6 +98,22 @@ static uint16 BgTileAt(Ppu *ppu, int layer, int x, int y, int bias_x, int bias_y
   if ((xx >> 8) & 1)
     sc += bg->tilemapWider ? 0x400 : 0;
   return ppu->vram[(sc + ((xx >> 3) & 0x1f)) & 0x7fff];
+}
+
+// Il fondale all'aperto e' largo 64x64 caselle (512 px) e il gioco ci scrive
+// ogni punto del mondo a (x & 511, y & 511): nello scorrimento fra due aree
+// la parte vecchia resta li' finche' si vede, mentre la mappa del gioco e'
+// gia' della nuova (prima il prato accanto al lago diventava acqua)
+int HdFx_OwShownEntry(int wx, int wy) {
+  if (wx < 0 || wy < 0 || overworld_screen_index >= 0x80 || HdWorld_Active() ||
+      HdWorld_InsideCurrentArea(wx, wy))
+    return -1;
+  const BgLayer *bg = &g_zenv.ppu->bgLayer[1];
+  int tx = wx >> 3 & 63, ty = wy >> 3 & 63;
+  uint16 adr = bg->tilemapAdr + ((ty & 31) << 5 | (tx & 31));
+  if ((tx & 32) && bg->tilemapWider) adr += 0x400;
+  if ((ty & 32) && bg->tilemapHigher) adr += bg->tilemapWider ? 0x800 : 0x400;
+  return g_zenv.ppu->vram[adr & 0x7fff];
 }
 
 static void ClassifyCells(const uint8 *pixels, int pitch, int width, int height, int bias_x, int bias_y) {
@@ -906,6 +923,7 @@ void HdFx_MarkWater(uint8 *pixels, int pitch, int width, int height, int bias_x,
         uint8 attr;
         uint16 cloud_e = 0;  // casella della mappa, se puo' contenere nuvole
         bool flood = false;
+        int shown;
         if (mod == 7) {
           int pos = ((wy & 0x1f8) << 3) + ((wx & 0x1f8) >> 3);
           // acqua della chiusa: per il gioco le caselle non cambiano
@@ -914,6 +932,8 @@ void HdFx_MarkWater(uint8 *pixels, int pitch, int width, int height, int bias_x,
         } else if (HdWorld_Active() && (HdWorld_BackgroundFromImages() || !HdWorld_InsideCurrentArea(wx, wy)))
           continue;  // fondale dalle immagini delle aree, con l'acqua gia' segnata; nel
                      // passaggio la mappa del gioco e' ancora quella dell'area vecchia
+        else if ((shown = HdFx_OwShownEntry(wx, wy)) >= 0)
+          attr = GetMap8toTileAttr()[shown & 0x1ff];
         else {
           attr = Overworld_GetTileAttributeAtLocation((uint16)wx >> 3, (uint16)wy);
           if (mountain) {

@@ -313,6 +313,9 @@ void HdWater_BeforeEffects(uint8 *pixels, int pitch, int width, int height) {
 static int CellEntry(int wx, int wy) {
   if (wx < 0 || wy < 0)
     return -1;
+  int shown = HdFx_OwShownEntry(wx, wy);
+  if (shown >= 0)
+    return shown;
   if (HdWorld_Active() && (HdWorld_BackgroundFromImages() || !HdWorld_InsideCurrentArea(wx, wy))) {
     int m16 = HdWorld_WorldTile(wx, wy);
     if (m16 >= 0)
