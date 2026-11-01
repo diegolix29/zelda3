@@ -404,8 +404,11 @@ static void PpuDrawBackground_4bpp(Ppu *ppu, uint y, bool sub, uint layer, PpuZb
 // X/L/R (icone a 72 + 32 * i, righe 32-47), LIFE, cuori e piano / super
 // bomba (160-247). A sinistra magia e riquadri degli oggetti, a destra
 // contatori, LIFE, cuori e piano. Le righe arrivano a 65 per il riquadro di
-// sotto (kHudSplitBottom)
-enum { kHudSplitBottom = 66, kHudBoxStep = 24, kHudBoxRowStep = 23 };
+// sotto (kHudSplitBottom). Fra due riquadri (22 x 22) in orizzontale e in
+// verticale resta lo stesso spazio che c'e' fra la magia e il riquadro di Y
+// nell'HUD originale (kHudBoxGap = 1 pixel)
+enum { kHudSplitBottom = 66, kHudBoxGap = 1, kHudBoxStep = 22 + kHudBoxGap,
+       kHudBoxRowStep = 22 + kHudBoxGap };
 
 // Posto (colonna, riga) dei riquadri di Y, X, L e R per ogni combinazione
 // di Ppu.hudSplitButtons (1 = X, 2 = L e R); colonna -1 = niente riquadro
@@ -427,18 +430,22 @@ static void PpuHudBoxPixel(int k, int fx, int fy, int *sx, int *sy) {
   }
 }
 
-// 4:3 (Ppu.hudBoxRow): HUD originale, con i riquadri di L, X e R (quelli
-// accesi, senza buchi) in fila centrati sotto i contatori (x 64-159) al posto
-// delle icone con le lettere
+// 4:3 (Ppu.hudBoxRow): HUD originale, con i riquadri di L, X e R in fila
+// sotto i contatori al posto delle icone con le lettere. Ogni tasto ha il suo
+// posto fisso (un riquadro spento lascia il buco, gli altri non si spostano);
+// la fila intera e' centrata sui quattro contatori, da rupie a chiave
+// (pixel 65-152 dello schermo, centro 108,5): da x 75 a 142
+enum { kHudBoxRowX = (65 + 152 + 1 - (3 * kHudBoxStep - kHudBoxGap)) / 2 };
 static bool PpuHudBoxRowSrc(Ppu *ppu, int x, int ty, int *sx, int *sy) {
   static const uint8 kOrder[3] = { 2, 1, 3 };  // L, X, R
-  int n = 0, ks[3];
-  for (int i = 0; i < 3; i++)
-    if (kOrder[i] == 1 ? (ppu->hudSplitButtons & 1) : (ppu->hudSplitButtons & 2))
-      ks[n++] = kOrder[i];
-  int fx = x - (112 - (kHudBoxStep * n - 2) / 2), fy = ty - 33;
-  if (fx >= 0 && fx < kHudBoxStep * n && fx % kHudBoxStep < 22 && (unsigned)fy < 22) {
-    PpuHudBoxPixel(ks[fx / kHudBoxStep], fx % kHudBoxStep, fy, sx, sy);
+  int fx = x - kHudBoxRowX, fy = ty - 33;
+  if (fx >= 0 && fx < kHudBoxStep * 3 && fx % kHudBoxStep < 22 && (unsigned)fy < 22) {
+    int k = kOrder[fx / kHudBoxStep];
+    if (k == 1 ? !(ppu->hudSplitButtons & 1) : !(ppu->hudSplitButtons & 2)) {
+      *sx = x, *sy = ty;  // tasto spento: la mappa originale senza le icone
+      return !(x >= 64 && x < 160 && ty >= 32 && ty < 48);
+    }
+    PpuHudBoxPixel(k, fx % kHudBoxStep, fy, sx, sy);
     return true;
   }
   *sx = x, *sy = ty;
