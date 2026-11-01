@@ -164,6 +164,7 @@ extern int g_lamp_cone_idx;
 
 #include "hd_world.h"
 #include "hd_trans.h"
+#include "overworld.h"
 
 // Passaggio fra due stanze con lo schermo largo: la mappa della PPU e' di
 // 512x512 pixel e il gioco ci copia solo la parte della stanza nuova in cui
@@ -668,6 +669,7 @@ void ZeldaDrawPpuFrame(uint8 *pixel_buffer, size_t pitch, uint32 render_flags) {
   HdHud_BeforeRender(g_zenv.ppu);
   HdText_BeforeRender(g_zenv.ppu);
   HudIt_BeforeRender(g_zenv.ppu);
+  Overworld_GbaCharsBeforeRender(g_zenv.ppu);
   HdFx_IrisBeforeRender(g_zenv.ppu);
   HdFx_ShadowsBeforeRender(g_zenv.ppu, 256 + 2 * g_zenv.ppu->extraLeftRight, height);
   HdWater_BeforeRender(g_zenv.ppu, 256 + 2 * g_zenv.ppu->extraLeftRight, height);
@@ -711,6 +713,7 @@ void ZeldaDrawPpuFrame(uint8 *pixel_buffer, size_t pitch, uint32 render_flags) {
   if (g_zenv.ppu->bg3MaxDigits)
     g_zenv.ppu->cgram[0x10] = cg10;
   HdText_AfterRender(g_zenv.ppu);
+  Overworld_GbaCharsAfterRender(g_zenv.ppu);
   HudIt_AfterRender(g_zenv.ppu);
   HdLight_AfterRender(g_zenv.ppu);
   HdFx_IrisAfterRender(g_zenv.ppu);

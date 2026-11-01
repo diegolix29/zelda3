@@ -20,6 +20,7 @@
 #include "sprite_main.h"
 #include "hd_rumble.h"
 #include "assets.h"
+#include "config.h"
 static const uint16 kOamGetBufferPos_Tab0[6] = {0x171, 0x201, 0x31, 0xc1, 0x141, 0x1d1};
 static const uint16 kOamGetBufferPos_Tab1[48] = {
    0x30,  0x50,  0x80,  0xb0,  0xe0, 0x110, 0x140, 0x170, 0x1d0, 0x1d4, 0x1dc, 0x1e0, 0x1e4, 0x1ec, 0x1f0, 0x1f8,
@@ -357,11 +358,13 @@ static const uint8 kOverworldAreaSprcollSizes[192] = {
   4, 4, 2, 2, 2, 4, 4, 2, 4, 4, 2, 2, 2, 4, 4, 2,
 };
 static const uint16 kOam_ResetRegionBases[6] = {0x30, 0x1d0, 0, 0x30, 0x120, 0x140};
-static const uint8 kGarnish_OamMemSize[23] = {
+static void Garnish17_GbaRockFlash(int k);
+static void GbaRock_Frame(void);
+static const uint8 kGarnish_OamMemSize[24] = {
   0, 4, 4, 4, 4, 4,  4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
-  8, 4, 4, 4, 8, 16,
+  8, 4, 4, 4, 8, 16, 4,
 };
-static HandlerFuncK *const kGarnish_Funcs[22] = {
+static HandlerFuncK *const kGarnish_Funcs[23] = {
   &Garnish01_FireSnakeTail,
   &Garnish02_MothulaBeamTrail,
   &Garnish03_FallingTile,
@@ -384,6 +387,7 @@ static HandlerFuncK *const kGarnish_Funcs[22] = {
   &Garnish14_KakKidDashDust,
   &Garnish15_ArrghusSplash,
   &Garnish16_ThrownItemDebris,
+  &Garnish17_GbaRockFlash,
 };
 static const uint8 kSpriteFall_Tab1[32] = {
   13, 13, 13, 13, 13, 13, 13, 12, 12, 12, 12, 12, 3, 3, 3, 3,
@@ -607,8 +611,9 @@ void Garnish_SparkleCommon(int k, uint8 shift) {
     return;
   OamEnt *oam = GetOamCurPtr();
   int j = garnish_sprite[k];
-  SetOamPlain(oam, pt.x, pt.y, kGarnishSparkle_Char[t],
-               (sprite_oam_flags[j] | sprite_obj_prio[j]) & 0xf0 | 4, 0);
+  // 0xff: scintilla senza sprite (roccia incantata, GbaRock_Frame)
+  uint8 f = j < 16 ? (sprite_oam_flags[j] | sprite_obj_prio[j]) & 0xf0 : 0x20;
+  SetOamPlain(oam, pt.x, pt.y, kGarnishSparkle_Char[t], f | 4, 0);
 }
 
 void Garnish_DustCommon(int k, uint8 shift) {
@@ -1216,6 +1221,8 @@ void Sprite_Main() {  // 868328
     }
   }
   flag_unk1 = saved_freeze;
+  if (!player_is_indoors)
+    GbaRock_Frame();
   Garnish_ExecuteLowerSlots();
   byte_7E069E[0] = byte_7E069E[1] = 0;
   ExecuteCachedSprites();
@@ -3357,6 +3364,172 @@ void Sprite_InitializeMirrorPortal() {  // 89af89
   sprite_ignore_projectile[j] = 1;
 }
 
+// Rocce incantate, come su GBA (sprite 0xF4, routine 0x8112684): entrando in
+// un'area, una volta su due la prima roccia piccola (map16 0x20f) trovata
+// guardando una colonna ogni 8 diventa incantata (GBA 0x811296c, chiamata alla
+// fine di Sprite_InitializeSlots). Brilla e, colpita con la spada, lancia una
+// rupia (9 verdi, una blu, una rossa) e poi bombe verdi che esplodono.
+// La GBA ne fa uno sprite; qui e' un oggetto a parte per non toccare le tavole
+// per tipo di sprite (243 voci)
+typedef struct GbaRock {
+  bool active;
+  uint8 area, floor, count, delay;
+  uint8 life;   // dal primo colpo resta incantata per 255 fotogrammi
+  uint16 pos;   // casella in dung_bg2 (indice)
+  uint16 x, y;  // angolo in alto a sinistra, coordinate del mondo
+} GbaRock;
+// nella RAM libera (0x1F5F0-0x1F5FB), cosi' finisce nei salvataggi rapidi
+#define g_gba_rock (*(GbaRock *)(g_ram + 0x1F5F0))
+
+static void GbaRock_Spawn(void) {
+  if (g_hd_neighbor_tick)
+    return;
+  g_gba_rock.active = false;
+  if (!g_config.enchanted_rocks || player_is_indoors)
+    return;
+  if (GetRandomNumber() & 0x40)
+    return;
+  const uint16 *map8 = GetMap16toMap8Table();
+  uint16 want = map8[0x20f * 4];
+  // indice della mappa GBA (caselle 8x8 a blocchi di 32x32): una casella
+  // 16x16 ogni 8 colonne, a partire da una colonna data dal contatore dei frame
+  int limit = overworld_area_is_big ? 0x4000 : 0x1000;
+  for (int r2 = (frame_counter << 1) & 0xe; r2 < limit; r2 += 0x10) {
+    if (r2 & 0x20)
+      r2 += 0x20;
+    if (r2 >= limit)
+      break;
+    int col = (r2 >> 1 & 15) | (r2 >> 6 & 16) | (r2 >> 7 & 32);
+    int row = (r2 >> 6 & 15) | (r2 >> 7 & 16) | (r2 >> 8 & 32);
+    uint16 i = row * 64 + col;
+    if (map8[dung_bg2[i] * 4] != want)
+      continue;
+    g_gba_rock.active = true;
+    g_gba_rock.area = BYTE(overworld_area_index);
+    g_gba_rock.floor = link_is_on_lower_level;
+    g_gba_rock.count = g_gba_rock.delay = g_gba_rock.life = 0;
+    g_gba_rock.pos = i;
+    g_gba_rock.x = ((overworld_area_index & 7) << 9) + col * 16;
+    g_gba_rock.y = (((overworld_area_index & 0x3f) >> 3) << 9) + row * 16;
+    return;
+  }
+}
+
+// Lampo della roccia colpita: la roccia sollevabile disegnata come sprite
+static void Garnish17_GbaRockFlash(int k) {
+  Point16U pt;
+  if (Garnish_ReturnIfPrepFails(k, &pt))
+    return;
+  // casella e palette della roccia piccola sollevata (kThrowableScenery_Char,
+  // tipo 1) con il lampeggio dei nemici colpiti (palette | hit_timer * 2)
+  uint8 t = garnish_countdown[k];
+  SetOamPlain(GetOamCurPtr(), pt.x, pt.y, 0x44, 0x2c | (t * 2 & 0xe), 2);
+}
+
+static void GbaRock_Hit(void) {
+  static const int8 kVelX[4] = { 0, 0, -8, 8 }, kVelY[4] = { -8, 8, 0, 0 };  // 0x817eee4
+  GbaRock *r = &g_gba_rock;
+  uint8 c = r->count;
+  uint8 type = c == 9 ? 0xda : c == 10 ? 0xdb : c < 9 ? 0xd9 : 0x4a;
+  SpriteSpawnInfo info;
+  int j = Sprite_SpawnDynamically(0, type, &info);
+  // senza posto il colpo non conta (anche su GBA): col mondo continuo si
+  // libera un nemico fuori dalla vista, che sulla GBA non sarebbe caricato
+  if (j < 0 && HdWorld_FreeSlotOffView(15) >= 0)
+    j = Sprite_SpawnDynamically(0, type, &info);
+  if (j < 0)
+    return;
+  int d = link_direction_facing >> 1 & 3;
+  Sprite_SetX(j, r->x);
+  Sprite_SetY(j, r->y);
+  sprite_z[j] = 0;
+  sprite_floor[j] = r->floor;
+  Ancilla_Sfx2_Near(5);
+  sprite_x_vel[j] = (GetRandomNumber() & 31) + kVelX[d] - 15;
+  sprite_y_vel[j] = (GetRandomNumber() & 31) + kVelY[d] - 15;
+  sprite_stunned[j] = 255;
+  sprite_delay_aux4[j] = 32;
+  sprite_delay_aux3[j] = 32;
+  sprite_z_vel[j] = (GetRandomNumber() & 7) + 24;
+  if (type == 0x4a) {  // bomba verde con la miccia accesa (BombGuard_CreateBomb)
+    sprite_C[j] = 1;
+    sprite_flags3[j] = sprite_flags3[j] & 0xee | 0x18;
+    sprite_oam_flags[j] = 8;
+    sprite_delay_aux1[j] = 255;
+    sprite_health[j] = 255;
+  }
+  r->delay = 16;
+  int g = GarnishAllocForce();
+  garnish_type[g] = 0x17;
+  garnish_active = 0x17;
+  Garnish_SetX(g, r->x);
+  Garnish_SetY(g, r->y + 16);
+  garnish_countdown[g] = 16;  // hit_timer 16 della GBA
+  garnish_sprite[g] = 0xff;
+  garnish_floor[g] = r->floor;
+  r->count++;
+  // GBA: al primo colpo sprite_delay_aux1 = 255, a 1 la roccia si spegne
+  if (!r->life)
+    r->life = 255;
+}
+
+static void GbaRock_Frame(void) {
+  GbaRock *r = &g_gba_rock;
+  // il giro delle aree vicine (hd_world.c) esegue Sprite_Main con un'altra
+  // area: la roccia si spegneva subito dopo la prima scintilla
+  if (!r->active || g_hd_neighbor_tick)
+    return;
+  if (!g_config.enchanted_rocks || player_is_indoors || BYTE(overworld_area_index) != r->area) {
+    r->active = false;
+    return;
+  }
+  if (submodule_index | flag_unk1)
+    return;
+  if (r->delay)
+    r->delay--;
+  if (r->life && --r->life == 1) {
+    r->active = false;
+    return;
+  }
+  // scintille ogni 4 frame, a caso sulla roccia (GBA 0x80ca83c)
+  if (!(frame_counter & 3)) {
+    // GBA: scintille da -3 a +12 rispetto alla roccia; lo SNES disegna gli
+    // sprite una riga piu' in basso, quindi qui y parte da -4
+    int ox = (GetRandomNumber() & 15) - 3, oy = (GetRandomNumber() & 15) - 4;
+    int j = GarnishAllocLimit(29);
+    if (j >= 0) {
+      garnish_type[j] = 5;
+      garnish_active = 5;
+      Garnish_SetX(j, r->x + ox);
+      Garnish_SetY(j, r->y + oy + 16);
+      garnish_countdown[j] = 31;
+      garnish_sprite[j] = 0xff;
+      garnish_floor[j] = r->floor;
+    }
+  }
+  // la roccia sollevata o distrutta smette di essere incantata
+  const uint16 *map8 = GetMap16toMap8Table();
+  if (map8[dung_bg2[r->pos] * 4] != map8[0x20f * 4]) {
+    r->active = false;
+    return;
+  }
+  if (r->delay)
+    return;
+  // colpo di spada, giravolta o tocco della punta contro la roccia
+  uint8 b = button_b_frames;
+  if (!((uint8)(b - 10) <= 2 || b == 5 || b == 0x90))
+    return;
+  if (r->floor != link_is_on_lower_level || player_oam_y_offset == 0x80)
+    return;
+  SpriteHitBox hb;
+  Player_SetupActionHitBox(&hb);
+  hb.r4_spr_xlo = r->x, hb.r10_spr_xhi = r->x >> 8;
+  hb.r5_spr_ylo = r->y, hb.r11_spr_yhi = r->y >> 8;
+  hb.r6_spr_xsize = hb.r7_spr_ysize = 16;
+  if (CheckIfHitBoxesOverlap(&hb))
+    GbaRock_Hit();
+}
+
 void Sprite_InitializeSlots() {  // 89afd6
   for (int k = 15; k >= 0; k--) {
     uint8 st = sprite_state[k], ty = sprite_type[k];
@@ -3377,6 +3550,7 @@ void Sprite_InitializeSlots() {  // 89afd6
     if (overlord_type[k] && overlord_spawned_in_area[k] != BYTE(overworld_area_index))
       overlord_type[k] = 0;
   }
+  GbaRock_Spawn();
 }
 
 void Garnish_ExecuteUpperSlots() {  // 89b08c

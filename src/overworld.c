@@ -15,6 +15,7 @@
 #include "messaging.h"
 #include "player_oam.h"
 #include "snes/snes_regs.h"
+#include "snes/ppu.h"
 #include "assets.h"
 #include "nmi.h"
 #include "hd_trans.h"
@@ -254,8 +255,114 @@ const uint8 *GetMap8toTileAttr() {
   return kMap8DataToTileAttr;
 }
 
+// Correzioni minori GBA: blocchi (map16) che la GBA aggiunge allo SNES.
+// Le caselle 8x8 sono quelle della VRAM GBA, nel formato dello SNES
+enum { kMap16_GbaBridge = 0xea8, kMap16_Count = 0xeac };
+static const uint16 kMap16_GbaExtra[4][4] = {
+  // ponticello in rovina dell'area 0x5d (sopra a sinistra, sopra a destra,
+  // sotto a sinistra, sotto a destra)
+  { 0x0921, 0x4921, 0x4995, 0x092a },
+  { 0x4921, 0x48b5, 0x092a, 0x488e },
+  { 0xc995, 0x092a, 0x0921, 0x4921 },
+  { 0x092a, 0x488e, 0x4921, 0x48a5 },
+};
+
 const uint16 *GetMap16toMap8Table() {
-  return kMap16ToMap8;
+  static uint16 *ext;
+  if (!ext) {
+    ext = (uint16 *)malloc(kMap16_Count * 8);
+    memcpy(ext, kMap16ToMap8, 0xea8 * 8);
+    memcpy(ext + 0xea8 * 4, kMap16_GbaExtra, sizeof(kMap16_GbaExtra));
+  }
+  return ext;
+}
+
+// Correzioni minori GBA: nella zona nord-ovest del Mondo Oscuro, dove serve il
+// Rampino, la GBA aggiunge un piccolo ponte in rovina sul bordo est del fiume.
+// Con live le caselle si ridisegnano anche sullo schermo: serve quando l'area
+// e' gia' in memoria (salvataggio rapido caricato, opzione accesa dal menu)
+static void Overworld_GbaAddTiles(bool live) {
+  if (!(enhanced_features0 & kFeatures0_GbaMinorFixes))
+    return;
+  if (overworld_screen_index == 0x5d && dung_bg2[XY(21, 2)] != kMap16_GbaBridge) {
+    static const uint8 kPos[4][2] = { {21, 2}, {22, 2}, {21, 3}, {22, 3} };
+    for (int i = 0; i < 4; i++) {
+      uint16 pos = XY(kPos[i][0], kPos[i][1]) * 2;
+      if (live)
+        Overworld_DrawMap16_Persist(pos, kMap16_GbaBridge + i);
+      else
+        dung_bg2[pos >> 1] = kMap16_GbaBridge + i;
+    }
+    if (live)
+      nmi_load_bg_from_vram = 1;
+  }
+}
+
+// Radura sotto il lago a sud del castello (opzione LakeClearing): tolta la fila
+// alta di alberi a sinistra della staccionata (aree 0x22 e 0x1b), il bordo
+// degli alberi rimasti si allinea a quello sotto la staccionata, che ora
+// arriva dritta fino al bordo dell'area. Blocchi map16 esistenti: 0x34 prato,
+// 0x233 prato sotto il muretto, 0x338 staccionata; bordo alto degli alberi
+// sopra la fila 14 15 16: af 7e b1, angolo sinistro ae, lato sinistro b0
+typedef struct LakeTile { uint8 x, y; uint16 t; } LakeTile;
+static const LakeTile kLakeClearing22[] = {
+  // area 0x22: bordo alto (riga 26) con l'angolo a sinistra, lato sinistro
+  {20, 26, 0x34}, {21, 26, 0x34}, {22, 26, 0xae}, {23, 26, 0xaf}, {24, 26, 0x7e},
+  {25, 26, 0xb1}, {26, 26, 0xaf}, {27, 26, 0x7e}, {28, 26, 0xb1}, {29, 26, 0xaf},
+  {30, 26, 0x7e}, {31, 26, 0xb1},
+  {21, 27, 0x34}, {22, 27, 0xb0},
+  // la scogliera scende di un passo in piu' (stessi blocchi della diagonale)
+  // e finisce all'altezza della fascia sotto il muretto dell'area 0x1b
+  {31, 21, 0x2f7}, {31, 22, 0x1f2}, {30, 23, 0x126}, {31, 23, 0x11e},
+};
+static const LakeTile kLakeClearing1b[] = {
+  {0, 53, 0x399}, {0, 54, 0x39a}, {0, 55, 0x290}, {1, 55, 0x233},
+  {0, 56, 0x338}, {1, 56, 0x338}, {2, 56, 0x338},
+  {0, 57, 0x34}, {1, 57, 0x34}, {2, 57, 0x34},
+  {0, 58, 0xaf}, {1, 58, 0x7e},
+};
+
+static void Overworld_LakeClearing(bool live) {
+  if (!g_config.lake_clearing)
+    return;
+  const LakeTile *p;
+  int n;
+  // stesso punto nel Mondo delle Tenebre (0x62 e 0x5b): blocchi identici
+  if (overworld_screen_index >= 0x80)
+    return;
+  uint8 area = overworld_screen_index & ~0x40;
+  if (area == 0x22) {
+    p = kLakeClearing22, n = countof(kLakeClearing22);
+    if (dung_bg2[XY(22, 26)] == 0xae)
+      return;
+  } else if (area == 0x1b) {
+    p = kLakeClearing1b, n = countof(kLakeClearing1b);
+    if (dung_bg2[XY(2, 56)] == 0x338)
+      return;
+  } else {
+    return;
+  }
+  // righe 23-25 dell'area 0x22/0x62: prato al posto delle chiome alte
+  static LakeTile grass[36];
+  int ng = 0;
+  if (area == 0x22) {
+    for (int y = 23; y <= 25; y++)
+      for (int x = 20; x <= 31; x++)
+        grass[ng].x = x, grass[ng].y = y, grass[ng].t = 0x34, ng++;
+  }
+  for (int pass = 0; pass < 2; pass++) {
+    const LakeTile *q = pass ? p : grass;
+    int m = pass ? n : ng;
+    for (int i = 0; i < m; i++) {
+      uint16 pos = XY(q[i].x, q[i].y) * 2;
+      if (live)
+        Overworld_DrawMap16_Persist(pos, q[i].t);
+      else
+        dung_bg2[pos >> 1] = q[i].t;
+    }
+  }
+  if (live)
+    nmi_load_bg_from_vram = 1;
 }
 
 // Area "testa" di uno dei 64 quadrati della mappa (le aree grandi ne coprono 4)
@@ -770,7 +877,51 @@ void OverworldOverlay_HandleRain() {  // 82a4cd
   BG1VOFS_copy2 += kOverworld_DrawBadWeather_Y[i] << 8;
 }
 
+// Le caselle 8x8 0x12a e 0x195 del ponte sono, sulla GBA, copie delle assi
+// 0x122 e 0x123 (con gli attributi di pavimento e di salto delle prime): qui
+// le assi si copiano al volo dalla VRAM, nell'area 0x5d (che non usa le 0x12a
+// e 0x195 originali) e solo mentre la si disegna: dalla PPU quando e' l'area
+// corrente, nell'immagine dell'area per il mondo continuo (hd_world.c)
+static const uint16 kGbaBridgeDst[2] = { 0x12a, 0x195 };
+static uint16 g_gba_bridge_saved[2][16];
+static bool g_gba_bridge_chars;
+
+void Overworld_GbaBridgeChars(Ppu *ppu, int head) {
+  if (!(enhanced_features0 & kFeatures0_GbaMinorFixes) || head != 0x5d)
+    return;
+  static const uint16 kSrc[2] = { 0x122, 0x123 };
+  uint16 base = ppu->bgLayer[1].tileAdr;
+  for (int i = 0; i < 2; i++)
+    memcpy(&ppu->vram[(base + kGbaBridgeDst[i] * 16) & 0x7fff], &ppu->vram[(base + kSrc[i] * 16) & 0x7fff], 32);
+}
+
+void Overworld_GbaCharsBeforeRender(Ppu *ppu) {
+  g_gba_bridge_chars = false;
+  if (!(enhanced_features0 & kFeatures0_GbaMinorFixes) || player_is_indoors || ppu->mode != 1 ||
+      overworld_screen_index != 0x5d)
+    return;
+  uint8 m = main_module_index == 14 ? saved_module_for_menu : main_module_index;
+  if (m != 9 && m != 11)
+    return;
+  uint16 base = ppu->bgLayer[1].tileAdr;
+  for (int i = 0; i < 2; i++)
+    memcpy(g_gba_bridge_saved[i], &ppu->vram[(base + kGbaBridgeDst[i] * 16) & 0x7fff], 32);
+  Overworld_GbaBridgeChars(ppu, 0x5d);
+  g_gba_bridge_chars = true;
+}
+
+void Overworld_GbaCharsAfterRender(Ppu *ppu) {
+  if (!g_gba_bridge_chars)
+    return;
+  g_gba_bridge_chars = false;
+  uint16 base = ppu->bgLayer[1].tileAdr;
+  for (int i = 0; i < 2; i++)
+    memcpy(&ppu->vram[(base + kGbaBridgeDst[i] * 16) & 0x7fff], g_gba_bridge_saved[i], 32);
+}
+
 void Module09_00_PlayerControl() {  // 82a53c
+  if (!nmi_load_bg_from_vram)
+    Overworld_GbaAddTiles(true), Overworld_LakeClearing(true);
   if (!(flag_custom_spell_anim_active | flag_is_link_immobilized | flag_block_link_menu | trigger_special_entrance)) {
     if (filtered_joypad_H & 0x10) {
       overworld_map_state = 0;
@@ -2729,7 +2880,7 @@ uint16 *BufferAndBuildMap16Stripes_X(uint16 *dst) {  // 82f3b9
     dst++;
     for (int j = 0; j < 16; j++) {
       int k = *tmp++;
-      assert(k < 0xea8);
+      assert(k < kMap16_Count);
       const uint16 *s = map8 + k * 4;
       dst[0] = s[0];
       dst[33] = s[1];
@@ -2760,7 +2911,7 @@ uint16 *BufferAndBuildMap16Stripes_Y(uint16 *dst) {  // 82f482
     *dst++ = r0;
     for (int j = 0; j < 16; j++) {
       int k = *tmp++;
-      assert(k < 0xea8);
+      assert(k < kMap16_Count);
       const uint16 *s = map8 + k * 4;
       dst[0] = s[0];
       dst[32] = s[2];
@@ -2779,6 +2930,8 @@ void Overworld_DecompressAndDrawAllQuadrants() {  // 82f54a
   Overworld_DecompressAndDrawOneQuadrant((uint16 *)&g_ram[0x2040], si + 1);
   Overworld_DecompressAndDrawOneQuadrant((uint16 *)&g_ram[0x3000], si + 8);
   Overworld_DecompressAndDrawOneQuadrant((uint16 *)&g_ram[0x3040], si + 9);
+  Overworld_GbaAddTiles(false);
+  Overworld_LakeClearing(false);
 }
 
 static const uint8 *GetOverworldHibytes(int i) {

@@ -427,6 +427,8 @@ static bool HandleIniConfig(int section, const char *key, char *value) {
       return ParseBool(value, &g_config.fx_whirlpool);
     } else if (StringEqualsNoCase(key, "OfficialArtwork")) {
       return ParseBool(value, &g_config.official_artwork);
+    } else if (StringEqualsNoCase(key, "TriforceTitle")) {
+      return ParseBool(value, &g_config.triforce_title);
     } else if (StringEqualsNoCase(key, "BlondLink")) {
       g_blond_link_seen = true;
       return ParseBool(value, &g_config.blond_link);
@@ -565,6 +567,10 @@ static bool HandleIniConfig(int section, const char *key, char *value) {
       return ParseBoolBit(value, &g_config.features0, kFeatures0_MiscBugFixes);
     } else if (StringEqualsNoCase(key, "GameChangingBugFixes")) {
       return ParseBoolBit(value, &g_config.features0, kFeatures0_GameChangingBugFixes);
+    } else if (StringEqualsNoCase(key, "EnchantedRocks")) {
+      return ParseBool(value, &g_config.enchanted_rocks);
+    } else if (StringEqualsNoCase(key, "LakeClearing")) {
+      return ParseBool(value, &g_config.lake_clearing);
     } else if (StringEqualsNoCase(key, "GbaMinorFixes")) {
       return ParseBoolBit(value, &g_config.features0, kFeatures0_GbaMinorFixes);
     } else if (StringEqualsNoCase(key, "CancelBirdTravel")) {

@@ -77,6 +77,7 @@ bool HdWorld_LeashWall(int k, uint16 x, uint16 y);
 bool HdWorld_HoldReload(uint16 blk);
 bool HdWorld_ProbeMoreSlots(int k);
 int HdWorld_FreeSlot(int k, int last);
+int HdWorld_FreeSlotOffView(int last);
 bool HdWorld_KeepDropNormal(int k);
 void HdWorld_SpriteSpawned(int k);
 void HdWorld_CarriedLost(int k);

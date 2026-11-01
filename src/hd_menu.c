@@ -424,6 +424,7 @@ static const char *Tr(const char *it) {
     { "Immersione con le pinne", "Dive with the flippers" },
     { "Frecce piantate nei muri", "Arrows stuck in walls" },
     { "Giravolta Tornado", "Hurricane Spin" },
+    { "Rocce incantate", "Enchanted rocks" },
     { "Solo 16:9 e 16:10", "Only 16:9 and 16:10" },
     { "Link personalizzato", "Custom Link" },
     { "Non con un Link personalizzato", "Not with a custom Link" },
@@ -529,6 +530,7 @@ static void SaveSettings() {
   AddIni(v, &n, "[Features]", "FlipperDive", "%d", g_config.flipper_dive);
   AddIni(v, &n, "[Features]", "StuckArrows", "%d", g_config.stuck_arrows);
   AddIni(v, &n, "[Features]", "HurricaneSpin", "%d", g_config.hurricane_spin);
+  AddIni(v, &n, "[Features]", "EnchantedRocks", "%d", g_config.enchanted_rocks);
   AddIni(v, &n, "[Features]", "ItemOnX", "%d", g_config.item_on_x);
   AddIni(v, &n, "[Features]", "ItemOnLR", "%d", g_config.item_on_lr);
   // La lingua si scrive solo se cambiata dal menu (altrimenti resta quella
@@ -662,6 +664,7 @@ static void BuildItems() {
     AddItem(102, "Immersione con le pinne", YesNo(g_config.flipper_dive));
     AddItem(103, "Frecce piantate nei muri", YesNo(g_config.stuck_arrows));
     AddItem(104, "Giravolta Tornado", YesNo(g_config.hurricane_spin));
+    AddItem(107, "Rocce incantate", YesNo(g_config.enchanted_rocks));
     break;
   case kPage_Audio:
     snprintf(buf, sizeof(buf), "%d%%", Host_GetVolume());
@@ -782,6 +785,10 @@ static void Activate(int id, int dir) {
       g_config.stuck_arrows = !g_config.stuck_arrows;
     } else if (id == 104) {
       g_config.hurricane_spin = !g_config.hurricane_spin;
+    } else if (id == 107) {
+      // spenta: la roccia accesa si spegne subito (GbaRock_Frame); accesa:
+      // la prossima roccia nasce entrando in un'area
+      g_config.enchanted_rocks = !g_config.enchanted_rocks;
     } else if (id == 105 || id == 106) {
       bool *opt = id == 105 ? &g_config.item_on_x : &g_config.item_on_lr;
       *opt = !*opt;

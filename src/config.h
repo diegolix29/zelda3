@@ -83,6 +83,12 @@ typedef struct Config {
   // aspetto dei disegni ufficiali (hd_art.c): Agahnim rosso, re in rosso,
   // medaglione con la stella della versione giapponese; Link biondo a parte
   bool official_artwork, blond_link;
+  // titolo "La Triforza degli Dei" / "Triforce of the Gods" (screens_it.c)
+  bool triforce_title;
+  // Rocce incantate, come su GBA (sprite.c, GbaRock_*)
+  bool enchanted_rocks;
+  // radura sotto il lago a sud del castello (overworld.c, Overworld_LakeClearing)
+  bool lake_clearing;
   // divise da SwordAndItemsInteraction: danni dei nemici come su GBA (si
   // applicano a inizio partita) e immersione con le pinne; divisa da
   // BurnAndFreezeInteraction: frecce che restano piantate nei muri

@@ -860,6 +860,33 @@ int HdWorld_FreeSlot(int k, int last) {
   return far;
 }
 
+// Come HdWorld_FreeSlot, ma basta che il nemico tranquillo sia fuori dalla
+// vista con kBorderSight pixel di margine: sullo SNES/GBA un nemico cosi' non
+// sarebbe ancora caricato. Serve alla roccia incantata: col mondo continuo i
+// nemici di tutta l'area riempivano i posti e i colpi dopo le prime rupie
+// andavano persi (GBA: 13 colpi = 2 bombe, qui ne usciva una)
+int HdWorld_FreeSlotOffView(int last) {
+  if (!FeatureOn() || BYTE(overworld_screen_index) >= 0x80 || player_is_indoors || main_module_index != 9)
+    return -1;
+  int ext = g_zenv.ppu->extraLeftRight, m = kBorderSight;
+  int lx = link_x_coord + 8, ly = link_y_coord + 12;
+  int far = -1, far_d = -1;
+  for (int j = 0; j <= last; j++) {
+    if (sprite_state[j] != 9 || spr_disturbed[j] || !IsAreaEnemy(j))
+      continue;
+    int x = SpriteWorldX(j), y = SpriteWorldY(j);
+    if (x + 16 + m > g_view_wx - ext && x - m < g_view_wx + 256 + ext &&
+        y + 16 + m > g_view_wy && y - m < g_view_wy + 224)
+      continue;
+    int d = Dist2(x + 8, y + 8, lx, ly);
+    if (d > far_d)
+      far = j, far_d = d;
+  }
+  if (far >= 0)
+    ResetEnemy(far);
+  return far;
+}
+
 static void MarkCarried(int k, int area, uint16 blk) {
   carried_area[k] = 0x80 | (area & 0x7f);
   carried_type[k] = sprite_type[k];
@@ -1842,6 +1869,7 @@ static void RenderArea(AreaImage *img, int head) {
   Overworld_HandleOverlaysAndBombDoors();
   ApplyTiles(head, false);  // cespugli tagliati e simili (mondo persistente)
   StoreMap(head);
+  Overworld_GbaBridgeChars(ppu, head);  // la VRAM si ripristina qui sotto
   DrawLoadedArea(img);
 
   memcpy(g_ram, g_saved_ram, sizeof(g_saved_ram));

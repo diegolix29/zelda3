@@ -7,6 +7,7 @@
 #include "zelda_rtl.h"
 #include "variables.h"
 #include "snes/ppu.h"
+#include "config.h"
 
 // ---------------------------------------------------------------------------
 // Selezione dei giochi. Le scritte sono strisce di lettere alte due caselle
@@ -414,9 +415,272 @@ static void LogoToPresenta(Ppu *ppu) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Sottotitolo del titolo (opzione TriforceTitle): "LA TRIFORZA DEGLI DEI" in
+// italiano e "TRIFORCE OF THE GODS" nelle altre lingue al posto di "A LINK TO
+// THE PAST". La scritta
+// e' sullo strato BG1: caselle 0x160-0x17f (righe 17 e 18 della mappa a
+// 0x1000, colonne 12-27), 128 x 16 pixel. Le lettere che ci sono gia' si
+// prendono dalla scritta originale (ogni regione collegata di riempimento
+// col suo contorno); R, F, C, G, D e Z sono disegnate qui nello stesso stile
+// ('d' contorno, 'x' riempimento, colorato riga per riga come le altre).
+// Le lettere vicine hanno il contorno in comune, fra le parole resta una
+// colonna vuota. La scritta nuova e' piu' larga: usa fino a 4 colonne in piu'
+// a destra (vuote nella mappa), tutta in caselle libere. Come le altre scritte si
+// cambia la VRAM solo mentre la PPU disegna.
+
+enum {
+  kSubW = 128, kSubH = 16, kSubHash = 0xc5663a6f, kSubOut = 13,
+  kSubMap = 0x1000, kSubRow = 17, kSubCol = 12, kSubTiles = 0x160,
+  kSubCols = 20, kSubMaxW = kSubCols * 8, kSubTileCount = kSubCols * 2,
+};
+
+typedef struct SubGlyph {
+  char c;
+  const char *rows[kSubH];
+} SubGlyph;
+
+static const SubGlyph kSubNewGlyphs[] = {
+  { 'F', { ".........", ".......d.", ".ddddddxd", "dxxxxxxxd", ".dxxdddxd", ".dxxd..d.",
+           ".dxxd.d..", ".dxxddxd.", ".dxxxxxd.", ".dxxddxd.", ".dxxd.d..", ".dxxd....",
+           ".dxxd....", "dxxxxd...", ".dddd....", "........." } },
+  { 'R', { "..........", "..........", ".dddddd...", "dxxxxxxd..", ".dxxddxxd.", ".dxxd.dxxd",
+           ".dxxd.dxxd", ".dxxd.dxxd", ".dxxddxxd.", ".dxxxxxd..", ".dxxddxxd.", ".dxxd.dxxd",
+           ".dxxd.dxxd", "dxxxxddxxd", ".dddd..dd.", ".........." } },
+  { 'C', { "..........", ".......d..", "...ddddxd.", ".ddxxxxxd.", ".dxxddxxd.", "ddxd..dxd.",
+           "dxxd...d..", "dxxd......", "dxxd......", "dxxd......", "dxxd...d..", ".dxd..dxd.",
+           ".dxxddxxd.", "..dxxxxd..", "...dddd...", ".........." } },
+  { 'G', { "..........", ".......d..", "...ddddxd.", ".ddxxxxxd.", ".dxxddxxd.", "ddxd..dxd.",
+           "dxxd...d..", "dxxd......", "dxxd.dddd.", "dxxd.dxxxd", "dxxd..dxxd", ".dxd..dxxd",
+           ".dxxddxxxd", "..dxxxxdxd", "...dddd.d.", ".........." } },
+  { 'D', { "..........", "..........", ".ddddd....", "dxxxxxdd..", ".dxxddxxd.", ".dxxd.dxd.",
+           ".dxxd.dxxd", ".dxxd.dxxd", ".dxxd.dxxd", ".dxxd.dxxd", ".dxxd.dxxd", ".dxxd.dxd.",
+           ".dxxddxxd.", "dxxxxxdd..", ".ddddd....", ".........." } },
+  { 'Z', { ".........", ".d.......", "dxdddddd.", "dxxxxxxxd", "dxdddxxd.", ".d.dxxd..",
+           "..dxxd...", "..dxxd...", ".dxxd....", ".dxxd....", "dxxd...d.", "dxxd..dxd",
+           "dxxdddxxd", "dxxxxxxxd", ".ddddddd.", "........." } },
+};
+
+// Lettere della scritta originale: indice della regione (in ordine da
+// sinistra) in "A LINK TO THE PAST"
+static const char kSubOldLetters[] = "ALINKTOTHEPAST";
+
+static uint8 g_sub_src[kSubH][kSubW];
+static int8 g_sub_lab[kSubH][kSubW];
+static uint8 g_sub_out[kSubH][kSubMaxW];
+static uint8 g_sub_rowc[kSubH];
+static uint16 g_sub_saved_tiles[kSubTileCount][16];
+static uint16 g_sub_saved_map[2][kSubCols];
+static uint16 g_sub_tiles[kSubTileCount];
+static bool g_sub_changed;
+
+static uint16 *SubTile(Ppu *ppu, int t) {
+  return &ppu->vram[(ppu->bgLayer[0].tileAdr + t * 16) & 0x7fff];
+}
+
+static uint16 *SubMapEntry(Ppu *ppu, int row, int col) {
+  return &ppu->vram[kSubMap + row * 32 + col];
+}
+
+// Regioni di riempimento collegate (anche in diagonale), numerate da sinistra
+static int SubLabel(void) {
+  static int16 stack[kSubW * kSubH][2];
+  memset(g_sub_lab, -1, sizeof(g_sub_lab));
+  int n = 0;
+  for (int x = 0; x < kSubW; x++)
+    for (int y = 0; y < kSubH; y++) {
+      int p = g_sub_src[y][x];
+      if (!p || p == kSubOut || g_sub_lab[y][x] >= 0)
+        continue;
+      if (n >= 127)
+        return n;
+      int sp = 0;
+      stack[sp][0] = x, stack[sp][1] = y, sp++;
+      g_sub_lab[y][x] = n;
+      while (sp) {
+        sp--;
+        int a = stack[sp][0], b = stack[sp][1];
+        for (int dy = -1; dy <= 1; dy++)
+          for (int dx = -1; dx <= 1; dx++) {
+            int c = a + dx, d = b + dy;
+            if (c < 0 || d < 0 || c >= kSubW || d >= kSubH)
+              continue;
+            int q = g_sub_src[d][c];
+            if (!q || q == kSubOut || g_sub_lab[d][c] >= 0)
+              continue;
+            g_sub_lab[d][c] = n;
+            stack[sp][0] = c, stack[sp][1] = d, sp++;
+          }
+      }
+      n++;
+    }
+  return n;
+}
+
+// Mette la lettera c a partire dalla colonna x (il riempimento vince sul
+// contorno, il contorno sul vuoto). Ritorna la larghezza o 0
+static int SubPutGlyph(char c, int x) {
+  for (size_t i = 0; i < countof(kSubNewGlyphs); i++) {
+    if (kSubNewGlyphs[i].c != c)
+      continue;
+    int w = (int)strlen(kSubNewGlyphs[i].rows[0]);
+    for (int y = 0; y < kSubH; y++)
+      for (int k = 0; k < w && x + k < kSubMaxW; k++) {
+        char m = kSubNewGlyphs[i].rows[y][k];
+        uint8 *o = &g_sub_out[y][x + k];
+        if (m == 'x')
+          *o = g_sub_rowc[y];
+        else if (m == 'd' && !*o)
+          *o = kSubOut;
+      }
+    return w;
+  }
+  const char *f = strchr(kSubOldLetters, c);
+  if (!f)
+    return 0;
+  int lab = (int)(f - kSubOldLetters), x0 = kSubW, x1 = -1;
+  // pixel della lettera: il suo riempimento e il contorno che lo tocca
+  static uint8 mask[kSubH][kSubW];
+  for (int y = 0; y < kSubH; y++)
+    for (int k = 0; k < kSubW; k++) {
+      uint8 m = 0;
+      if (g_sub_lab[y][k] == lab) {
+        m = 2;
+      } else if (g_sub_src[y][k] == kSubOut) {
+        for (int dy = -1; dy <= 1 && !m; dy++)
+          for (int dx = -1; dx <= 1; dx++) {
+            int a = k + dx, b = y + dy;
+            if (a >= 0 && b >= 0 && a < kSubW && b < kSubH && g_sub_lab[b][a] == lab) {
+              m = 1;
+              break;
+            }
+          }
+      }
+      mask[y][k] = m;
+      if (m) {
+        if (k < x0) x0 = k;
+        if (k > x1) x1 = k;
+      }
+    }
+  if (x1 < 0)
+    return 0;
+  for (int y = 0; y < kSubH; y++)
+    for (int k = x0; k <= x1 && x + k - x0 < kSubMaxW; k++) {
+      uint8 *o = &g_sub_out[y][x + k - x0];
+      if (mask[y][k] == 2)
+        *o = g_sub_rowc[y];
+      else if (mask[y][k] == 1 && !*o)
+        *o = kSubOut;
+    }
+  return x1 - x0 + 1;
+}
+
+static void SubWriteTile(uint16 *t, int col, int half) {
+  memset(t, 0, 16 * sizeof(uint16));
+  for (int r = 0; r < 8; r++)
+    for (int c = 0; c < 8; c++) {
+      int p = g_sub_out[half * 8 + r][col * 8 + c], b = 7 - c;
+      t[r] |= (p & 1) << b | (p >> 1 & 1) << (b + 8);
+      t[8 + r] |= (p >> 2 & 1) << b | (p >> 3 & 1) << (b + 8);
+    }
+}
+
+static void SubtitleBeforeRender(Ppu *ppu) {
+  if (!g_config.triforce_title || main_module_index != 0 || ppu->bgLayer[0].tilemapAdr != kSubMap)
+    return;
+  for (int i = 0; i < 16; i++)
+    if (*SubMapEntry(ppu, kSubRow, kSubCol + i) != (0x1c00 | (kSubTiles + i)) ||
+        *SubMapEntry(ppu, kSubRow + 1, kSubCol + i) != (0x1c00 | (kSubTiles + 16 + i)))
+      return;
+  for (int y = 0; y < kSubH; y++)
+    for (int x = 0; x < kSubW; x++)
+      g_sub_src[y][x] = (uint8)ObjTilePixel(SubTile(ppu, kSubTiles + (y >> 3) * 16 + (x >> 3)), x & 7, y & 7);
+  uint32 h = 2166136261u;
+  for (int y = 0; y < kSubH; y++)
+    for (int x = 0; x < kSubW; x++)
+      h = (h ^ g_sub_src[y][x]) * 16777619u;
+  if (h != kSubHash || SubLabel() != (int)strlen(kSubOldLetters))
+    return;
+  // colore del riempimento di ogni riga (il piu' usato)
+  for (int y = 0; y < kSubH; y++) {
+    int cnt[16] = { 0 }, best = 9;
+    for (int x = 0; x < kSubW; x++)
+      if (g_sub_src[y][x] && g_sub_src[y][x] != kSubOut)
+        cnt[g_sub_src[y][x]]++;
+    for (int c = 1; c < 16; c++)
+      if (cnt[c] > cnt[best])
+        best = c;
+    g_sub_rowc[y] = (uint8)best;
+  }
+  const char *text = HudIt_Active() ? "LA TRIFORZA DEGLI DEI" : "TRIFORCE OF THE GODS";
+  memset(g_sub_out, 0, sizeof(g_sub_out));
+  int x = 0, width = 0;
+  for (const char *s = text; *s; s++) {
+    if (*s == ' ') {
+      x += 2;
+      continue;
+    }
+    int w = SubPutGlyph(*s, x);
+    if (!w)
+      return;
+    width = x + w;
+    x += w - 1;
+  }
+  if (width > kSubMaxW)
+    return;
+  // Le caselle originali non si toccano ("THE LEGEND OF" usa le stesse del
+  // "THE" della scritta): la scritta nuova va tutta in caselle libere, non
+  // usate dalle mappe di BG1 e BG2 e fuori dalle tavole degli sprite e dalle
+  // mappe e caselle degli altri strati; nella mappa cambiano solo le righe
+  // 17 e 18
+  static uint8 used[0x400 / 8];
+  memset(used, 0, sizeof(used));
+  for (int a = 0; a < 0x2000; a++) {
+    int t = ppu->vram[a] & 0x3ff;
+    used[t >> 3] |= 1 << (t & 7);
+  }
+  int ne = 0;
+  for (int t = 0x3ff; t >= 0 && ne < kSubTileCount; t--) {
+    int adr = (ppu->bgLayer[0].tileAdr + t * 16) & 0x7fff;
+    bool bad = (used[t >> 3] >> (t & 7) & 1) ||
+        ((adr - ppu->objTileAdr1) & 0x7fff) < 0x1000 || ((adr - ppu->objTileAdr2) & 0x7fff) < 0x1000 ||
+        ((adr - ppu->bgLayer[2].tileAdr) & 0x7fff) < 0x2000;
+    for (int i = 0; i < 4 && !bad; i++)
+      bad = ((adr - ppu->bgLayer[i].tilemapAdr) & 0x7fff) < 0x1000;
+    if (!bad)
+      g_sub_tiles[ne++] = (uint16)t;
+  }
+  if (ne < kSubTileCount)
+    return;
+  for (int i = 0; i < kSubTileCount; i++)
+    memcpy(g_sub_saved_tiles[i], SubTile(ppu, g_sub_tiles[i]), 16 * sizeof(uint16));
+  for (int r = 0; r < 2; r++)
+    for (int c = 0; c < kSubCols; c++)
+      g_sub_saved_map[r][c] = *SubMapEntry(ppu, kSubRow + r, kSubCol + c);
+  for (int col = 0; col < kSubCols; col++)
+    for (int half = 0; half < 2; half++) {
+      uint16 t = g_sub_tiles[col * 2 + half];
+      SubWriteTile(SubTile(ppu, t), col, half);
+      *SubMapEntry(ppu, kSubRow + half, kSubCol + col) = 0x1c00 | t;
+    }
+  g_sub_changed = true;
+}
+
+static void SubtitleAfterRender(Ppu *ppu) {
+  if (!g_sub_changed)
+    return;
+  g_sub_changed = false;
+  for (int i = 0; i < kSubTileCount; i++)
+    memcpy(SubTile(ppu, g_sub_tiles[i]), g_sub_saved_tiles[i], 16 * sizeof(uint16));
+  for (int r = 0; r < 2; r++)
+    for (int c = 0; c < kSubCols; c++)
+      *SubMapEntry(ppu, kSubRow + r, kSubCol + c) = g_sub_saved_map[r][c];
+}
+
 void ScreensIt_BeforeRender(Ppu *ppu) {
   g_end_changed = false;
   g_logo_changed = false;
+  SubtitleBeforeRender(ppu);
   if (HudIt_Active() && main_module_index == 0)
     LogoToPresenta(ppu);
   if (!HudIt_Active() || main_module_index != 0x1a)
@@ -438,6 +702,7 @@ void ScreensIt_BeforeRender(Ppu *ppu) {
 }
 
 void ScreensIt_AfterRender(Ppu *ppu) {
+  SubtitleAfterRender(ppu);
   if (g_logo_changed) {
     memcpy(&ppu->vram[g_logo_adr], g_logo_saved, sizeof(g_logo_saved));
     g_logo_changed = false;
