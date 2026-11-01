@@ -420,7 +420,21 @@ uint16 Overworld_GetSignText(int area) {
 const uint8 *GetOverworldSpritePtr(int area) {
   int base = (sram_progress_indicator == 3) ? 2 :
     (sram_progress_indicator == 2) ? 1 : 0;
-  return kOverworldSprites + kOverworldSpriteOffs[area + base * 144];
+  const uint8 *src = kOverworldSprites + kOverworldSpriteOffs[area + base * 144];
+  // Mappa come A Link Between Worlds: il passaggio nuovo in basso a sinistra
+  // dell'area 0x1b lo chiude, finche' piove, un soldato del prologo (0x3f)
+  // come quelli della stessa lista: sparisce con loro quando cambia la lista
+  if (g_config.lake_clearing && base == 0 && area == 0x1b) {
+    static uint8 buf[3 * 32 + 4];
+    int n = 0;
+    while (src[n] != 0xff && n < 3 * 31)
+      n += 3;
+    memcpy(buf, src, n);
+    buf[n] = 57, buf[n + 1] = 1, buf[n + 2] = 0x3f;  // y, x (blocchi di 16 px), tipo
+    buf[n + 3] = 0xff;
+    return buf;
+  }
+  return src;
 }
 
 uint8 GetOverworldBgPalette(int idx) {
@@ -855,6 +869,12 @@ void Module09_Overworld() {  // 82a475
   OverworldOverlay_HandleRain();
 }
 
+// Pioggia sullo schermo (stessa condizione di OverworldOverlay_HandleRain)
+bool Overworld_RainActive(void) {
+  return !player_is_indoors &&
+         !(BYTE(overworld_screen_index) != 0x70 && sram_progress_indicator >= 2 || (save_ow_event_info[0x70] & 0x20));
+}
+
 void OverworldOverlay_HandleRain() {  // 82a4cd
   static const uint8 kOverworld_DrawBadWeather_X[4] = { 1, 0, 1, 0 };
   static const uint8 kOverworld_DrawBadWeather_Y[4] = { 0, 17, 0, 17 };
@@ -919,9 +939,22 @@ void Overworld_GbaCharsAfterRender(Ppu *ppu) {
     memcpy(&ppu->vram[(base + kGbaBridgeDst[i] * 16) & 0x7fff], g_gba_bridge_saved[i], 32);
 }
 
+// Soldato del prologo che chiude il passaggio nuovo dell'area 0x1b (lista in
+// GetOverworldSpritePtr): qui solo per i salvataggi rapidi fatti prima, dove
+// la lista dell'area era gia' stata letta senza di lui
+static void Overworld_LakeGuard(void) {
+  enum { kBlk = 12 << 8 | (57 & 15) << 4 | 1 };  // y 57, x 1 come nella lista
+  if (!g_config.lake_clearing || sram_progress_indicator >= 2 || player_is_indoors ||
+      overworld_area_index != 0x1b || BYTE(overworld_screen_index) >= 0x40 || sprite_where_in_overworld[kBlk])
+    return;
+  sprite_where_in_overworld[kBlk] = 0x3f + 1;
+  Overworld_LoadProximaSpriteIfAlive(kBlk);
+}
+
 void Module09_00_PlayerControl() {  // 82a53c
   if (!nmi_load_bg_from_vram)
     Overworld_GbaAddTiles(true), Overworld_LakeClearing(true);
+  Overworld_LakeGuard();
   if (!(flag_custom_spell_anim_active | flag_is_link_immobilized | flag_block_link_menu | trigger_special_entrance)) {
     if (filtered_joypad_H & 0x10) {
       overworld_map_state = 0;

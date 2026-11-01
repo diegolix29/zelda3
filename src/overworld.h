@@ -35,6 +35,7 @@ void SetTargetOverworldWarpToPyramid();
 void ResetAncillaAndCutscene();
 void Module09_Overworld();
 void OverworldOverlay_HandleRain();
+bool Overworld_RainActive(void);
 void Module09_00_PlayerControl();
 void OverworldHandleTransitions();
 void Overworld_LoadGFXAndScreenSize();

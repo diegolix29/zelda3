@@ -1973,7 +1973,9 @@ static void OverlayBegin(OverlayCtx *o, int ext) {
   Ppu *ppu = g_zenv.ppu;
   bool sub = (ppu->screenEnabled[1] & 1) && !(ppu->screenEnabled[0] & 1) && ppu->addSubscreen &&
              !ppu->subtractColor && ppu->mode != 7;
-  o->on = sub && (ppu->mathEnabled & 2) && ppu->halfColor;
+  // pioggia del prologo: nei lampi il gioco toglie la meta' (somma piena,
+  // CGADSUB 0x32); anche le aree vicine del mondo continuo devono schiarirsi
+  o->on = sub && (ppu->mathEnabled & 2) && (ppu->halfColor || Overworld_RainActive());
   o->sky = sub && !o->on && (ppu->mathEnabled & 0x20);
   o->half = ppu->halfColor;
   o->x0 = ppu->bgLayer[0].hScroll + ppu->bgBiasX - ext;
@@ -2033,6 +2035,17 @@ static inline uint32 OverlayBlend(const OverlayCtx *o, uint32 c, int sx, int sy)
   if (!o->on)
     return c;
   int col = OverlayColor(o, sx, sy);
+  if (!o->half) {
+    // somma piena come la PPU (lampi): strato, o colore fisso dove e' trasparente
+    Ppu *ppu = g_zenv.ppu;
+    if (col < 0)
+      col = ppu->fixedColorR | ppu->fixedColorG << 5 | ppu->fixedColorB << 10;
+    if (!col)
+      return c;
+    uint32 oc = Dim(HdFx_Bgr15ToRgb((uint16)col));
+    int r = (c >> 16 & 255) + (oc >> 16 & 255), g = (c >> 8 & 255) + (oc >> 8 & 255), b = (c & 255) + (oc & 255);
+    return (c & 0xff000000) | (r > 255 ? 255 : r) << 16 | (g > 255 ? 255 : g) << 8 | (b > 255 ? 255 : b);
+  }
   if (col < 0)
     return c;  // trasparente: il terreno resta com'e'
   uint32 oc = HdFx_Bgr15ToRgb((uint16)col);
