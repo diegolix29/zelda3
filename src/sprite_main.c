@@ -10,6 +10,7 @@
 #include "dungeon.h"
 #include "player.h"
 #include "misc.h"
+#include "config.h"
 #include <time.h>
 
 #define byte_7FFE01 (*(uint8*)(g_ram+0x1FE01))
@@ -11079,7 +11080,10 @@ void Sprite_TutorialGuardOrBarrier(int k) {  // 86bffe
     return;
   Sprite_CheckDamageFromLink(k);
 
-  if (BYTE(overworld_area_index) == 0x1b && (sprite_y_lo[k] == 0x50 || sprite_y_lo[k] == 0x90)) {
+  // il soldato aggiunto da LakeClearing (x 0x610, lista in GetOverworldSpritePtr)
+  // parla dei tasti come quelli vicino a casa di Link, non come quelli del cancello
+  if (BYTE(overworld_area_index) == 0x1b && (sprite_y_lo[k] == 0x50 || sprite_y_lo[k] == 0x90) &&
+      !(g_config.lake_clearing && Sprite_GetX(k) == 0x610)) {
     Sprite_TutorialGuard_ShowMessageOnContact(k, sprite_y_lo[k] == 0x50 ? 0xB2 : 0xB3);
   } else {
     if (Sprite_TutorialGuard_ShowMessageOnContact(k, byte_7E0B69 + 0xf)) {
