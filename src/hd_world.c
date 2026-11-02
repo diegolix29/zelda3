@@ -116,10 +116,15 @@ static int g_bright = 15;
 // (somma di colori) a OverlayBegin/OverlayBlend
 static bool g_pal_map_on;
 static int16 g_pal_add[3][32];  // per canale e valore a 5 bit: da aggiungere (0-255)
+static bool g_warp_on;          // specchio in corso in questo frame (HdWorld_WarpBeforeRender)
 
 static void PreparePaletteMap(void) {
   g_pal_map_on = false;
-  if (HdFx_FadeActive())
+  // Specchio: main_palette_buffer ha ancora i colori del mondo di prima e
+  // aux_palette_buffer gia' quelli del mondo nuovo, la differenza non e' un
+  // effetto e tingeva le aree vicine (rosso a destra in 18:9). Lo specchio
+  // ha la sua regola: HdWorld_WarpPost schiarisce tutto lo schermo insieme
+  if (HdFx_FadeActive() || g_warp_on)
     return;
   // il mulinello cambia anche le palette degli sprite: si contano tutte come
   // prima; negli altri casi solo quelle del fondale (le immagini delle aree
@@ -228,7 +233,6 @@ static float g_warp_dxf[240]; // lo stesso per lo shader
 static int g_warp_white;      // 0-31: quanto il gioco ha aggiunto ai colori
 static int g_warp_floor;      // 0-31: livello sotto cui nessun colore scende
 static bool g_warp_old_world; // prima del cambio: lo schermo mostra il mondo di prima
-static bool g_warp_on;        // animazione in corso in questo frame
 static uint16 g_warp_real_pal[256];  // colori di prima dell'animazione
 static uint16 g_warp_cgram[256];     // colori della PPU durante il disegno
 static uint16 g_warp_bg1, g_warp_bg2;
