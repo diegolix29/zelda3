@@ -76,8 +76,39 @@ void HdWorld_SpriteEnd(int k, bool offscreen);
 bool HdWorld_LeashWall(int k, uint16 x, uint16 y);
 bool HdWorld_HoldReload(uint16 blk);
 bool HdWorld_ProbeMoreSlots(int k);
+// Regola fissa dei 16 posti: libera un posto 0-last (tranne k) per lo sprite
+// che deve nascere, -1 se non si puo'. Le azioni di Link hanno la precedenza
+// (g_hd_spawner: sprite che fa il suo passo in Sprite_Main, -1 fuori)
 int HdWorld_FreeSlot(int k, int last);
-int HdWorld_FreeSlotOffView(int last);
+// Effetti su tutto lo schermo (medaglioni...): nel gioco normale valgono per
+// gli sprite caricati, cioe' quelli inquadrati (il gioco toglie gli altri);
+// col mondo continuo per quelli nella vista, anche nelle aree vicine
+bool HdWorld_SpriteOnScreen(int k);
+// Vista del mondo continuo (g_view_wx/wy, piu' larga della telecamera del
+// gioco) in uso nel gioco vero, non nel passo delle copie delle aree vicine
+bool HdWorld_LiveView(void);
+// Vero se il riquadro w x h in (x, y) del mondo tocca la vista (240 righe,
+// fasce dello schermo largo comprese) allargata di m pixel per lato
+bool HdWorld_BoxInView(int x, int y, int w, int h, int m);
+// Riquadro del mondo inquadrato (telecamera mostrata + fasce + righe): la
+// regola unica per tutti gli effetti "su tutto lo schermo"
+void HdWorld_ScreenRect(int *x, int *y, int *w, int *h);
+// Angolo dei 256 px centrali dello schermo mostrato (x = 0 del gioco originale)
+void HdWorld_ScreenOrigin(int *x, int *y);
+// Il medaglione colpisce in questo frame: la sua ancilla (tipo) colpisce anche
+// i nemici inquadrati nelle copie delle aree vicine
+void HdWorld_ScreenMedallion(uint8 type);
+// Sprite che si vedono, del gioco (k = posto) e delle aree vicine inquadrate
+// (k = -1): per gli effetti che li guardano soltanto (luci, bagliori, scintille)
+typedef struct HdShownSprite {
+  int x, y, z;  // posizione nel mondo, altezza da terra
+  int k;
+  uint8 type, state, head_dir;
+} HdShownSprite;
+enum { kHdMaxShown = 160 };
+int HdWorld_ShownSprites(HdShownSprite *out, int max);
+enum { kHdSpawnerOverlord = 16 };
+extern int g_hd_spawner;
 bool HdWorld_KeepDropNormal(int k);
 void HdWorld_SpriteSpawned(int k);
 void HdWorld_CarriedLost(int k);

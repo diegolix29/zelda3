@@ -1170,7 +1170,9 @@ void Sprite_Main() {  // 868328
   if (sprite_alert_flag)
     sprite_alert_flag--;
   Ancilla_Main();
+  g_hd_spawner = kHdSpawnerOverlord;  // i generatori non sono azioni di Link
   Overlord_Main();
+  g_hd_spawner = -1;
   archery_game_out_of_arrows = 0;
   memset(g_sprite_oam_owner, 0xff, sizeof(g_sprite_oam_owner));
   // Nome del dungeon sullo schermo: nemici fermi (ma disegnati) con il blocco
@@ -1202,7 +1204,9 @@ void Sprite_Main() {  // 868328
     g_sprite_offscreen[i] = 0;
     uint8 sfx1 = sound_effect_1, sfx2 = sound_effect_2;
     HdWorld_SpriteBegin(i);  // vede Link solo da vicino, resta vicino a casa
+    g_hd_spawner = i;  // chi chiede un posto (HdWorld_FreeSlot)
     Sprite_ExecuteSingle(i);
+    g_hd_spawner = -1;
     HdWorld_SpriteEnd(i, g_sprite_offscreen[i] != 0);
     // fuori dalla vista: niente pezzi sullo schermo e niente suoni
     bool hide = g_sprite_offscreen[i] != 0;
@@ -3432,11 +3436,10 @@ static void GbaRock_Hit(void) {
   uint8 c = r->count;
   uint8 type = c == 9 ? 0xda : c == 10 ? 0xdb : c < 9 ? 0xd9 : 0x4a;
   SpriteSpawnInfo info;
+  // senza posto il colpo non conta (anche su GBA): col mondo continuo e'
+  // un'azione di Link e HdWorld_FreeSlot libera anche un nemico fuori dalla
+  // vista, che sulla GBA non sarebbe caricato
   int j = Sprite_SpawnDynamically(0, type, &info);
-  // senza posto il colpo non conta (anche su GBA): col mondo continuo si
-  // libera un nemico fuori dalla vista, che sulla GBA non sarebbe caricato
-  if (j < 0 && HdWorld_FreeSlotOffView(15) >= 0)
-    j = Sprite_SpawnDynamically(0, type, &info);
   if (j < 0)
     return;
   int d = link_direction_facing >> 1 & 3;
@@ -3535,7 +3538,9 @@ void Sprite_InitializeSlots() {  // 89afd6
     uint8 st = sprite_state[k], ty = sprite_type[k];
     if (st != 0) {
       if (st == 10) {
-        if (ty != 0xec && ty != 0xd2) {
+        // mondo continuo: quello che Link tiene in mano (pollo...) passa con
+        // lui nell'area nuova (HdWorld_BeforeNewSprites lo fa ospite)
+        if (ty != 0xec && ty != 0xd2 && !(main_module_index == 9 && HdWorld_Carried(k))) {
           link_picking_throw_state = 0;
           link_state_bits = 0;
           sprite_state[k] = 0;
@@ -3811,11 +3816,11 @@ bool Garnish_ReturnIfPrepFails(int k, Point16U *pt) {  // 89b5de
 // gioco: SetOamHelper1 tiene il nono bit della x e la y vera si ricostruisce
 // al disegno (ResolveSpritePositions)
 static bool Garnish_ReturnIfPrepFailsInView(int k, Point16U *pt) {
-  if (!g_view_valid || g_hd_neighbor_tick || !HdWorld_Active())
+  if (!HdWorld_LiveView())
     return Garnish_ReturnIfPrepFails(k, pt);
-  int ext = g_zenv.ppu->extraLeftRight;
   uint16 gx = Garnish_GetX(k), gy = Garnish_GetY(k);
-  if ((uint16)(gx - g_view_wx + ext + 16) >= 256 + 2 * ext + 32 || (uint16)(gy - g_view_wy) >= 256) {
+  // punto nella vista con 16 pixel ai lati, sotto fino alla riga 255
+  if (!HdWorld_BoxInView(gx - 16, gy - 16, 33, 17, 0)) {
     garnish_type[k] = 0;
     return true;
   }
@@ -4054,12 +4059,21 @@ void Overworld_LoadSprites() {  // 89c4ac
   }
 }
 
+// Margine oltre i 256 px in cui il gioco attiva i nemici dello schermo largo.
+// In origine 0x40 fissi (pensati per il 16:10): con fasce piu' larghe (16:9 85 px,
+// 18:9 96 px) i nemici comparivano gia' dentro la fascia. Ora almeno quanto la fascia.
+int Sprite_WideMargin(void) {
+  if (!(enhanced_features0 & kFeatures0_ExtendScreen64))
+    return 0;
+  return IntMax(0x40, g_zenv.ppu->extraLeftRight);
+}
+
 void Sprite_ActivateAllProxima() {  // 89c55e
   uint16 bak0 = BG2HOFS_copy2;
   uint8 bak1 = byte_7E069E[1];
   byte_7E069E[1] = 0xff;
 
-  int xt = (enhanced_features0 & kFeatures0_ExtendScreen64) ? 0x40 : 0;
+  int xt = Sprite_WideMargin();
   BG2HOFS_copy2 -= xt;
   for (int i = 21 + (xt >> 3); i >= 0; i--) {
     Sprite_ActivateWhenProximal();
@@ -4084,7 +4098,7 @@ void Sprite_ProximityActivation() {  // 89c58f
 
 void Sprite_ActivateWhenProximal() {  // 89c5bb
   if (byte_7E069E[1]) {
-    int xt = (enhanced_features0 & kFeatures0_ExtendScreen64) ? 0x40 : 0;
+    int xt = Sprite_WideMargin();
     uint16 x = BG2HOFS_copy2 + (sign8(byte_7E069E[1]) ? -0x10 - xt : 0x110 + xt);
     uint16 y = BG2VOFS_copy2 - 0x30;
     for (int i = 21; i >= 0; i--, y += 16)
@@ -4094,7 +4108,7 @@ void Sprite_ActivateWhenProximal() {  // 89c5bb
 
 void Sprite_ActivateWhenProximalBig() {  // 89c5fa
   if (byte_7E069E[0]) {
-    int xt = (enhanced_features0 & kFeatures0_ExtendScreen64) ? 0x40 : 0;
+    int xt = Sprite_WideMargin();
     uint16 x = BG2HOFS_copy2 - 0x30 - xt;
     uint16 y = BG2VOFS_copy2 + (sign8(byte_7E069E[0]) ? -0x10 : 0x110);
     for (int i = 21 + (xt >> 3); i >= 0; i--, x += 16)

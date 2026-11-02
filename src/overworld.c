@@ -1268,7 +1268,7 @@ void Module09_LoadNewMapAndGFX() {  // 82abc6
 // passaggio normale si attivano man mano che la telecamera scorre, in quello
 // istantaneo lo scorrimento non c'e'
 static void ActivateSpritesInView(void) {
-  int xt = (enhanced_features0 & kFeatures0_ExtendScreen64) ? 0x40 : 0;
+  int xt = Sprite_WideMargin();
   for (int y = BG2VOFS_copy2 - 0x30; y <= BG2VOFS_copy2 + 0x110; y += 16)
     for (int x = BG2HOFS_copy2 - 0x30 - xt; x <= BG2HOFS_copy2 + 0x110 + xt; x += 16)
       Sprite_Overworld_ProximityMotivatedLoad((uint16)x, (uint16)y);

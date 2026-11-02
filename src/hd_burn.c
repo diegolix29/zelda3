@@ -342,6 +342,19 @@ static void HurtSprites(uint16 x, uint16 y) {
   }
 }
 
+// Mondo continuo, durante il passo della copia dell'area (HdWorld: CopyEffects):
+// le fiamme delle sue caselle colpiscono anche i suoi nemici (HdBurn_Update
+// gira solo nel gioco vero, dove ci sono soltanto i nemici dell'area di Link)
+void HdBurn_HurtSpritesInArea(uint8 area) {
+  if (!Enabled())
+    return;
+  for (int i = 0; i < g_num_burning; i++) {
+    const HdBurnTile *b = &g_burning[i];
+    if (b->area == area && b->age < kHarmlessAt)
+      HurtSprites(b->x, b->y);
+  }
+}
+
 // Il fuoco si spegne: resta il cespuglio bruciato
 static void BurnOut(uint16 x, uint16 y) {
   int pos = TilePos(x, y);
@@ -405,12 +418,10 @@ static bool StartFreezing(uint16 x, uint16 y, uint8 water, bool only_water) {
 
 // Riquadro del mondo che si vede sullo schermo, tile 16x16 comprese
 static void VisibleTiles(uint16 *x0, uint16 *y0, int *w, int *h) {
-  Ppu *ppu = g_zenv.ppu;
-  int ext = ppu->extraLeftRight;
-  int rows = (ppu->renderFlags & kPpuRenderFlags_Height240) ? 240 : 224;
-  *x0 = (BG2HOFS_copy2 + g_render_bias_x - ext) & ~0xf;
-  *y0 = (BG2VOFS_copy2 + g_render_bias_y) & ~0xf;
-  *w = 256 + 2 * ext + 16, *h = rows + 16;
+  int x, y;
+  HdWorld_ScreenRect(&x, &y, w, h);  // regola unica degli effetti sullo schermo
+  *x0 = x & ~0xf, *y0 = y & ~0xf;
+  *w += 16, *h += 16;
 }
 
 // Il fuoco scioglie l'acqua ghiacciata della tile (gia' allineata a 16): si

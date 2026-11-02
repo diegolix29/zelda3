@@ -388,10 +388,13 @@ static void SpawnWhirlpoolSparkles() {
   // la Piramide e le scintille apparivano nel punto d'arrivo
   if (submodule_index)
     return;
-  for (int k = 0; k < 16; k++) {
-    if (sprite_state[k] != 9 || sprite_type[k] != 0xba || Rand01() > 0.12f)
+  // anche i mulinelli delle aree vicine inquadrate (HdWorld_ShownSprites)
+  static HdShownSprite shown[kHdMaxShown];
+  int num_shown = HdWorld_ShownSprites(shown, kHdMaxShown);
+  for (int i = 0; i < num_shown; i++) {
+    if (shown[i].state != 9 || shown[i].type != 0xba || Rand01() > 0.12f)
       continue;
-    int sx = sprite_x_hi[k] << 8 | sprite_x_lo[k], sy = sprite_y_hi[k] << 8 | sprite_y_lo[k];
+    int sx = shown[i].x, sy = shown[i].y;
     // centro del disegno: Sprite_BA_Whirlpool lo sposta di 5 pixel a sinistra
     float cx = sx + 3.0f, cy = sy + 8.0f;
     if ((sx >> 9) >= 3 && (sx >> 9) <= 4 && (sy >> 9) >= 3 && (sy >> 9) <= 4)

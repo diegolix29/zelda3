@@ -491,7 +491,9 @@ static bool HandleIniConfig(int section, const char *key, char *value) {
         else if (strcmp(s, "16:10") == 0)
           num = 16, den = 10;
         else if (strcmp(s, "18:9") == 0)
-          num = 18, den = 9;
+          num = 18, den = 9;  // 448x224: le fasce arrivano al massimo (kPpuExtraLeftRight)
+        else if (strcmp(s, "3:2") == 0)
+          num = 3, den = 2;  // 336x224, 360x240 con extend_y
         else if (strcmp(s, "4:3") == 0)
           num = 0;
         else if (strcmp(s, "unchanged_sprites") == 0)

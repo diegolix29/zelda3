@@ -100,42 +100,63 @@ bool HdWorld_Active(void) {
 // suoi pixel; a quelli presi dalle immagini delle aree si applica qui.
 static int g_bright = 15;
 
-// Filtro dei colori del mulinello (Module09_2E_Whirlpool): il gioco aggiunge
-// blu a tutta la palette, poi toglie rosso e verde e li rimette. Non e' una
-// dissolvenza uniforme: per ogni canale si confrontano i colori della palette
-// (aux_palette_buffer, quelli dell'area) con quelli filtrati
-// (main_palette_buffer) e si applica la stessa differenza ai pixel presi dalle
-// immagini delle aree, altrimenti nello schermo largo le colonne oltre il
-// bordo dell'area restano con i colori normali
+// Regola unica degli effetti sui colori dello schermo (scelta dell'utente,
+// 02/11/2026: tutto cio' che e' inquadrato, non solo l'area di Link). Il gioco
+// cambia i colori del fondale nella palette dell'area di Link
+// (main_palette_buffer, mentre aux_palette_buffer tiene quelli veri): lampi e
+// scurimento dei medaglioni (Filter_Majorly_Whiten_Bg, GbaFlash_DimStep),
+// lampi delle bombe e di Agahnim, filtro del mulinello (Module09_2E_Whirlpool:
+// aggiunge blu e toglie rosso e verde)... Le immagini delle aree vicine hanno
+// le loro palette e restavano con i colori normali. Per ogni canale si
+// confrontano i colori veri con quelli cambiati e si applica la stessa
+// differenza, per valore, ai pixel presi dalle immagini delle aree. Non serve
+// durante le dissolvenze verso il nero (HdFx_FadeActive: la PPU disegna gia'
+// i colori veri e HdFx_FadePost scurisce tutto lo schermo insieme). Le
+// luminosita' (INIDISP) restano a g_bright, la pioggia e i lampi del prologo
+// (somma di colori) a OverlayBegin/OverlayBlend
 static bool g_pal_map_on;
 static int16 g_pal_add[3][32];  // per canale e valore a 5 bit: da aggiungere (0-255)
 
 static void PreparePaletteMap(void) {
   g_pal_map_on = false;
-  if (main_module_index != 9 || submodule_index != 0x2e)
+  if (HdFx_FadeActive())
     return;
-  int sum[3][32] = { { 0 } }, cnt[3][32] = { { 0 } };
+  // il mulinello cambia anche le palette degli sprite: si contano tutte come
+  // prima; negli altri casi solo quelle del fondale (le immagini delle aree
+  // sono solo fondale; gli sprite delle copie hanno la loro palette)
+  int end = main_module_index == 9 && submodule_index == 0x2e ? 0x100 : 0x80;
+  // per canale e valore vero: quante volte il gioco lo ha cambiato di d (-31..31)
+  static uint8 hist[3][32][63];
+  memset(hist, 0, sizeof(hist));
+  int cnt[3][32] = { { 0 } };
   bool same = true;
-  for (int i = 0x20; i < 0x100; i++) {
+  for (int i = 0x20; i < end; i++) {
     uint16 c = main_palette_buffer[i], a = aux_palette_buffer[i];
     if (c != a)
       same = false;
     for (int k = 0; k < 3; k++) {
       int av = a >> (5 * k) & 31;
-      sum[k][av] += (c >> (5 * k) & 31) - av;
+      hist[k][av][(c >> (5 * k) & 31) - av + 31]++;
       cnt[k][av]++;
     }
   }
   if (same)
     return;
+  bool any = false;
   for (int k = 0; k < 3; k++) {
-    // differenza media per ogni valore; i valori senza colori nella palette
-    // prendono quella dei vicini (interpolata)
+    // la differenza piu' frequente per ogni valore (un colore cambiato da solo,
+    // per esempio da un'animazione dell'area, non tinge le aree vicine); i
+    // valori senza colori nella palette prendono quella dei vicini (interpolata)
     int prev = -1;
     for (int v = 0; v < 32; v++) {
       if (!cnt[k][v])
         continue;
-      int d = sum[k][v] * 255 / (31 * cnt[k][v]);
+      int best = 31;
+      for (int d5 = 0; d5 < 63; d5++)
+        if (hist[k][v][d5] > hist[k][v][best] || (hist[k][v][d5] == hist[k][v][best] && abs(d5 - 31) < abs(best - 31)))
+          best = d5;
+      int d = (best - 31) * 255 / 31;
+      any |= d != 0;
       g_pal_add[k][v] = d;
       if (prev < 0) {
         for (int j = 0; j < v; j++)
@@ -149,7 +170,7 @@ static void PreparePaletteMap(void) {
     for (int j = prev + 1; j < 32; j++)
       g_pal_add[k][j] = prev < 0 ? 0 : g_pal_add[k][prev];
   }
-  g_pal_map_on = true;
+  g_pal_map_on = any;
 }
 
 static inline uint32 Dim(uint32 c) {
@@ -386,8 +407,8 @@ bool HdWorld_InsideCurrentArea(int wx, int wy) {
 //   resta all'aperto;
 // - i nemici: quelli sconfitti non ricompaiono, quelli vivi tornano dove
 //   erano, con la loro vita e il loro stato (tutti i dati del loro posto nelle
-//   tabelle del gioco). Si dimenticano quando fra Link e la loro area ci sono
-//   3 aree in mezzo (kEnemyResetGap).
+//   tabelle del gioco). Si dimenticano quando la loro area non tocca piu'
+//   quella di Link e non e' fra le ultime attraversate (AreaKept, la scia).
 // - l'aspetto dei nemici vivi l'ultima volta che erano sullo schermo: cosi'
 //   si vedono, fermi, oltre il bordo dell'area quando la loro area non si
 //   muove dal vivo;
@@ -399,7 +420,7 @@ bool HdWorld_InsideCurrentArea(int wx, int wy) {
 // Tutte le caselle cambiate (la lista del gioco ha posto solo per 256): erba
 // tagliata, buche della pala, cespugli, sassi...
 enum { kMaxExtra = 2048 };
-enum { kMaxTiles = 256, kMaxKilled = 256, kMaxAlive = 16, kEnemyResetGap = 3 };  // 3 quadrati in mezzo = 4 aree
+enum { kMaxTiles = 256, kMaxKilled = 256, kMaxAlive = 16 };
 enum { kMaxArrows = 64 };  // per area; oltre, la piu' vecchia sparisce
 enum { kPatchW = 64, kPatchH = 72 };
 
@@ -584,6 +605,50 @@ static void ResetEnemy(int k) {
   g_hold[BYTE(overworld_screen_index) & 0x7f][blk >> 3] |= bit;
 }
 
+bool HdWorld_LiveView(void) {
+  return g_view_valid && !g_hd_neighbor_tick && HdWorld_Active();
+}
+
+// Regola unica per gli effetti che riguardano "lo schermo" (Bombos, Etere,
+// fuoco e ghiaccio sulle caselle...): il riquadro del mondo che si vede
+// davvero, cioe' la telecamera mostrata (anche quella libera del mondo
+// continuo, g_cam_dx) con le fasce dello schermo largo e le righe in piu'.
+// Mai la telecamera del gioco a 256 px (BG2HOFS_copy2 da solo).
+void HdWorld_ScreenRect(int *x, int *y, int *w, int *h) {
+  Ppu *ppu = g_zenv.ppu;
+  int ext = ppu->extraLeftRight;
+  int ox, oy;
+  HdWorld_ScreenOrigin(&ox, &oy);
+  *x = ox - ext, *y = oy;
+  *w = 256 + 2 * ext;
+  *h = (ppu->renderFlags & kPpuRenderFlags_Height240) ? 240 : 224;
+}
+
+// Angolo in alto a sinistra dei 256 px centrali dello schermo mostrato (dove
+// il gioco originale mette x = 0): per gli effetti posizionati con una tavola
+// fatta per lo schermo (oggetti che cadono, sassi, fulmini dall'alto). Nel
+// passo delle copie delle aree vicine la telecamera della copia e' gia' la
+// vista (SetLiveCamera, una riga piu' su)
+void HdWorld_ScreenOrigin(int *x, int *y) {
+  if (g_hd_neighbor_tick) {
+    *x = BG2HOFS_copy2, *y = (uint16)(BG2VOFS_copy2 + 1);
+    return;
+  }
+  *x = (uint16)(BG2HOFS_copy2 + g_cam_dx);
+  *y = (uint16)(BG2VOFS_copy2 + g_cam_dy);
+}
+
+bool HdWorld_BoxInView(int x, int y, int w, int h, int m) {
+  int ext = g_zenv.ppu->extraLeftRight;
+  return x + w + m > g_view_wx - ext && x - m < g_view_wx + 256 + ext &&
+         y + h + m > g_view_wy && y - m < g_view_wy + 240;
+}
+
+// Il quadrato 16x16 (uno sprite) in (x, y) tocca la vista allargata di m
+static bool InView(int x, int y, int m) {
+  return HdWorld_BoxInView(x, y, 16, 16, m);
+}
+
 // Sprite_OverworldLoadAllEnemies: vero se il nemico tolto deve ancora
 // aspettare (la sua casa e' nella vista, con 32 pixel di margine)
 bool HdWorld_HoldReload(uint16 blk) {
@@ -592,9 +657,7 @@ bool HdWorld_HoldReload(uint16 blk) {
     return false;
   int hx, hy;
   BlkHome(blk, &hx, &hy);
-  int ext = g_zenv.ppu->extraLeftRight;
-  if (hx + 16 + 32 > g_view_wx - ext && hx - 32 < g_view_wx + 256 + ext &&
-      hy + 16 + 32 > g_view_wy && hy - 32 < g_view_wy + 240)
+  if (InView(hx, hy, 32))
     return true;
   *hold &= ~bit;
   return false;
@@ -796,6 +859,30 @@ static void ResetFarEnemies(int lx, int ly, const uint8 *main_ram) {
   }
 }
 
+// Nemico dell'area da togliere per fare posto (torna a casa con
+// ResetEnemy), fra i posti 0-last tranne skip, il piu' lontano da Link:
+// - kPickFar: tranquillo (non disturbato), oltre una volta e mezza la schermata;
+// - kPickOffView: tranquillo, fuori dalla vista con kBorderSight di margine
+//   (sullo SNES/GBA non sarebbe ancora caricato);
+// - kPickOffViewAny: come kPickOffView, anche se disturbato.
+// Mai chi e' in mano a Link o lanciato (stato 10, o diverso da 9). -1 se non c'e'
+enum { kPickFar, kPickOffView, kPickOffViewAny };
+static int PickAreaEnemy(int skip, int last, int mode) {
+  int lx = link_x_coord + 8, ly = link_y_coord + 12;
+  int far = -1, far_d = mode == kPickFar ? kSightLimit * 3 / 2 : -1;
+  for (int j = 0; j <= last; j++) {
+    if (j == skip || sprite_state[j] != 9 || !IsAreaEnemy(j) || (spr_disturbed[j] && mode != kPickOffViewAny))
+      continue;
+    int x = SpriteWorldX(j), y = SpriteWorldY(j);
+    if (mode != kPickFar && InView(x, y, kBorderSight))
+      continue;
+    int d = Dist2(x + 8, y + 8, lx, ly);
+    if (d > far_d)
+      far = j, far_d = d;
+  }
+  return far;
+}
+
 // Le tabelle del gioco hanno 16 posti e i nemici dell'area ne usano al
 // massimo 14 (0-13); alcune aree, soprattutto nel Mondo delle Tenebre, ne
 // hanno di piu' (0x75 ne elenca 22) e con tutti i nemici caricati qualcuno
@@ -823,68 +910,11 @@ static void MakeRoomNearLink(void) {
   // stessi posti di Overworld_AllocSprite
   uint8 type = sprite_where_in_overworld[best] - 1;
   int last = type == 0x58 ? 4 : type == 0xd0 ? 5 : (type == 0xeb || type == 0x53 || type == 0xf3) ? 14 : 13;
-  int far = -1, far_d = kSightLimit * 3 / 2;
-  for (int k = 0; k <= last; k++) {
-    if (sprite_state[k] != 9 || spr_disturbed[k] || !IsAreaEnemy(k))
-      continue;
-    int d = Dist2(SpriteWorldX(k) + 8, SpriteWorldY(k) + 8, lx, ly);
-    if (d > far_d)
-      far = k, far_d = d;
-  }
+  int far = PickAreaEnemy(-1, last, kPickFar);
   if (far < 0)
     return;
   ResetEnemy(far);
   Overworld_LoadProximaSpriteIfAlive(best);
-}
-
-// Con tutti i nemici dell'area caricati i posti 0-13 possono essere tutti
-// occupati, e i colpi che nascono solo li' non partivano mai (la palla di
-// fuoco degli Zora, Sprite_SpawnFireball). Sprite_SpawnDynamicallyEx senza
-// posto libero: si toglie il nemico tranquillo piu' lontano da Link, oltre
-// una volta e mezza la schermata, fra i posti 0-last (torna a casa quando
-// c'e' di nuovo posto). -1 se non ce n'e'.
-int HdWorld_FreeSlot(int k, int last) {
-  if (!FeatureOn() || BYTE(overworld_screen_index) >= 0x80 || player_is_indoors || main_module_index != 9)
-    return -1;
-  int lx = link_x_coord + 8, ly = link_y_coord + 12;
-  int far = -1, far_d = kSightLimit * 3 / 2;
-  for (int j = 0; j <= last; j++) {
-    if (j == k || sprite_state[j] != 9 || spr_disturbed[j] || !IsAreaEnemy(j))
-      continue;
-    int d = Dist2(SpriteWorldX(j) + 8, SpriteWorldY(j) + 8, lx, ly);
-    if (d > far_d)
-      far = j, far_d = d;
-  }
-  if (far >= 0)
-    ResetEnemy(far);
-  return far;
-}
-
-// Come HdWorld_FreeSlot, ma basta che il nemico tranquillo sia fuori dalla
-// vista con kBorderSight pixel di margine: sullo SNES/GBA un nemico cosi' non
-// sarebbe ancora caricato. Serve alla roccia incantata: col mondo continuo i
-// nemici di tutta l'area riempivano i posti e i colpi dopo le prime rupie
-// andavano persi (GBA: 13 colpi = 2 bombe, qui ne usciva una)
-int HdWorld_FreeSlotOffView(int last) {
-  if (!FeatureOn() || BYTE(overworld_screen_index) >= 0x80 || player_is_indoors || main_module_index != 9)
-    return -1;
-  int ext = g_zenv.ppu->extraLeftRight, m = kBorderSight;
-  int lx = link_x_coord + 8, ly = link_y_coord + 12;
-  int far = -1, far_d = -1;
-  for (int j = 0; j <= last; j++) {
-    if (sprite_state[j] != 9 || spr_disturbed[j] || !IsAreaEnemy(j))
-      continue;
-    int x = SpriteWorldX(j), y = SpriteWorldY(j);
-    if (x + 16 + m > g_view_wx - ext && x - m < g_view_wx + 256 + ext &&
-        y + 16 + m > g_view_wy && y - m < g_view_wy + 224)
-      continue;
-    int d = Dist2(x + 8, y + 8, lx, ly);
-    if (d > far_d)
-      far = j, far_d = d;
-  }
-  if (far >= 0)
-    ResetEnemy(far);
-  return far;
 }
 
 static void MarkCarried(int k, int area, uint16 blk) {
@@ -950,12 +980,14 @@ static void ForgetEnemies(int i) {
 
 static void LiveDropAll(void);
 static void LiveDropArea(int a);
+static void TrailClear(void);
 
 void HdWorld_ResetStates(void) {
   // anche i cespugli bruciati ricrescono: niente macchie all'uscita
   HdBurn_Reset();
   LiveDropAll();
   g_n_homing = 0;  // il mondo riparte: tutti i nemici tornano a casa
+  TrailClear();
   if (!g_any_state)
     return;
   memset(g_states, 0, sizeof(g_states));
@@ -982,6 +1014,55 @@ static int AreaGap(int a, int b) {
   return (gx > gy ? gx : gy) / 512;
 }
 
+// Scia di Link (scelta dell'utente, 02/11/2026). Restano in memoria (copia
+// dal vivo e nemici ricordati) solo le aree che toccano quella di Link, anche
+// in diagonale, e le ultime kTrailLen aree attraversate; le altre si
+// scaricano e i loro nemici ripartono da quelli di partenza. Quando serve un
+// posto per un'azione di Link (HdWorld_FreeSlot) si tolgono per primi gli
+// ospiti arrivati dalle aree piu' vecchie della scia
+enum { kTrailLen = 3 };
+static int g_last_head = -1;  // area di Link all'ultimo frame di gioco (TrackMain)
+static int g_trail[kTrailLen] = { -1, -1, -1 };  // [0] = l'ultima lasciata
+
+static void TrailClear(void) {
+  for (int i = 0; i < kTrailLen; i++)
+    g_trail[i] = -1;
+}
+
+// Posto nella scia (0 = l'ultima lasciata, kTrailLen-1 = la piu' vecchia), -1 se non c'e'
+static int TrailRank(int head) {
+  for (int i = 0; i < kTrailLen; i++)
+    if (g_trail[i] >= 0 && (g_trail[i] & 0x7f) == (head & 0x7f))
+      return i;
+  return -1;
+}
+
+// Link passa dall'area old all'area cur: old va in testa alla scia, cur ne
+// esce (ora e' l'area di Link). Con un salto (Ocarina, altro mondo, uscita da
+// una casa lontana) la scia riparte da zero
+static void TrailPush(int old, int cur) {
+  if (old < 0 || (old & 0x7f) == (cur & 0x7f))
+    return;
+  if (AreaGap(old, cur) != 0) {
+    TrailClear();
+    return;
+  }
+  int keep[kTrailLen], n = 0;
+  for (int i = 0; i < kTrailLen; i++) {
+    int h = g_trail[i];
+    if (h >= 0 && (h & 0x7f) != (cur & 0x7f) && (h & 0x7f) != (old & 0x7f))
+      keep[n++] = h;
+  }
+  g_trail[0] = old;
+  for (int i = 1; i < kTrailLen; i++)
+    g_trail[i] = i - 1 < n ? keep[i - 1] : -1;
+}
+
+// L'area resta in memoria: e' quella di Link, la tocca o e' nella scia
+static bool AreaKept(int head, int cur) {
+  return AreaGap(head, cur) == 0 || TrailRank(head) >= 0;
+}
+
 static int SpriteWorldX(int k) { return sprite_x_hi[k] << 8 | sprite_x_lo[k]; }
 static int SpriteWorldY(int k) { return sprite_y_hi[k] << 8 | sprite_y_lo[k]; }
 
@@ -1001,11 +1082,14 @@ static bool IsAreaEnemy(int k) {
 // senza disegnarsi (g_sprite_offscreen, in Sprite_PrepOamCoordOrDoubleRet)
 // invece di sparire e ricomparire al punto di partenza.
 // Anche gli oggetti caduti che spariscono da soli (IsTimedDrop) restano
-// finche' il tempo non scade, invece di sparire appena escono dalla vista
+// finche' il tempo non scade, invece di sparire appena escono dalla vista.
+// Lo stesso per gli ospiti (nemici arrivati da un'altra area, anche quelli
+// lanciati da Link): spariscono solo quando Link esce dall'area in cui si
+// trovano (HdWorld_BeforeNewSprites; scelta dell'utente, 02/11/2026)
 bool HdWorld_KeepOffscreen(int k) {
   if (!PersistOn() || player_is_indoors)
     return false;
-  return IsTimedDrop(k) || IsAreaEnemy(k);
+  return IsTimedDrop(k) || IsAreaEnemy(k) || (!g_hd_neighbor_tick && IsMarkedCarried(k));
 }
 
 // Lo stesso per gli oggetti caduti nel gioco normale (fuori dalla telecamera
@@ -1233,9 +1317,10 @@ void HdWorld_EnterAreaTiles(bool memorize) {
   if (!PersistOn())
     return;
   int a = BYTE(overworld_screen_index);
-  // i nemici delle aree lontane tornano quelli di partenza
+  TrailPush(g_last_head, a);  // (TrackMain non ha ancora visto l'area nuova)
+  // i nemici delle aree scaricate tornano quelli di partenza
   for (int i = 0; i < 128; i++)
-    if (g_states[i].used && i != (a & 0x7f) && AreaGap(i, a) >= kEnemyResetGap) {
+    if (g_states[i].used && i != (a & 0x7f) && !AreaKept(i, a)) {
       ForgetEnemies(i);
       KeepCarriedKilled(i);  // chi segue Link non torna a casa
       LiveDropArea(i);  // la sua copia dal vivo riparte dai nemici di partenza
@@ -2178,7 +2263,6 @@ static Pending g_pending[kMaxPending];
 static int g_n_pending, g_pending_room;
 static GuestGfx g_area_gfx;  // grafica dell'area corrente all'ultimo frame di gioco
 static bool g_area_gfx_valid;
-static int g_last_head = -1;
 static uint8 g_chase[16], g_chase_type[16];
 static const uint8 *g_live_chase;  // inseguimento nella copia che fa il passo
 
@@ -2274,19 +2358,56 @@ static bool IsFollower(int k, uint8 chase) {
   return sprite_state[k] == 9 && d < kFollowDist && (chase >= kChaseFollow || d < kNearFollow);
 }
 
+// Il nemico k dell'area 'area' diventa un ospite dell'area di Link (come chi
+// segue Link oltre il bordo): la sua area lo conta sconfitto (CarriedFrom: non
+// ricompare due volte) e si disegna con la grafica della sua area
+static void MakeGuest(int k, int area) {
+  AreaState *st = &g_states[area & 0x7f];
+  uint16 blk = sprite_N_word[k];
+  int j = 0;
+  for (int i = 0; i < st->n_alive; i++)
+    if (st->alive[i].blk != blk)
+      st->alive[j++] = st->alive[i];
+  st->n_alive = j;
+  if (st->n_killed < kMaxKilled)
+    st->killed[st->n_killed++] = blk;
+  sprite_N_word[k] = 0xffff;
+  MarkCarried(k, area, blk);
+  if (g_area_gfx_valid)
+    GuestAdd(k, &g_area_gfx);
+  g_chase[k] = kChaseMax;
+  g_carried[k] = true;
+}
+
+// Nemico dell'area in mano a Link (stato 10) o lanciato da poco: non si
+// toglie mai per fare posto (PickAreaEnemy vuole lo stato 9) e il bordo
+// dell'area non lo ferma; se cade in un'altra area diventa un ospite, cioe'
+// un nemico che ha perso Link (scelta dell'utente, 02/11/2026)
+enum { kThrownFrames = 64 };
+static uint8 g_thrown[16];
+
 // Una volta per frame di gioco, nell'area corrente
 static void TrackMain(void) {
   GuestsCheck();
+  int cur = BYTE(overworld_screen_index);
   int ax, ay, as;
-  AreaRect(BYTE(overworld_screen_index), &ax, &ay, &as);
+  AreaRect(cur, &ax, &ay, &as);
   for (int k = 0; k < 16; k++) {
+    bool held = sprite_state[k] == 10 && IsAreaEnemy(k);
+    if (held)
+      g_thrown[k] = kThrownFrames;
+    else if (g_thrown[k] && --g_thrown[k] && IsAreaEnemy(k)) {
+      int cx = SpriteWorldX(k) + 8, cy = SpriteWorldY(k) + 8;
+      if (cx < ax || cx >= ax + as || cy < ay || cy >= ay + as)
+        MakeGuest(k, cur), g_thrown[k] = 0;
+    }
     // i nemici dell'area che camminano (non chi segue Link) non ne escono,
     // neanche quando vengono respinti; chi vola va dove vuole
-    if (IsAreaEnemy(k) && !g_carried[k] && !FreeMover(k))
+    if (IsAreaEnemy(k) && !g_carried[k] && !FreeMover(k) && !g_thrown[k])
       KeepInArea(k, g_chase_x[k], g_chase_y[k], sprite_type[k] == g_chase_type[k], ax, ay, as);
     int x = SpriteWorldX(k), y = SpriteWorldY(k);
     if (!sprite_state[k] || sprite_type[k] != g_chase_type[k])
-      g_chase[k] = 0, g_chase_type[k] = sprite_state[k] ? sprite_type[k] : 0xff, g_carried[k] = false;
+      g_chase[k] = 0, g_chase_type[k] = sprite_state[k] ? sprite_type[k] : 0xff, g_carried[k] = false, g_thrown[k] = 0;
     else
       ChaseStep(&g_chase[k], g_chase_x[k], g_chase_y[k], x, y, link_x_coord, link_y_coord);
     g_chase_x[k] = x, g_chase_y[k] = y;
@@ -2295,7 +2416,7 @@ static void TrackMain(void) {
   }
   SaveGfx(&g_area_gfx, g_zenv.ppu);
   g_area_gfx_valid = true;
-  g_last_head = BYTE(overworld_screen_index);
+  g_last_head = cur;
   ReturnHomeWhenAway();
   ResetFarEnemies(link_x_coord, link_y_coord, g_ram);
   UpdateWorldMap();
@@ -2304,13 +2425,15 @@ static void TrackMain(void) {
 void HdWorld_BeforeNewSprites(void) {
   if (!PersistOn() || g_last_head < 0 || g_last_head == BYTE(overworld_screen_index))
     return;
-  AreaState *st = &g_states[g_last_head & 0x7f];
   int ax, ay, as;
   AreaRect(BYTE(overworld_screen_index), &ax, &ay, &as);
   for (int k = 0; k < 16; k++) {
     if (!sprite_state[k])
       continue;
     bool area = IsAreaEnemy(k), guest = sprite_N_word[k] == 0xffff && GuestFind(k);
+    // in mano a Link (o appena lanciato): passa con lui nell'area nuova
+    // (prima un nemico dell'area in mano a Link spariva al cambio d'area)
+    bool held = area && g_thrown[k];
     if (!area && !guest && !(sprite_N_word[k] == 0xffff && IsFollower(k, g_chase[k]))) {
       // colpi, resti e altri oggetti senza area (pietre degli Octorok...)
       // continuano il loro volo: alla fine del passaggio il gioco li
@@ -2321,7 +2444,19 @@ void HdWorld_BeforeNewSprites(void) {
     // chi vola (corvi...) ed e' gia' nell'area nuova resta con Link
     int cx = SpriteWorldX(k) + 8, cy = SpriteWorldY(k) + 8;
     bool flies_in = FreeMover(k) && cx >= ax && cx < ax + as && cy >= ay && cy < ay + as;
-    if (!IsFollower(k, g_chase[k]) && !flies_in) {
+    if (!IsFollower(k, g_chase[k]) && !flies_in && !held) {
+      // ospite che non segue Link: Link esce dall'area in cui si trova, e lui
+      // sparisce e torna a casa (come chi perde Link, HdWorld_CarriedLost);
+      // se e' gia' nell'area nuova resta
+      bool in_new = cx >= ax && cx < ax + as && cy >= ay && cy < ay + as;
+      if (!area && IsMarkedCarried(k) && !in_new) {
+        Guest *g = GuestFind(k);
+        if (g)
+          g->used = false;
+        HdWorld_CarriedLost(k);
+        sprite_state[k] = 0;
+        continue;
+      }
       if (!area)
         sprite_room[k] = BYTE(overworld_area_index);
       // resta nella sua area (mondo persistente): li' lo muove la sua copia
@@ -2329,20 +2464,9 @@ void HdWorld_BeforeNewSprites(void) {
         sprite_state[k] = 0;
       continue;
     }
-    if (area) {
-      uint16 blk = sprite_N_word[k];
-      int j = 0;
-      for (int i = 0; i < st->n_alive; i++)
-        if (st->alive[i].blk != blk)
-          st->alive[j++] = st->alive[i];
-      st->n_alive = j;
-      if (st->n_killed < kMaxKilled)
-        st->killed[st->n_killed++] = blk;
-      sprite_N_word[k] = 0xffff;
-      MarkCarried(k, g_last_head, blk);
-      if (g_area_gfx_valid)
-        GuestAdd(k, &g_area_gfx);
-    }
+    if (area)
+      MakeGuest(k, g_last_head);
+    g_thrown[k] = 0;
     g_chase[k] = kChaseMax;
     g_carried[k] = true;
     // alla fine del passaggio il gioco toglie i nemici nati in un'altra area
@@ -2380,9 +2504,11 @@ void HdWorld_AfterLoad(void) {
   g_room_n_arrows = 0;  // le frecce della stanza non vengono dal salvataggio
   memset(g_guests, 0, sizeof(g_guests));
   memset(g_carried, 0, sizeof(g_carried));
+  memset(g_thrown, 0, sizeof(g_thrown));
   g_n_pending = 0;
   g_area_gfx_valid = false;
   g_last_head = BYTE(overworld_screen_index);
+  TrailClear();
   for (int k = 0; k < 16; k++) {
     g_chase[k] = 0, g_chase_type[k] = sprite_state[k] ? sprite_type[k] : 0xff;
     g_chase_x[k] = SpriteWorldX(k), g_chase_y[k] = SpriteWorldY(k);
@@ -2400,6 +2526,76 @@ void HdWorld_AfterLoad(void) {
 
 bool HdWorld_Carried(int k) {
   return g_carried[k] && sprite_state[k] && sprite_type[k] == g_chase_type[k] && PersistOn();
+}
+
+// Chi sta chiedendo un posto (Sprite_Main): il posto dello sprite che fa il
+// suo passo, kHdSpawnerOverlord durante Overlord_Main, -1 fuori (Link, i suoi
+// oggetti in volo, le caselle che tocca)
+int g_hd_spawner = -1;
+
+// Vero se il posto serve a un'azione di Link: sollevare, tagliare, un
+// oggetto che esce da un cespuglio o da una roccia, i suoi colpi. Anche i
+// passi di cio' che Link tiene in mano o ha lanciato (cespugli, vasi, pietre
+// 0xEC che si rompono)
+static bool SpawnForLink(void) {
+  int s = g_hd_spawner;
+  if (s < 0)
+    return true;
+  return s < 16 && (sprite_state[s] == 10 || sprite_type[s] == 0xec || g_thrown[s]);
+}
+
+// Ospite (nemico arrivato da un'altra area) da togliere per primo: quello
+// dell'area piu' vecchia della scia, poi delle piu' recenti, poi gli altri;
+// a parita' il piu' lontano da Link. Mai chi e' in mano a Link (stato 10)
+static int PickGuest(int skip, int last) {
+  int lx = link_x_coord + 8, ly = link_y_coord + 12;
+  int best = -1, best_rank = -2, best_d = -1;
+  for (int j = 0; j <= last; j++) {
+    if (j == skip || sprite_state[j] != 9 || !IsMarkedCarried(j))
+      continue;
+    int rank = TrailRank(carried_area[j]);
+    int d = Dist2(SpriteWorldX(j) + 8, SpriteWorldY(j) + 8, lx, ly);
+    if (rank > best_rank || (rank == best_rank && d > best_d))
+      best = j, best_rank = rank, best_d = d;
+  }
+  return best;
+}
+
+// Regola fissa dei 16 posti: chi fa nascere uno sprite e non trova posto
+// chiama questa funzione (unica per tutti), che libera il posto 0-last (tranne
+// k) e lo restituisce, -1 se non puo'. Ordine:
+// 1. solo per le azioni di Link (che hanno la precedenza su tutto, scelta
+//    dell'utente): gli ospiti, prima quelli delle aree piu' vecchie della scia
+//    (spariscono come chi perde Link e tornano a casa, HdWorld_CarriedLost);
+// 2. per tutti: il nemico tranquillo dell'area piu' lontano, oltre una volta e
+//    mezza la schermata (le palle di fuoco degli Zora, Sprite_SpawnFireball);
+// 3. solo per Link: un nemico tranquillo fuori dalla vista (sullo SNES/GBA non
+//    sarebbe ancora caricato: le bombe della roccia incantata, le pietre
+//    sollevate), poi anche uno disturbato fuori dalla vista.
+// I nemici dell'area tolti tornano a casa quando la casa e' fuori dalla vista
+int HdWorld_FreeSlot(int k, int last) {
+  if (!FeatureOn() || BYTE(overworld_screen_index) >= 0x80 || player_is_indoors || main_module_index != 9)
+    return -1;
+  bool link = SpawnForLink();
+  if (link && !g_hd_neighbor_tick) {
+    int j = PickGuest(k, last);
+    if (j >= 0) {
+      Guest *g = GuestFind(j);
+      if (g)
+        g->used = false;
+      HdWorld_CarriedLost(j);
+      sprite_state[j] = 0;
+      return j;
+    }
+  }
+  int j = PickAreaEnemy(k, last, kPickFar);
+  if (j < 0 && link)
+    j = PickAreaEnemy(k, last, kPickOffView);
+  if (j < 0 && link)
+    j = PickAreaEnemy(k, last, kPickOffViewAny);
+  if (j >= 0)
+    ResetEnemy(j);
+  return j;
 }
 
 static void HideObj(Ppu *p, int i) {
@@ -2607,6 +2803,7 @@ typedef struct LiveLink {
   uint16 x, y, z;
   uint8 lower, facing, frame, freeze;
   uint8 cur;  // area di Link
+  int medallion;  // medaglione che colpisce in questo frame (-1 nessuno)
 } LiveLink;
 
 static LiveArea g_live[kMaxLive];
@@ -2623,6 +2820,89 @@ static void LiveDropArea(int a) {
   for (int i = 0; i < kMaxLive; i++)
     if ((g_live[i].head & 0x7f) == a)
       g_live[i].used = false;
+}
+
+static bool LivePresent(int head) {
+  for (int i = 0; i < kMaxLive; i++)
+    if (g_live[i].used && g_live[i].head == head)
+      return true;
+  return false;
+}
+
+// ---------------------------------------------------------------------------
+// Effetti su tutto cio' che e' inquadrato (scelta dell'utente, 02/11/2026).
+// Nel gioco normale gli effetti su tutto lo schermo (medaglioni) valgono per
+// gli sprite caricati: il gioco toglie quelli a piu' di 64 pixel dallo
+// schermo (Sprite_PrepOamCoordOrDoubleRet). Col mondo continuo i nemici di
+// tutta l'area di Link restano caricati e quelli delle aree vicine stanno
+// nelle loro copie: qui conta la vista, con lo stesso margine, in tutte le
+// aree inquadrate. Gli effetti sulle caselle (Bombos incendia, Etere congela:
+// HdBurn_IgniteScreen/FreezeScreen) usano gia' la vista, aree vicine comprese.
+// - chi modifica i nemici lo fa nel gioco vero e, durante il passo di ogni
+//   copia inquadrata, dentro la copia (CopyEffects);
+// - chi li guarda soltanto usa HdWorld_ShownSprites.
+enum { kScreenEffectMargin = 64 };
+static bool LiveVisibleNow(void);
+
+bool HdWorld_SpriteOnScreen(int k) {
+  if (!PersistOn() || player_is_indoors || !g_view_valid)
+    return true;
+  return InView(SpriteWorldX(k), SpriteWorldY(k), kScreenEffectMargin);
+}
+
+static int g_screen_medallion = -1;  // ancilla del medaglione che colpisce in questo frame
+
+void HdWorld_ScreenMedallion(uint8 type) {
+  if (!g_hd_neighbor_tick && PersistOn() && !player_is_indoors)
+    g_screen_medallion = type;
+}
+
+// Durante il passo della copia (RAM della copia caricata): gli effetti del
+// gioco vero arrivano anche ai suoi nemici
+static void CopyEffects(LiveArea *la, int medallion) {
+  if (la->near && medallion >= 0)
+    Medallion_DamageShownSprites((uint8)medallion);
+  HdBurn_HurtSpritesInArea((uint8)la->head);  // le fiamme delle sue caselle
+}
+
+int HdWorld_ShownSprites(HdShownSprite *out, int max) {
+  int n = 0;
+  for (int k = 0; k < 16 && n < max; k++)
+    if (sprite_state[k])
+      out[n++] = (HdShownSprite){ SpriteWorldX(k), SpriteWorldY(k), (int8)sprite_z[k], k,
+                                  sprite_type[k], sprite_state[k], sprite_head_dir[k] };
+  if (!PersistOn() || player_is_indoors || !g_view_valid || !LiveVisibleNow())
+    return n;
+  // stesse tabelle del gioco, lette nella RAM delle copie disegnate
+  size_t o_st = sprite_state - g_ram, o_ty = sprite_type - g_ram, o_hd = sprite_head_dir - g_ram;
+  size_t o_xl = sprite_x_lo - g_ram, o_xh = sprite_x_hi - g_ram, o_yl = sprite_y_lo - g_ram;
+  size_t o_yh = sprite_y_hi - g_ram, o_z = sprite_z - g_ram;
+  for (int i = 0; i < kMaxLive; i++) {
+    LiveArea *la = &g_live[i];
+    if (!la->used || !la->near || !la->drawn)
+      continue;
+    const uint8 *r = la->ram;
+    for (int k = 0; k < 16 && n < max; k++) {
+      if (!r[o_st + k])
+        continue;
+      int x = r[o_xh + k] << 8 | r[o_xl + k], y = r[o_yh + k] << 8 | r[o_yl + k];
+      if (InView(x, y, 32))
+        out[n++] = (HdShownSprite){ x, y, (int8)r[o_z + k], -1, r[o_ty + k], r[o_st + k], r[o_hd + k] };
+    }
+  }
+  return n;
+}
+
+// Margini dall'area grande (HdWorld_TickNeighbors): l'area vicina si prepara
+// quando la vista arriva a kBigReach pixel dal suo bordo (una copia nuova per
+// frame: c'e' tempo prima che la telecamera la inquadri) e si lascia oltre
+// kBigKeep (piu' largo, per non prepararla e lasciarla di continuo)
+enum { kBigReach = 192, kBigKeep = 320 };
+
+// Vero se il quadrato di mappa (sx, sy) tocca la vista (vx, vy) allargata di m
+static bool SquareInView(int sx, int sy, int vx, int vy, int ext, int m) {
+  int x0 = vx - ext - m, x1 = vx + 256 + ext + m, y0 = vy - m, y1 = vy + 240 + m;
+  return sx * 512 + 512 > x0 && sx * 512 <= x1 && sy * 512 + 512 > y0 && sy * 512 <= y1;
 }
 
 // Un nemico che seguiva Link e lo ha perso di vista (il gioco lo toglie)
@@ -2665,6 +2945,9 @@ static void ReturnHome(int a, uint16 blk) {
       st->killed[j++] = st->killed[i];
   st->n_killed = j;
   uint8 bit = 0x80 >> (blk & 7);
+  // ricompare solo quando la telecamera non inquadra la casa (HdWorld_HoldReload):
+  // con Link appena oltre il bordo sembrerebbe teletrasportato
+  g_hold[a][blk >> 3] |= bit;
   size_t off = (uint8 *)&overworld_sprite_was_loaded[blk >> 3] - g_ram;
   if (a == (BYTE(overworld_screen_index) & 0x7f))
     g_ram[off] &= ~bit;
@@ -2821,6 +3104,7 @@ static void LiveTick(LiveArea *la, int vx, int vy, const LiveLink *m) {
   g_hd_neighbor_tick = true;
   g_live_chase = la->chase;
   Sprite_Main();
+  CopyEffects(la, m->medallion);  // medaglioni e fiamme anche qui
   NMI_PrepareSprites();
   g_hd_neighbor_tick = false;
   ResetFarEnemies(m->x, m->y, g_saved_ram);
@@ -2893,6 +3177,8 @@ static void GuestsFromCopies(void);
 
 void HdWorld_TickNeighbors(void) {
   g_live_frame++;
+  int medallion = g_screen_medallion;  // (messo durante il frame del gioco vero)
+  g_screen_medallion = -1;
   // fuori dal mondo esterno le copie non servono piu'; nei menu restano ferme
   if (!PersistOn() || (main_module_index != 9 && main_module_index != 14)) {
     LiveDropAll();
@@ -2909,25 +3195,41 @@ void HdWorld_TickNeighbors(void) {
   int cur = BYTE(overworld_screen_index);
   int vx = BG2HOFS_copy2 + g_cam_dx, vy = BG2VOFS_copy2 + g_cam_dy;
   int ext = g_zenv.ppu->extraLeftRight;
-  // tutte le aree del mondo di Link; vicine = toccano la vista, con un
-  // margine (si disegnano, e si preparano per prime)
-  int x0 = vx - ext - kLiveMargin, x1 = vx + 256 + ext + kLiveMargin;
-  int y0 = vy - kLiveMargin, y1 = vy + 240 + kLiveMargin;
+  // aree tenute in memoria (AreaKept: quelle che toccano l'area di Link e la
+  // scia); vicine = toccano la vista, con un margine (si disegnano, e si
+  // preparano per prime). Dall'area grande (2x2 schermate) le vicine si
+  // preparano solo quando la vista si avvicina al loro bordo (kBigReach) e
+  // si lasciano quando se ne allontana (kBigKeep); la scia resta sempre
+  int as;
+  {
+    int ax, ay;
+    AreaRect(cur, &ax, &ay, &as);
+  }
+  bool big = as > 512;
   int want[64], nw = 0;
-  bool want_near[64];
+  bool want_near[64], want_reach[64], want_hold[64];
   for (int sy = 0; sy < 8; sy++)
     for (int sx = 0; sx < 8; sx++) {
       int head = HeadAt(sx * 512, sy * 512), i = 0;
-      if (head < 0 || head == cur)
+      if (head < 0 || head == cur || !AreaKept(head, cur))
         continue;
-      bool near = sx * 512 + 512 > x0 && sx * 512 <= x1 && sy * 512 + 512 > y0 && sy * 512 <= y1;
+      bool near = SquareInView(sx, sy, vx, vy, ext, kLiveMargin);
+      bool reach = SquareInView(sx, sy, vx, vy, ext, kBigReach);
+      bool hold = SquareInView(sx, sy, vx, vy, ext, kBigKeep);
       while (i < nw && want[i] != head)
         i++;
       if (i == nw)
-        want[nw] = head, want_near[nw++] = near;
+        want[nw] = head, want_near[nw] = near, want_reach[nw] = reach, want_hold[nw++] = hold;
       else
-        want_near[i] |= near;
+        want_near[i] |= near, want_reach[i] |= reach, want_hold[i] |= hold;
     }
+  if (big) {
+    int n = 0;
+    for (int i = 0; i < nw; i++)
+      if (TrailRank(want[i]) >= 0 || want_reach[i] || (want_hold[i] && LivePresent(want[i])))
+        want[n] = want[i], want_near[n++] = want_near[i];
+    nw = n;
+  }
   // via le copie che non servono piu': l'area in cui e' entrato Link (ora la
   // muove il gioco), l'altro mondo, un evento che ha cambiato l'area
   for (int i = 0; i < kMaxLive; i++) {
@@ -2946,7 +3248,7 @@ void HdWorld_TickNeighbors(void) {
   if (!nw)
     return;
   LiveLink m = { link_x_coord, link_y_coord, link_z_coord, link_is_on_lower_level,
-                 link_direction_facing, frame_counter, flag_unk1, (uint8)cur };
+                 link_direction_facing, frame_counter, flag_unk1, (uint8)cur, medallion };
   // posti liberi per i nemici che entrano nell'area di Link
   g_n_pending = g_pending_room = 0;
   for (int k = 0; k < 16; k++)

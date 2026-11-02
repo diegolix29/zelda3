@@ -35,6 +35,7 @@ void AddBirdCommon(int k);
 ProjectSpeedRet Bomb_ProjectSpeedTowardsPlayer(int k, uint16 x, uint16 y, uint8 vel);
 void Boomerang_CheatWhenNoOnesLooking(int k, ProjectSpeedRet *pt);
 void Medallion_CheckSpriteDamage(int k);
+void Medallion_DamageShownSprites(uint8 type);
 void Ancilla_CheckDamageToSprite(int k, uint8 type);
 void Ancilla_CheckDamageToSprite_aggressive(int k, uint8 type);
 void CallForDuckIndoors();

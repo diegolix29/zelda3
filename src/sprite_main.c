@@ -9565,11 +9565,16 @@ void Cucco_SummonAvenger(int k) {  // 86a7d3
   SpriteSfx_QueueSfx3WithPan(j, 0x1e);
   sprite_C[j] = 1;
   uint8 t = GetRandomNumber();
-  uint16 x = BG2HOFS_copy2, y = BG2VOFS_copy2;
+  // dai bordi dello schermo mostrato (fasce e telecamera libera comprese): la
+  // tavola e' per 256x224 e si allarga in proporzione (uguale nel 4:3)
+  int sx, sy, sw, sh;
+  HdWorld_ScreenRect(&sx, &sy, &sw, &sh);
+  uint16 x, y;
   if (t & 2)
-    x += t, y += kChicken_Avenger[t & 1];
+    x = sx + t * sw / 256, y = sy + (kChicken_Avenger[t & 1] ? sh + 31 : 0);
   else
-    y += t, x += kChicken_Avenger[t & 1];
+    y = sy + t * sh / 224, x = sx + (kChicken_Avenger[t & 1] ? sw - 1 : 0);
+  (void)kChicken_Avenger;
   Sprite_SetX(j, x);
   Sprite_SetY(j, y);
   Sprite_ApplySpeedTowardsLink(j, 32);

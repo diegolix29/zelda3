@@ -24,7 +24,7 @@
 // si ferma, la vista no): le armi di Link escono dallo schermo quando escono
 // dalla vista, e fino a li' urtano i muri. Non nelle copie delle aree vicine
 static bool Ancilla_LiveView(void) {
-  return g_view_valid && !g_hd_neighbor_tick && HdWorld_Active();
+  return HdWorld_LiveView();
 }
 
 // Quanto sporgono le fasce dello schermo largo (85 pixel in 16:9) per il
@@ -37,8 +37,7 @@ static int Ancilla_WideExt(void) {
 
 // Vero se il punto del mondo (x, y) e' fuori dalla vista
 static bool Ancilla_OutsideView(uint16 x, uint16 y) {
-  int ext = g_zenv.ppu->extraLeftRight;
-  return (uint16)(x - g_view_wx + ext) >= 256 + 2 * ext || (uint16)(y - g_view_wy) >= 240;
+  return !HdWorld_BoxInView(x, y, 1, 1, 0);
 }
 
 // Bacchette del Fuoco e del Ghiaccio: il colpo vola fino al bordo della
@@ -553,6 +552,12 @@ static int Bird_ScreenExt(void) {
   return Ancilla_WideExt();
 }
 
+static int Bird_ScreenLeft(void) {
+  int x, y, w, h;
+  HdWorld_ScreenRect(&x, &y, &w, &h);  // bordo sinistro dello schermo mostrato
+  return x;
+}
+
 void AddBirdCommon(int k) {
   ancilla_y_vel[k] = 0;
   ancilla_item_to_link[k] = 0;
@@ -562,7 +567,7 @@ void AddBirdCommon(int k) {
   ancilla_K[k] = 0;
   ancilla_G[k] = 0;
 
-  Ancilla_SetXY(k, BG2HOFS_copy2 - 16 - Bird_ScreenExt(), link_y_coord - 8);
+  Ancilla_SetXY(k, Bird_ScreenLeft() - 16, link_y_coord - 8);
 }
 
 ProjectSpeedRet Bomb_ProjectSpeedTowardsPlayer(int k, uint16 x, uint16 y, uint8 vel) {  // 84eb63
@@ -588,9 +593,19 @@ void Boomerang_CheatWhenNoOnesLooking(int k, ProjectSpeedRet *pt) {  // 86809f
 }
 
 void Medallion_CheckSpriteDamage(int k) {  // 86ec5c
-  tmp_counter = ancilla_type[k];
+  // mondo continuo: lo stesso colpo arriva ai nemici inquadrati delle aree
+  // vicine, nelle loro copie (HdWorld_ScreenMedallion)
+  HdWorld_ScreenMedallion(ancilla_type[k]);
+  Medallion_DamageShownSprites(ancilla_type[k]);
+}
+
+// Il colpo del medaglione su tutti gli sprite caricati, cioe' (nel gioco
+// normale) quelli sullo schermo; col mondo continuo solo quelli inquadrati
+// (HdWorld_SpriteOnScreen): i nemici di tutta l'area restano caricati
+void Medallion_DamageShownSprites(uint8 type) {
+  tmp_counter = type;
   for (int j = 15; j >= 0; j--) {
-    if (sprite_state[j] >= 9 && !(sprite_ignore_projectile[j] | sprite_pause[j])) {
+    if (sprite_state[j] >= 9 && !(sprite_ignore_projectile[j] | sprite_pause[j]) && HdWorld_SpriteOnScreen(j)) {
       Ancilla_CheckDamageToSprite_aggressive(j, tmp_counter);
     }
   }
@@ -3025,8 +3040,13 @@ void BombosSpell_ControlBlasting(int kk) {  // 88b40d
 
         uint16 y = kBombosBlasts_Tab[frame_counter & 0x3f];
         uint16 x = kBombosBlasts_Tab[(frame_counter & 0x3f) + 3];
-        bombos_y_coord[j] = y + BG2VOFS_copy2;
-        bombos_x_coord[j] = x + BG2HOFS_copy2;
+        // le esplosioni coprono tutto l'inquadrato (fasce e aree vicine
+        // comprese), non solo i 256x224 della telecamera del gioco: la tavola
+        // e' per quello schermo e si allarga in proporzione
+        int sx, sy, sw, sh;
+        HdWorld_ScreenRect(&sx, &sy, &sw, &sh);
+        bombos_y_coord[j] = sy + y * sh / 224;
+        bombos_x_coord[j] = sx + x * sw / 256;
 
         sound_effect_1 = 0xc | kBombos_Sfx[bombos_x_coord[j] >> 5 & 7];
       }
@@ -4933,7 +4953,7 @@ void Ancilla27_Duck(int k) {  // 88dde8
     goto endif_1;
 
   if (ancilla_timer[k]) {
-    Ancilla_SetXY(k, BG2HOFS_copy2 - 16 - Bird_ScreenExt(), link_y_coord - 8);
+    Ancilla_SetXY(k, Bird_ScreenLeft() - 16, link_y_coord - 8);
     return;
   }
 
@@ -6335,18 +6355,19 @@ int AncillaAdd_FallingPrize(uint8 a, uint8 item_idx, uint8 yv) {  // 898bc1
   ancilla_G[k] = kFallingItem_G[item_idx];
   link_receiveitem_index = item_type;
 
-  int x, y;
+  int x, y, ox, oy;
+  HdWorld_ScreenOrigin(&ox, &oy);  // la tavola e' per lo schermo mostrato
   if (item_idx != 0 && item_idx != 5) {
     if (BYTE(cur_palace_index_x2) == 20) {
       x = (link_x_coord & 0xff00) | 0x100;
       y = (link_y_coord & 0xff00) | 0x100;
     } else {
-      x = kFallingItem_X[item_idx] + BG2HOFS_copy2;
-      y = kFallingItem_Y[item_idx] + BG2VOFS_copy2;
+      x = kFallingItem_X[item_idx] + ox;
+      y = kFallingItem_Y[item_idx] + oy;
     }
   } else {
     x = link_x_coord;
-    y = kFallingItem_Y[item_idx] + BG2VOFS_copy2;
+    y = kFallingItem_Y[item_idx] + oy;
   }
   Ancilla_SetXY(k, x, y);
   return k;
@@ -6648,7 +6669,9 @@ void AncillaAdd_EtherSpell(uint8 a, uint8 y) {  // 8991fc
     for(int i = 0; i < 8; i++)
       ether_arr1[i] = i * 8;
     ether_y = link_y_coord;
-    uint16 y = BG2VOFS_copy2 - 16;
+    int ox, oy;
+    HdWorld_ScreenOrigin(&ox, &oy);  // il fulmine parte dal bordo alto dello schermo mostrato
+    uint16 y = oy - 16;
     ether_y_adjusted = y & 0xf0;
     ether_x = link_x_coord;
     ether_x2 = ether_x + 8;

@@ -10,6 +10,7 @@
 #include "hd_fx.h"
 #include "hd_burn.h"
 #include "hd_trans.h"
+#include "hd_world.h"
 
 bool g_dynamic_light;
 
@@ -392,14 +393,19 @@ static bool IsFireSprite(int type, float *radius, bool *cold) {
 }
 
 static void CollectSpriteLights(bool dark, int ext, int cam_x, int cam_y, float t) {
-  for (int k = 0; k < 16; k++) {
+  // gli sprite del gioco e, col mondo continuo, quelli delle aree vicine
+  // inquadrate (HdWorld_ShownSprites)
+  static HdShownSprite shown[kHdMaxShown];
+  int num_shown = HdWorld_ShownSprites(shown, kHdMaxShown);
+  for (int i = 0; i < num_shown; i++) {
+    const HdShownSprite *s = &shown[i];
     float radius;
     bool cold;
-    if (!sprite_state[k] || !IsFireSprite(sprite_type[k], &radius, &cold))
+    if (!IsFireSprite(s->type, &radius, &cold))
       continue;
-    float x = (sprite_x_hi[k] << 8 | sprite_x_lo[k]) + 8 - cam_x + ext;
-    float y = (sprite_y_hi[k] << 8 | sprite_y_lo[k]) + 8 - (int8)sprite_z[k] - cam_y;
-    radius *= 1.0f + 0.08f * sinf(t * 2.1f + k);
+    float x = s->x + 8 - cam_x + ext;
+    float y = s->y + 8 - s->z - cam_y;
+    radius *= 1.0f + 0.08f * sinf(t * 2.1f + (s->k >= 0 ? s->k : i));
     float m = dark ? 1.3f : 1.0f;
     if (cold)
       AddLight(x, y, radius * m, 0.30f * m, 0.40f * m, 0.75f * m);
@@ -408,15 +414,16 @@ static void CollectSpriteLights(bool dark, int ext, int cam_x, int cam_y, float 
   }
   // Fate: un bagliore appena piu' piccolo dello sprite che pulsa come le torce
   // (stessa formula: intensita' e grandezza insieme, due onde sovrapposte)
-  for (int k = 0; k < 16; k++) {
+  for (int i = 0; i < num_shown; i++) {
+    const HdShownSprite *s = &shown[i];
     // 0xe3 fata piccola, 0xc8 grande fata (non la sua nuvola che cura Link,
     // stesso tipo con sprite_head_dir 1)
-    bool big = sprite_type[k] == 0xc8 && !sprite_head_dir[k];
-    if (!sprite_state[k] || (sprite_type[k] != 0xe3 && !big))
+    bool big = s->type == 0xc8 && !s->head_dir;
+    if (s->type != 0xe3 && !big)
       continue;
-    float x = (sprite_x_hi[k] << 8 | sprite_x_lo[k]) + 8 - cam_x + ext;
-    float y = (sprite_y_hi[k] << 8 | sprite_y_lo[k]) + 8 - (int8)sprite_z[k] - cam_y;
-    float pulse = FlamePulse(t * 0.5f, k * 1.7f);
+    float x = s->x + 8 - cam_x + ext;
+    float y = s->y + 8 - s->z - cam_y;
+    float pulse = FlamePulse(t * 0.5f, (s->k >= 0 ? s->k : i) * 1.7f);
     if (g_num_fairies < kMaxFairies) {
       g_fairy_x[g_num_fairies] = x, g_fairy_y[g_num_fairies] = y;
       g_fairy_r[g_num_fairies] = big ? 24.0f : 9.0f;

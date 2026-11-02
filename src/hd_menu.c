@@ -425,10 +425,10 @@ static const char *Tr(const char *it) {
     { "Frecce piantate nei muri", "Arrows stuck in walls" },
     { "Giravolta Tornado", "Hurricane Spin" },
     { "Rocce incantate", "Enchanted rocks" },
-    { "Solo 16:9 e 16:10", "Only 16:9 and 16:10" },
+    { "Solo schermo largo", "Only widescreen" },
     { "Link personalizzato", "Custom Link" },
     { "Non con un Link personalizzato", "Not with a custom Link" },
-    { "Richiede lo schermo 16:9 o 16:10", "Requires a 16:9 or 16:10 screen" },
+    { "Richiede lo schermo largo", "Requires a widescreen aspect ratio" },
     { "Non con meno flash", "Not with fewer flashes" },
     { "Velocit\xc3\xa0 del testo", "Text speed" },
     { "Lingua dei dialoghi", "Dialogue language" },
@@ -641,7 +641,7 @@ static void BuildItems() {
     AddItem(12, "Sfocatura dietro menu e dialoghi", YesNo(g_config.fx_menu_blur));
     AddItem(13, "Ombre di personaggi e nemici", YesNo(g_config.fx_sprite_shadows));
     AddItem(14, "Cerchio di transizione morbido", YesNo(g_config.fx_soft_iris));
-    AddItem(15, "Suggerimenti dei tasti", g_zenv.ppu->extraLeftRight > 0 ? YesNo(g_config.fx_button_hints) : "Solo 16:9 e 16:10");
+    AddItem(15, "Suggerimenti dei tasti", g_zenv.ppu->extraLeftRight > 0 ? YesNo(g_config.fx_button_hints) : "Solo schermo largo");
     AddItem(16, "Acqua e cascate realistiche", YesNo(g_config.fx_water));
     AddItem(17, "Distingui vortici da Zora", YesNo(g_config.fx_whirlpool));
     AddItem(18, "Aspetto dei disegni ufficiali", YesNo(g_config.official_artwork));
@@ -760,7 +760,7 @@ static void Activate(int id, int dir) {
     } else if (id == 11 && (g_config.features0 & (kFeatures0_DimFlashes | kFeatures0_DimFlashesGba))) {
       ShowMessage("Non con meno flash");
     } else if (id == 15 && g_zenv.ppu->extraLeftRight == 0) {
-      ShowMessage("Richiede lo schermo 16:9 o 16:10");
+      ShowMessage("Richiede lo schermo largo");
     } else if (id >= 7 && id <= 17) {
       bool *opt[11] = { &g_config.fx_heat, &g_config.fx_window_rays, &g_config.fx_item_glow,
                        &g_config.fx_fog, &g_config.fx_rain, &g_config.fx_menu_blur,
@@ -1188,7 +1188,7 @@ static void DrawInventoryLetterOutlines(Canvas *cv) {
   }
 }
 
-// I suggerimenti stanno nelle fasce del widescreen (16:9, 16:10): in 4:3 non
+// I suggerimenti stanno nelle fasce del widescreen (16:9, 16:10, 3:2, 18:9): in 4:3 non
 // c'e' posto e coprirebbero il menu o uscirebbero dallo schermo
 bool HdMenu_ButtonHintsOn(void) {
   return g_config.fx_button_hints && g_zenv.ppu->extraLeftRight > 0;

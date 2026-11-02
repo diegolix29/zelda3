@@ -16,6 +16,7 @@
 #include "player_oam.h"
 #include "attract.h"
 #include "nmi.h"
+#include "snes/ppu.h"
 #include "assets.h"
 #include "hd_menu.h"
 #include "hd_hud.h"
@@ -2129,7 +2130,8 @@ static bool WorldMap_CalculateOamCoordinates(Point16U *pt) {  // 8ac39f
     uint16 t10 = ((t8 >> 8) * 45) + t9;
     uint16 t11 = below2 ? 0x80 - t10 : t10 + 0x80;
     uint16 xval = t11 - BG1HOFS_copy2;
-    int xt = enhanced_features0 & kFeatures0_ExtendScreen64 ? 0x48 : 0;
+    // icone visibili in tutta la fascia (0x48 fissi tagliavano il 16:9 e il 18:9)
+    int xt = enhanced_features0 & kFeatures0_ExtendScreen64 ? IntMax(0x48, g_zenv.ppu->extraLeftRight) : 0;
     if ((uint16)(xval + 0x80 + xt) >= (0x100 + xt * 2))
       return false;
     pt->x = xval + 0x81;

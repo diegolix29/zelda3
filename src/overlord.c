@@ -78,9 +78,8 @@ void Overlord_SpawnBoulder() {  // 89b714
   // mondo continuo: la vista puo' scendere oltre il bordo dell'area (si vede
   // anche l'area sotto) mentre la telecamera del gioco si ferma; il sasso nasce
   // sopra la vista, altrimenti sarebbe subito fuori schermo e sparirebbe
-  int cx = BG2HOFS_copy2, cy = BG2VOFS_copy2;
-  if (!g_hd_neighbor_tick && g_view_valid && HdWorld_Active())
-    cx = g_view_wx, cy = g_view_wy;
+  int cx, cy;
+  HdWorld_ScreenOrigin(&cx, &cy);  // regola unica dello schermo mostrato
   SpriteSpawnInfo info;
   int j = Sprite_SpawnDynamically(0, 0xc2, &info);
   if (j >= 0) {

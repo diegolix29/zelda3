@@ -31,6 +31,9 @@ bool HdBurn_IsFrozenAt(uint16 x, uint16 y);
 uint8 HdBurn_WaterCells(uint16 x, uint16 y);
 // Fa avanzare l'incendio: una volta per frame
 void HdBurn_Update(void);
+// Mondo continuo: nel passo della copia di un'area vicina, le sue fiamme ne
+// colpiscono i nemici
+void HdBurn_HurtSpritesInArea(uint8 area);
 // Spegne tutto e dimentica le tile annerite e congelate: entrando in una casa
 // o caricando un salvataggio il gioco fa ricrescere tutti i cespugli
 void HdBurn_Reset(void);

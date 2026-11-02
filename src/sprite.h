@@ -282,6 +282,7 @@ void Sprite_ReloadAll_Overworld();
 void Sprite_OverworldReloadAll_justLoad();
 void Overworld_LoadSprites();
 void Sprite_ActivateAllProxima();
+int Sprite_WideMargin(void);
 void Sprite_ProximityActivation();
 void Sprite_ActivateWhenProximal();
 void Sprite_ActivateWhenProximalBig();
