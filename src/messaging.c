@@ -1004,8 +1004,10 @@ void FluteMenu_HandleSelection() {  // 8ab78b
   if (some_menu_ctr == 0) {
     if ((joypad1L_last | joypad1H_last) & 0xc0) {
 
+      // come su GBA annulla il tasto della spada (B): 0x40 = volo annullato
+      // (FluteMenu_LoadSelectedScreen); A, Y e X confermano
       if (enhanced_features0 & kFeatures0_CancelBirdTravel)
-        some_menu_ctr = joypad1L_last;
+        some_menu_ctr = (joypad1H_last & 0x80) ? 0x40 : 0;
 
       overworld_map_state++;
       return;
