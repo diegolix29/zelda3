@@ -1893,8 +1893,14 @@ static AreaMap *GetMap(int head) {
   return &g_maps[head & 0x7f];
 }
 
+// Le caselle delle aree vicine valgono anche con il mondo fermo in vista
+// (dialoghi, cartelli, menu, pozioni...), come in HdWorld_Active: prima con un
+// cartello aperto l'acqua oltre il bordo dell'area perdeva l'effetto HD
 static bool WorldMapOn(void) {
-  return FeatureOn() && !player_is_indoors && overworld_screen_index < 0x80 && main_module_index == 9;
+  if (!FeatureOn() || player_is_indoors || overworld_screen_index >= 0x80)
+    return false;
+  return main_module_index == 9 || InMenuOverWorld() || InFluteArrival() || InSoftIris() ||
+         InDeathOverWorld();
 }
 
 int HdWorld_WorldTile(int px, int py) {
