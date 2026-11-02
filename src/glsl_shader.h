@@ -12,7 +12,8 @@ enum GLSLScaleType {
   GLSL_NONE,
   GLSL_SOURCE,
   GLSL_VIEWPORT,
-  GLSL_ABSOLUTE
+  GLSL_ABSOLUTE,
+  GLSL_INTEGER,  // multiplo intero dell'immagine del gioco, il piu' grande che entra nello schermo
 };
 
 typedef struct GlslTextureUniform {

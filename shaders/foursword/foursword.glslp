@@ -4,11 +4,13 @@
 # 2 sfocatura     -> ombre e alone morbidi (a meta' risoluzione)
 # 3 composizione  -> pixel nitidi, ombre in basso a destra, pennellate
 #                    (fsa_brush.png, piastrella continua) ancorate al mondo, ombre di nuvole all'aperto,
-#                    alone, colori saturi
+#                    alone, colori saturi; dipinta a ingrandimento intero
+#                    (4x) perche' pennellate e ombre non sfarfallino
+# 4 allargamento  -> l'immagine dipinta portata alla misura dello schermo
 # Sprite e HUD si riconoscono dal layer che il gioco scrive nell'alpha:
 # serve lo zelda3.exe con le migliorie HD.
 
-shaders = 3
+shaders = 4
 
 shader0 = 01-masks.glsl
 filter_linear0 = false
@@ -22,6 +24,10 @@ scale1 = 0.5
 
 shader2 = 03-final.glsl
 filter_linear2 = true
+scale_type2 = integer
+
+shader3 = 04-stretch.glsl
+filter_linear3 = true
 
 # Pennellate di Four Swords: piastrella continua, ripetuta in diagonale
 textures = "FSABrush"

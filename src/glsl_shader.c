@@ -38,10 +38,16 @@ static float ZeldaMosaicForShader() {
 // prigione di Zelda e l'altare di Agahnim (fasi 2-4, e la dissolvenza finale 5)
 // sono stanze vere del gioco e hanno lo shader come i labirinti
 #define ZELDA_ATTRACT_SEQUENCE (g_ram[0x23])
+#define ZELDA_SUBMODULE (g_ram[0x11])
 static int ZeldaModuleForShader() {
   int m = HdFx_SceneModule();
   if (m == 20 && ZELDA_ATTRACT_SEQUENCE >= 2 && ZELDA_ATTRACT_SEQUENCE <= 5)
     return 7;
+  // Titoli finali (modulo 26, dalla fase 32 = EndSequence_32: nomi dello staff
+  // sulle montagne con la Triforza, fino a "The End"): escono intatti come i
+  // menu. Le scene dei luoghi prima dei nomi restano dipinte
+  if (m == 26 && ZELDA_SUBMODULE >= 32)
+    return 14;
   return m;
 }
 
@@ -69,7 +75,8 @@ static GlslPass *ParseConfigKeyPass(GlslShader *gs, const char *key, const char 
 static uint8 ParseScaleType(const char *s) {
   return StringEqualsNoCase(s, "source") ? GLSL_SOURCE : 
          StringEqualsNoCase(s, "viewport") ? GLSL_VIEWPORT :
-         StringEqualsNoCase(s, "absolute") ? GLSL_ABSOLUTE : GLSL_NONE;
+         StringEqualsNoCase(s, "absolute") ? GLSL_ABSOLUTE :
+         StringEqualsNoCase(s, "integer") ? GLSL_INTEGER : GLSL_NONE;
 }
 
 static uint ParseWrapMode(const char *s) {
@@ -646,6 +653,16 @@ void GlslShader_Render(GlslShader *gs, GlTextureWithSize *tex, int viewport_x, i
   glGetIntegerv(GL_FRAMEBUFFER_BINDING, &previous_framebuffer);
   glBindBuffer(GL_ARRAY_BUFFER, gs->gl_vbo);
 
+  // scale_type "integer": l'immagine del gioco ingrandita del piu' grande
+  // fattore intero che entra nello schermo (4 su 1080 righe). Con un
+  // ingrandimento non intero (4,5) i pixel del gioco cadono sui pixel dello
+  // schermo in modo diverso a ogni passo di scorrimento dispari, e gli effetti
+  // calcolati per pixel dello schermo (pennellate, ombre) sfarfallavano: si
+  // dipinge a misura intera e una fase finale allarga l'immagine gia' fatta
+  int int_scale = IntMin(viewport_width / IntMax(tex->width, 1), viewport_height / IntMax(tex->height, 1));
+  if (int_scale < 1)
+    int_scale = 1;
+
   for (int pass = 1; pass <= gs->n_pass; pass++) {
     bool last_pass = pass == gs->n_pass;
     GlslPass *p = gs->pass + pass;
@@ -654,6 +671,7 @@ void GlslShader_Render(GlslShader *gs, GlTextureWithSize *tex, int viewport_x, i
     case GLSL_ABSOLUTE: p->width = (uint16)p->scale_x; break;
     case GLSL_SOURCE: p->width = (uint16)(p[-1].width * p->scale_x); break;
     case GLSL_VIEWPORT: p->width = (uint16)(viewport_width * p->scale_x); break;
+    case GLSL_INTEGER: p->width = (uint16)(tex->width * int_scale); break;
     default: p->width = (uint16)(last_pass ? viewport_width : (p[-1].width * p->scale_x)); break;
     }
 
@@ -661,6 +679,7 @@ void GlslShader_Render(GlslShader *gs, GlTextureWithSize *tex, int viewport_x, i
     case GLSL_ABSOLUTE: p->height = (uint16)p->scale_y; break;
     case GLSL_SOURCE: p->height = (uint16)(p[-1].height * p->scale_y); break;
     case GLSL_VIEWPORT: p->height = (uint16)(viewport_height * p->scale_y); break;
+    case GLSL_INTEGER: p->height = (uint16)(tex->height * int_scale); break;
     default: p->height = (uint16)(last_pass ? viewport_height : (p[-1].height * p->scale_y)); break;
     }
 

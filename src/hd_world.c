@@ -1560,8 +1560,19 @@ void HdWorld_UpdateCamera(int *cam_x, int *cam_y) {
     // lontano da dove Link e' nella vista. Lo si sposta dove Link e' davvero:
     // la vista continua a seguirlo senza recuperi, e la telecamera del gioco
     // riparte quando la vista la raggiunge.
+    // Solo sull'asse del passaggio (0-1 su/giu', 2-3 sinistra/destra): il
+    // gioco ricalcola solo quello. Sull'altro asse il punto resta dov'era
+    // (al centro, anche con la telecamera ferma al bordo): spostandolo dove
+    // stava Link (in fondo allo schermo, con la telecamera ferma al bordo
+    // basso) il gioco lo teneva poi li' per sempre e, risalendo, Link restava
+    // in basso con la vista spostata giu'
     if (area_changed && g_vis_valid) {
+      bool vert = overworld_screen_transition < 2;
       int px = lx - (int)floorf(g_vis_x + 0.5f), py = ly - (int)floorf(g_vis_y + 0.5f);
+      if (vert)
+        px = -1;
+      else
+        py = -1;
       if (px > 16 && px < 240) {
         camera_x_coord_scroll_hi = gx + px;
         camera_x_coord_scroll_low = camera_x_coord_scroll_hi + 2;
