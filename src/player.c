@@ -17,6 +17,7 @@
 #include "hd_world.h"
 #include "hd_fx.h"
 #include "hd_rumble.h"
+#include "hd_cheats.h"
 
 static bool g_ApplyLinksMovementToCamera_called;
 
@@ -203,15 +204,22 @@ void Link_Main() {  // 878000
 }
 
 void Link_ControlHandler() {  // 87807f
+  // trucco "Uccidi Link": un danno pari ai cuori rimasti (non col mantello)
+  bool kill = !link_cape_mode && Cheats_TakeKill();
+  if (kill)
+    link_give_damage = link_health_current;
   if (link_give_damage) {
     if (link_cape_mode) {
       link_give_damage = 0;
       link_auxiliary_state = 0;
       link_incapacitated_timer = 0;
     } else {
-      if (!link_disable_sprite_damage) {
+      if (!link_disable_sprite_damage || kill) {
         uint8 dmg = link_give_damage;
         link_give_damage = 0;
+        // trucco "Vita infinita": Link e' colpito ma non perde cuori
+        if (Cheats_InfiniteLife() && !kill)
+          dmg = 0;
         if (ancilla_type[0] == 5 && player_handler_timer == 0 && link_delay_timer_spin_attack) {
           ancilla_type[0] = 0;
           flag_for_boomerang_in_place = 0;
@@ -1635,6 +1643,8 @@ void HandleLayerOfDestination() {  // 8794f1
 
 void DungeonPitDoDamage() {  // 879502
   submodule_index = 20;
+  if (Cheats_InfiniteLife())
+    return;
   link_health_current -= 8;
   if (link_health_current >= 0xa8)
     link_health_current = 0;

@@ -35,6 +35,7 @@ enum {
   kKeys_VolumeUp,
   kKeys_VolumeDown,
   kKeys_HdMenu,
+  kKeys_CheatKillLink,
   kKeys_Total,
 };
 
@@ -100,6 +101,12 @@ typedef struct Config {
   bool item_on_x, item_on_lr;
   uint8 text_speed;         // 0 = originale, 1 = veloce, 2 = istantaneo
   uint8 rumble;             // vibrazione del controller: 0 spenta, 1 leggera, 2 media, 3 forte
+  // Trucchi (sezione [Cheats], hd_cheats.c): tutti spenti in partenza; quelli
+  // a tasto funzionano solo se accesi
+  struct {
+    bool no_clip, kill_link, refill, give_key;
+    bool one_hit_kill, infinite_life, infinite_magic, infinite_rupees, infinite_bombs, infinite_arrows;
+  } cheats;
 
   const char *link_graphics;
   char *memory_buffer;

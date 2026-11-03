@@ -21,6 +21,7 @@
 #include "hd_rumble.h"
 #include "assets.h"
 #include "config.h"
+#include "hd_cheats.h"
 static const uint16 kOamGetBufferPos_Tab0[6] = {0x171, 0x201, 0x31, 0xc1, 0x141, 0x1d1};
 static const uint16 kOamGetBufferPos_Tab1[48] = {
    0x30,  0x50,  0x80,  0xb0,  0xe0, 0x110, 0x140, 0x170, 0x1d0, 0x1d4, 0x1dc, 0x1e0, 0x1e4, 0x1ec, 0x1f0, 0x1f8,
@@ -789,7 +790,7 @@ void SpriteModule_Burn(int k) {
 void Sprite_HitTimer31(int k) {
   if (sprite_type[k] != 0x7a || is_in_dark_world)
     return;
-  if (sprite_health[k] <= sprite_give_damage[k]) {
+  if (sprite_health[k] <= sprite_give_damage[k] || Cheats_OneHitKill() && sprite_give_damage[k]) {
     dialogue_message_index = 0x140;
     Sprite_ShowMessageMinimal();
   }
@@ -2537,6 +2538,9 @@ void Sprite_MiniMoldorm_Recoil(int k) {  // 86eec8
   }
 
   int t = sprite_health[k] - sprite_give_damage[k];
+  // trucco "Uccisione istantanea": un colpo che fa danno uccide
+  if (Cheats_OneHitKill() && sprite_give_damage[k])
+    t = 0;
   sprite_health[k] = t;
   sprite_give_damage[k] = 0;
   if (t > 0)
@@ -3466,7 +3470,9 @@ static void GbaRock_Hit(void) {
   garnish_type[g] = 0x17;
   garnish_active = 0x17;
   Garnish_SetX(g, r->x);
-  Garnish_SetY(g, r->y + 16);
+  // lo SNES disegna gli sprite una riga piu' in basso del fondale: con +16
+  // il lampo stava un pixel sotto la roccia e la roccia sembrava spostarsi
+  Garnish_SetY(g, r->y + 15);
   garnish_countdown[g] = 16;  // hit_timer 16 della GBA
   garnish_sprite[g] = 0xff;
   garnish_floor[g] = r->floor;

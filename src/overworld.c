@@ -19,6 +19,7 @@
 #include "assets.h"
 #include "nmi.h"
 #include "hd_trans.h"
+#include "hd_cheats.h"
 
 const uint16 kOverworld_OffsetBaseX[64] = {
   0,     0, 0x400, 0x600, 0x600, 0xa00, 0xa00, 0xe00,
@@ -545,6 +546,8 @@ void MirrorWarp_BuildDewavingHDMATable() {  // 80ff2f
 void TakeDamageFromPit() {  // 81ffd9
   link_visibility_status = 12;
   submodule_index = player_is_indoors ? 20 : 42;
+  if (Cheats_InfiniteLife())
+    return;
   link_health_current -= 8;
   if (link_health_current >= 0xa8)
     link_health_current = 0;

@@ -22,6 +22,7 @@ Everything is optional and can be turned on or off from the new in-game options 
 - Items assigned to X, L and R shown in the HUD; faster dialogue text while holding A or B.
 - **Controller rumble** (optional, off, light, medium or strong; inspired by *Ocarina of Time*): bombs and explosions (weaker when far from Link), damage according to how many hearts you lose, death, Pegasus Boots crashes, screen shakes, electric shocks, blocked hits on the shield, charged Spin Attack, landing after a jump or a fall, the Hookshot grabbing, hammer blows, lifting heavy rocks, and choosing, copying or erasing a file.
 - The player name can be typed on the keyboard too (letters, digits, Backspace), besides choosing the letters with the controller as in the original.
+- **Cheats** (section `[Cheats]` of `zelda3.ini`, all off by default): walk through walls, kill Link, fill hearts and magic and one small key work with their key only when turned on; one-hit kills and infinite life, magic, rupees, bombs and arrows.
 - **Extended inventory** (optional): 6 columns like on GBA, with four separate bottles and the shovel and flute in separate slots.
 - **Sword and items interact with the world** (optional, like the GBA version): every sword collects items, stronger swords cut signs and break pots, arrows break pots, the hammer breaks bushes and light rocks, the Magic Powder breaks bushes and pots, the Lantern hurts enemies, and the first magic item you get fills your magic.
 - **Fire and ice** (optional): the Lantern and the Fire Rod set bushes and tall grass on fire, and the fire spreads; Bombos burns everything on screen. The Ice Rod and Ether freeze bushes and grass (frozen grass is slippery ice), and fire and ice cancel each other; fire slowly melts frozen water. Arrows of Link and of the enemies stuck in walls stay there instead of vanishing.
@@ -152,7 +153,7 @@ The game is run with `./zelda3` and takes an optional path to the ROM-file, whic
 
 The keys can be reconfigured in zelda3.ini
 
-Additionally, the following commands are available:
+Additionally, the following commands are available (the cheat keys W, Shift+W, O, Ctrl+E and Ctrl+K work only when the cheat is turned on in `[Cheats]`):
 
 | Key | Action                |
 | --- | --------------------- |
@@ -166,6 +167,7 @@ Additionally, the following commands are available:
 | Ctrl+Down   | Decrease window size                |
 | T   | Toggle replay turbo mode  |
 | O   | Set dungeon key to 1  |
+| Ctrl+K | Kill Link  |
 | K   | Clear all input history from the joypad log  |
 | L   | Stop replaying a shapshot  |
 | R   | Toggle between fast and slow renderer |

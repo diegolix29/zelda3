@@ -29,6 +29,7 @@
 #include "hd_menu.h"
 #include "hd_art.h"
 #include "select_file.h"
+#include "hd_cheats.h"
 
 static bool g_run_without_emu = 0;
 
@@ -849,10 +850,12 @@ static void HandleCommand_Locked(uint32 j, bool pressed) {
     SaveLoadSlot(kSaveLoad_Replay, 256 + j - kKeys_ReplayRef);
   } else {
     switch (j) {
-    case kKeys_CheatLife: PatchCommand('w'); break;
-    case kKeys_CheatEquipment: PatchCommand('W'); break;
-    case kKeys_CheatKeys: PatchCommand('o'); break;
-    case kKeys_CheatWalkThroughWalls: PatchCommand('E'); break;
+    // trucchi: i tasti funzionano solo se accesi nel launcher ([Cheats])
+    case kKeys_CheatLife: if (g_config.cheats.refill) PatchCommand('w'); break;
+    case kKeys_CheatEquipment: if (g_config.cheats.refill) PatchCommand('W'); break;
+    case kKeys_CheatKeys: if (g_config.cheats.give_key) PatchCommand('o'); break;
+    case kKeys_CheatWalkThroughWalls: if (g_config.cheats.no_clip) PatchCommand('E'); break;
+    case kKeys_CheatKillLink: Cheats_RequestKill(); break;
     case kKeys_ClearKeyLog: PatchCommand('k'); break;
     case kKeys_StopReplay: PatchCommand('l'); break;
     case kKeys_Fullscreen:

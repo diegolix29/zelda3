@@ -1,5 +1,6 @@
 #include "config.h"
 #include "types.h"
+#include <stddef.h>
 #include <stdio.h>
 #include <string.h>
 #include <SDL.h>
@@ -42,8 +43,8 @@ static const uint16 kDefaultKbdControls[kKeys_Total] = {
   _(SDLK_w), _(SDLK_o), S(SDLK_w), C(SDLK_e),
   // ClearKeyLog, StopReplay, Fullscreen, Reset, Pause, PauseDimmed, Turbo, ReplayTurbo, WindowBigger, WindowSmaller, DisplayPerf, ToggleRenderer
   _(SDLK_k), _(SDLK_l), A(SDLK_RETURN), C(SDLK_r), S(SDLK_p), _(SDLK_p), _(SDLK_TAB), _(SDLK_t), N, N, _(SDLK_f), _(SDLK_r),
-  // VolumeUp, VolumeDown, HdMenu
-  N, N, _(SDLK_ESCAPE),
+  // VolumeUp, VolumeDown, HdMenu, CheatKillLink
+  N, N, _(SDLK_ESCAPE), C(SDLK_k),
 };
 #undef _
 #undef A
@@ -64,7 +65,7 @@ static const KeyNameId kKeyNameId[] = {
   S(CheatLife), S(CheatKeys), S(CheatEquipment), S(CheatWalkThroughWalls),
   S(ClearKeyLog), S(StopReplay), S(Fullscreen), S(Reset),
   S(Pause), S(PauseDimmed), S(Turbo), S(ReplayTurbo), S(WindowBigger), S(WindowSmaller), S(VolumeUp), S(VolumeDown), S(DisplayPerf), S(ToggleRenderer),
-  S(HdMenu),
+  S(HdMenu), S(CheatKillLink),
 };
 #undef S
 #undef M
@@ -288,6 +289,8 @@ static int GetIniSection(const char *s) {
     return 4;
   if (StringEqualsNoCase(s, "[GamepadMap]"))
     return 5;
+  if (StringEqualsNoCase(s, "[Cheats]"))
+    return 6;
   return -1;
 }
 
@@ -335,6 +338,20 @@ static bool HandleIniConfig(int section, const char *key, char *value) {
         return true;
       }
     }
+  } else if (section == 6) {
+    // trucchi: tutti spenti se mancano
+    static const struct { const char *name; size_t offs; } kCheats[] = {
+#define CH(n, f) { n, offsetof(Config, cheats.f) }
+      CH("NoClip", no_clip), CH("KillLink", kill_link), CH("Refill", refill),
+      CH("GiveKey", give_key), CH("OneHitKill", one_hit_kill),
+      CH("InfiniteLife", infinite_life), CH("InfiniteMagic", infinite_magic),
+      CH("InfiniteRupees", infinite_rupees), CH("InfiniteBombs", infinite_bombs),
+      CH("InfiniteArrows", infinite_arrows),
+#undef CH
+    };
+    for (int i = 0; i < countof(kCheats); i++)
+      if (StringEqualsNoCase(key, kCheats[i].name))
+        return ParseBool(value, (bool *)((uint8 *)&g_config + kCheats[i].offs));
   } else if (section == 5) {
     for (int i = 0; i < countof(kKeyNameId); i++) {
       if (StringEqualsNoCase(key, kKeyNameId[i].name)) {

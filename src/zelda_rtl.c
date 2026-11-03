@@ -22,6 +22,7 @@
 #include "hd_icegba.h"
 #include "hud.h"
 #include "messaging.h"
+#include "hd_cheats.h"
 ZeldaEnv g_zenv;
 uint8 g_ram[131072];
 
@@ -1286,12 +1287,14 @@ bool ZeldaRunFrame(int inputs) {
     EmuSyncMemoryRegion(&g_ram[kRam_CrystalRotateCounter], 1);
   }
 
+  Cheats_BeforeFrame();
   if (g_emu_runframe == NULL || enhanced_features0 != 0 || g_zenv.dialogue_flags) {
     // can't compare against real impl when running with extra features.
     ZeldaRunFrameInternal(inputs, run_what);
   } else {
     g_emu_runframe(inputs, run_what);
   }
+  Cheats_AfterFrame();
 
   ZeldaPushApuState();
   ZeldaUpdateCamera();
