@@ -675,11 +675,14 @@ static void BuildItems() {
   case kPage_Controls:
     for (int i = 0; i < 12; i++) {
       Config_KeyName(Config_GetKeyForCmd(kKeys_Controls + i), buf2, sizeof(buf2));
-      snprintf(buf, sizeof(buf), "%s   -   %s", buf2, Config_PadButtonName(Config_GetPadButtonForCmd(kKeys_Controls + i)));
+      // testo tagliato se troppo lungo: va bene (gcc -Werror su Linux vuole il risultato usato)
+      if (snprintf(buf, sizeof(buf), "%s   -   %s", buf2, Config_PadButtonName(Config_GetPadButtonForCmd(kKeys_Controls + i))) < 0)
+        buf[0] = 0;
       AddItem(i, kControlNames[i], buf);
     }
     Config_KeyName(Config_GetKeyForCmd(kKeys_HdMenu), buf2, sizeof(buf2));
-    snprintf(buf, sizeof(buf), "%s   -   %s", buf2, Config_PadButtonName(Config_GetPadButtonForCmd(kKeys_HdMenu)));
+    if (snprintf(buf, sizeof(buf), "%s   -   %s", buf2, Config_PadButtonName(Config_GetPadButtonForCmd(kKeys_HdMenu))) < 0)
+      buf[0] = 0;
     AddItem(12, "Menu opzioni", buf);
     AddItem(14, "Vibrazione del controller", kSmoothCameraNames[g_config.rumble & 3]);
     AddItem(13, "Ripristina tasti predefiniti", NULL);
@@ -1034,8 +1037,8 @@ static void ButtonName(int btn, char *buf, size_t size) {
       Config_KeyName(Config_GetKeyForCmd(kKeys_Controls + i), k[i], sizeof(k[i]));
     if (!strcmp(k[0], "Up") && !strcmp(k[1], "Down") && !strcmp(k[2], "Left") && !strcmp(k[3], "Right"))
       snprintf(buf, size, "%s", Tr("Frecce"));
-    else
-      snprintf(buf, size, "%s %s %s %s", k[0], k[2], k[1], k[3]);
+    else if (snprintf(buf, size, "%s %s %s %s", k[0], k[2], k[1], k[3]) < 0)
+      buf[0] = 0;
     return;
   }
   if (g_last_input_pad) {
