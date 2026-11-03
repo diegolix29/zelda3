@@ -130,13 +130,17 @@ static void PreparePaletteMap(void) {
   // prima; negli altri casi solo quelle del fondale (le immagini delle aree
   // sono solo fondale; gli sprite delle copie hanno la loro palette)
   int end = main_module_index == 9 && submodule_index == 0x2e ? 0x100 : 0x80;
+  // alla morte di Link il gioco azzera aux_palette_buffer (il cerchio scurisce
+  // verso il nero) e tiene i colori veri in mapbak_palette (Death_Func1): col
+  // confronto con zero le aree vicine si schiarivano
+  const uint16 *real = main_module_index == 18 ? mapbak_palette : aux_palette_buffer;
   // per canale e valore vero: quante volte il gioco lo ha cambiato di d (-31..31)
   static uint8 hist[3][32][63];
   memset(hist, 0, sizeof(hist));
   int cnt[3][32] = { { 0 } };
   bool same = true;
   for (int i = 0x20; i < end; i++) {
-    uint16 c = main_palette_buffer[i], a = aux_palette_buffer[i];
+    uint16 c = main_palette_buffer[i], a = real[i];
     if (c != a)
       same = false;
     for (int k = 0; k < 3; k++) {
