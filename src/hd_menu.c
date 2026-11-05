@@ -9,6 +9,7 @@
 #include <sys/stat.h>
 #include "zelda_rtl.h"
 #include "variables.h"
+#include "overworld.h"
 #include "config.h"
 #include "features.h"
 #include "load_gfx.h"
@@ -17,8 +18,11 @@
 #include "hd_light.h"
 #include "hd_fx.h"
 #include "hd_water.h"
+#include "hd_pit.h"
 #include "hd_hud.h"
 #include "hd_art.h"
+#include "hud_it.h"
+#include "assets.h"
 
 void ZeldaApuLock();
 void ZeldaApuUnlock();
@@ -30,11 +34,18 @@ enum {
   kPage_Audio,
   kPage_Controls,
   kPage_Saves,
+  kPage_Items,  // seconda meta' delle opzioni del gioco (pagina Items del launcher)
+  kNumPages,
 };
 
 enum {
   kNumQuickSlots = 20,
-  kMaxItems = 40,
+  kMaxItems = 64,
+  // voci di intestazione (sezioni come nel launcher): non si selezionano
+  kHeaderId = -1,
+  // voci della pagina Grafica mostrate nella pagina Gioco, e di Gioco in Audio
+  kGfxInGame = 200,
+  kGameInAudio = 300,
   kRowHeight = 16,
 };
 
@@ -51,12 +62,14 @@ static void UpdateDungeonName(void);
 
 static bool g_menu_open;
 static int g_page;
-static int g_cursor[6];
+static int g_cursor[kNumPages];
 static int g_scroll;
 static int g_capture = -1;        // indice del comando in attesa di un tasto
 static bool g_slot_action_save;
 static char g_message[96];
 static int g_message_timer;
+static bool g_menu_modern; // menu col font del testo moderno
+static int g_open_anim;    // fotogrammi dall'apertura (discesa del riquadro)
 static bool g_last_input_pad;  // ultimo tasto premuto sul pad (non sulla tastiera)
 static bool g_controls_dirty, g_msu_dirty, g_lang_dirty;
 static bool g_msu_on;
@@ -77,7 +90,7 @@ typedef struct FeatureOption {
 
 static const FeatureOption kFeatureOptions[] = {
   { "Transizioni veloci", "FastTransitions", kFeatures0_FastTransitions },
-  { "Mondo continuo all'esterno", "ContinuousWorld", kFeatures0_ContinuousWorld },
+  { "Mondo continuo", "ContinuousWorld", kFeatures0_ContinuousWorld },
   { "HUD moderno", "ModernHud", kFeatures0_ModernHud },
   { "Nomi dei labirinti", "DungeonNames", kFeatures0_DungeonNames },
   { "Mappa migliorata", "ImprovedWorldMap", kFeatures0_ImprovedWorldMap },
@@ -90,25 +103,25 @@ static const FeatureOption kFeatureOptions[] = {
   { "Oggetti riempiono le risorse", "ItemsRefillResources", kFeatures0_ItemsRefillResources },
   { "Pozione d'oro", "GoldPotion", kFeatures0_GoldPotion },
   { "Interazione bruciatura e congelamento", "BurnAndFreezeInteraction", kFeatures0_BurnAndFreeze },
-  { "Sterza durante lo scatto", "TurnWhileDashing", kFeatures0_TurnWhileDashing },
-  { "Fino a 10 bombe insieme", "MoreActiveBombs", kFeatures0_MoreActiveBombs },
-  { "Massimi in giallo nell'HUD", "ShowMaxItemsInYellow", kFeatures0_ShowMaxItemsInYellow },
+  { "Sterzata durante la corsa", "TurnWhileDashing", kFeatures0_TurnWhileDashing },
+  { "Pi\xc3\xb9 bombe attive", "MoreActiveBombs", kFeatures0_MoreActiveBombs },
+  { "Evidenzia risorse al massimo", "ShowMaxItemsInYellow", kFeatures0_ShowMaxItemsInYellow },
   { "Borsa pi\xc3\xb9 grande", "CarryMoreRupees", kFeatures0_CarryMoreRupees },
-  { "Disattiva bip vita bassa", "DisableLowHealthBeep", kFeatures0_DisableLowHealthBeep },
+  { "Niente bip con pochi cuori", "DisableLowHealthBeep", kFeatures0_DisableLowHealthBeep },
   { "Salva stato cuori e magia", "SaveHeartsAndMagic", kFeatures0_SaveHeartsAndMagic },
-  { "Annulla il volo con B", "CancelBirdTravel", kFeatures0_CancelBirdTravel },
+  { "Annulla viaggio uccello", "CancelBirdTravel", kFeatures0_CancelBirdTravel },
   { "Punto di volo 9", "BirdTravelPoint9", kFeatures0_BirdTravel9 },
   { "Specchio verso il Mondo delle Tenebre", "MirrorToDarkworld", kFeatures0_MirrorToDarkworld },
-  { "Correzioni di bug", "MiscBugFixes", kFeatures0_MiscBugFixes },
+  { "Correzioni minori varie", "MiscBugFixes", kFeatures0_MiscBugFixes },
   { "Correzioni maggiori", "GameChangingBugFixes", kFeatures0_GameChangingBugFixes },
-  { "Correzioni minori GBA", "GbaMinorFixes", kFeatures0_GbaMinorFixes },
+  { "Correzioni varie GBA", "GbaMinorFixes", kFeatures0_GbaMinorFixes },
 };
 
 static const char *const kControlNames[12] = {
   "Su", "Gi\xc3\xb9", "Sinistra", "Destra", "Select", "Start", "A", "B", "X", "Y", "L", "R",
 };
 
-static const char *const kSmoothCameraNames[4] = { "Spenta", "Leggera", "Media", "Forte" };
+static const char *const kLevelNames[4] = { "Spenta", "Leggera", "Media", "Forte" };
 static const char *const kTextSpeedNames[3] = { "Originale", "Veloce con A o B", "Istantanea" };
 
 // ---------------------------------------------------------------------------
@@ -213,6 +226,17 @@ static void Canvas_Rect(Canvas *cv, int x, int y, int w, int h, uint32 color) {
 // Disegna un carattere e restituisce la sua larghezza
 static int DrawChar(Canvas *cv, int x, int y, uint32 c, uint32 color) {
   int g = Font_GlyphFor(c);
+  // con il testo moderno lo stesso font dei dialoghi (ombra in basso a destra)
+  const uint16 *bits;
+  int mw = g_menu_modern && g >= 0 ? HdText_ModernGlyph(g, &bits) : 0;
+  if (mw) {
+    for (int pass = 0; pass < 2; pass++)
+      for (int r = 0; r < 9; r++)
+        for (int b = 0; b < mw; b++)
+          if (bits[r] >> (mw - 1 - b) & 1)
+            Canvas_Pixel(cv, x + b + (pass == 0), y + 4 + r + (pass == 0), pass ? color : 0x101018);
+    return mw + 1;
+  }
   if (g >= 0 && g < g_font_count && g_font_data) {
     int w = g_font_width[g];
     for (int row = 0; row < 16; row++) {
@@ -239,7 +263,9 @@ static int TextWidth(const char *s) {
   while (*s) {
     uint32 c = Utf8Next(&s);
     int g = Font_GlyphFor(c);
-    w += (g >= 0 && g < g_font_count && g_font_data) ? g_font_width[g] : 7;
+    const uint16 *bits;
+    int mw = g_menu_modern && g >= 0 ? HdText_ModernGlyph(g, &bits) : 0;
+    w += mw ? mw + 1 : (g >= 0 && g < g_font_count && g_font_data) ? g_font_width[g] : 7;
   }
   return w;
 }
@@ -329,7 +355,6 @@ static void QuickSlotAction(int slot) {
 // Impostazioni
 
 void HdMenu_ApplyConfig() {
-  g_smooth_camera = g_config.smooth_camera;
   g_text_speed = g_config.text_speed;
   g_msu_on = g_config.enable_msu != 0;
   if (g_msu_on)
@@ -341,6 +366,7 @@ void HdMenu_ApplyConfig() {
   g_fx_menu_blur = g_config.fx_menu_blur, g_fx_sprite_shadows = g_config.fx_sprite_shadows;
   g_fx_soft_iris = g_config.fx_soft_iris;
   g_fx_whirlpool = g_config.fx_whirlpool;
+  g_fx_pit = g_config.fx_pit;
   g_fx_fog = g_config.fx_fog;
   g_fx_water = g_config.fx_water;
 }
@@ -352,7 +378,7 @@ static bool IsItalian() {
 static const char *Tr(const char *it) {
   static const char *const kTr[][2] = {
     { "Transizioni veloci", "Fast transitions" },
-    { "Mondo continuo all'esterno", "Continuous overworld" },
+    { "Mondo continuo", "Continuous world" },
     { "HUD moderno", "Modern HUD" },
     { "Richiede Cambio oggetti con L e R", "Requires Switch items with L and R" },
     { "Richiede la PPU ottimizzata (NewRenderer)", "Requires the optimized PPU (NewRenderer)" },
@@ -367,17 +393,17 @@ static const char *Tr(const char *it) {
     { "Mappa migliorata", "Improved map" },
     { "Mappa dei labirinti migliorata", "Improved dungeon map" },
     { "Mappa progressiva", "Progressive map" },
-    { "Sterza durante lo scatto", "Turn while dashing" },
-    { "Fino a 10 bombe insieme", "Up to 10 bombs at once" },
-    { "Massimi in giallo nell'HUD", "Maximums in yellow in the HUD" },
-    { "Disattiva bip vita bassa", "Disable low health beep" },
+    { "Sterzata durante la corsa", "Allow turning while dashing" },
+    { "Pi\xc3\xb9 bombe attive", "More active bombs" },
+    { "Evidenzia risorse al massimo", "Indicate max resources" },
+    { "Niente bip con pochi cuori", "Disable low heart beep" },
     { "Salva stato cuori e magia", "Save hearts and magic" },
-    { "Annulla il volo con B", "Cancel bird travel with B" },
+    { "Annulla viaggio uccello", "Cancel bird" },
     { "Punto di volo 9", "Bird travel point 9" },
     { "Specchio verso il Mondo delle Tenebre", "Mirror to the Dark World" },
-    { "Correzioni di bug", "Bug fixes" },
+    { "Correzioni minori varie", "Miscellaneous minor fixes" },
     { "Correzioni maggiori", "Game changing bug fixes" },
-    { "Correzioni minori GBA", "GBA minor fixes" },
+    { "Correzioni varie GBA", "Various GBA fixes" },
     { "L/R solo sui primi 4 oggetti", "Limit L/R to the first 4 items" },
     { "Borsa pi\xc3\xb9 grande", "Larger wallet" },
     { "Su", "Up" },
@@ -393,14 +419,14 @@ static const char *Tr(const char *it) {
     { "Istantanea", "Instant" },
     { "Grafica", "Graphics" },
     { "Gioco", "Game" },
+    { "Oggetti", "Items" },
     { "Controlli", "Controls" },
     { "Salvataggi", "Saves" },
     { "Opzioni", "Options" },
     { "Riprendi", "Resume" },
     { "Esci dal gioco", "Quit game" },
-    { "Telecamera fluida", "Smooth camera" },
     { "Schermo intero", "Fullscreen" },
-    { "Mappa del mondo in HD", "HD world map" },
+    { "Mode7 migliorato", "Enhanced Mode7" },
     { "Mostra FPS", "Show FPS" },
     { "Testo nitido nei dialoghi", "Sharp dialogue text" },
     { "Testo moderno", "Modern text" },
@@ -419,18 +445,33 @@ static const char *Tr(const char *it) {
     { "Cerchio di transizione morbido", "Soft transition circle" },
     { "Suggerimenti dei tasti", "Button hints" },
     { "Distingui vortici da Zora", "Tell whirlpools from Zoras" },
-    { "Aspetto dei disegni ufficiali", "Official artwork look" },
+    { "Stanza sotto le buche", "Room below in pits" },
     { "Link biondo", "Blond Link" },
     { "Immersione con le pinne", "Dive with the flippers" },
     { "Frecce piantate nei muri", "Arrows stuck in walls" },
     { "Giravolta Tornado", "Hurricane Spin" },
     { "Rocce incantate", "Enchanted rocks" },
+    { "Danni dei nemici come su GBA", "Enemy damage as on GBA" },
     { "Solo schermo largo", "Only widescreen" },
     { "Link personalizzato", "Custom Link" },
     { "Non con un Link personalizzato", "Not with a custom Link" },
     { "Richiede lo schermo largo", "Requires a widescreen aspect ratio" },
     { "Non con meno flash", "Not with fewer flashes" },
-    { "Velocit\xc3\xa0 del testo", "Text speed" },
+    { "Velocit\xc3\xa0 dei dialoghi", "Dialogue speed" },
+    { "Generale", "General" },
+    { "Immagine", "Image" },
+    { "Aspetto HD", "HD look" },
+    { "Effetti", "Effects" },
+    { "Mondo e transizioni", "World and transitions" },
+    { "Dialoghi", "Dialogue" },
+    { "Mappe", "Maps" },
+    { "Interfaccia", "Interface" },
+    { "Salvataggi e avvio", "Saves and start" },
+    { "Selezione degli oggetti", "Item selection" },
+    { "Movimento e viaggi", "Movement and travel" },
+    { "Interazione con l'ambiente", "World interaction" },
+    { "Oggetti e combattimento", "Items and combat" },
+    { "Correzioni", "Bug fixes" },
     { "Lingua dei dialoghi", "Dialogue language" },
     { "Musica orchestrale MSU", "MSU orchestral music" },
     { "(al riavvio)", "(on restart)" },
@@ -447,6 +488,9 @@ static const char *Tr(const char *it) {
     { "Slot %d caricato", "Slot %d loaded" },
     { "Tasti predefiniti ripristinati", "Default keys restored" },
     { "Scegli", "Select" },
+    { "Conferma", "Confirm" },
+    { "Indietro", "Back" },
+    { "Scegli e cambia", "Select and change" },
     { "Chiudi", "Close" },
     { "Segnalino", "Marker" },
     { "Centra su Link", "Center on Link" },
@@ -504,7 +548,6 @@ static void SaveSettings() {
   // restano le scelte dell'utente, che altrimenti si cancellavano chiudendo il menu
   bool ppu = g_config.new_renderer;
   if (ppu) {
-    AddIni(v, &n, "[Graphics]", "SmoothCamera", "%d", g_config.smooth_camera);
     AddIni(v, &n, "[Graphics]", "EnhancedMode7", "%d", g_config.enhanced_mode7);
     AddIni(v, &n, "[Graphics]", "HighRefreshInterpolation", "%d", g_config.high_refresh);
     AddIni(v, &n, "[Graphics]", "DynamicLighting", "%d", g_config.dynamic_light);
@@ -519,6 +562,7 @@ static void SaveSettings() {
     AddIni(v, &n, "[Graphics]", "FxSoftIris", "%d", g_config.fx_soft_iris);
     AddIni(v, &n, "[Graphics]", "FxButtonHints", "%d", g_config.fx_button_hints);
     AddIni(v, &n, "[Graphics]", "FxWhirlpoolGlow", "%d", g_config.fx_whirlpool);
+    AddIni(v, &n, "[Graphics]", "FxPitDepth", "%d", g_config.fx_pit);
   }
   AddIni(v, &n, "[Graphics]", "HdText", "%d", g_config.hd_text);
   AddIni(v, &n, "[Graphics]", "ModernText", "%d", g_config.modern_text);
@@ -606,71 +650,202 @@ static const char *PageTitle() {
   case kPage_Audio: return "Audio";
   case kPage_Controls: return "Controlli";
   case kPage_Saves: return "Salvataggi";
+  case kPage_Items: return "Oggetti";
   }
   return "Opzioni";
 }
 
+// Voci che ora non si possono cambiare: non si mostrano (stesse condizioni
+// dei messaggi di Activate, che restano per sicurezza)
+static bool GfxAvailable(int id) {
+  if (!g_config.new_renderer && (id == 2 || id == 5 || id == 6 || (id >= 7 && id <= 17) || id == 23))
+    return false;  // servono gli strati e lo spostamento della vista
+  if (id == 19 && g_config.link_graphics)
+    return false;  // Link biondo: non con un Link personalizzato
+  if (id == 11 && (g_config.features0 & (kFeatures0_DimFlashes | kFeatures0_DimFlashesGba)))
+    return false;  // pioggia e lampi: non con meno flash
+  if (id == 15 && g_zenv.ppu->extraLeftRight == 0)
+    return false;  // suggerimenti dei tasti: solo schermo largo
+  return true;
+}
+
+static bool FeatureAvailable(uint32 bit) {
+  if ((bit == kFeatures0_ContinuousWorld || bit == kFeatures0_FastTransitions) && !g_config.new_renderer)
+    return false;
+  if (bit == kFeatures0_SwitchLRLimit && !(g_config.features0 & kFeatures0_SwitchLR))
+    return false;
+  return true;
+}
+
+// Toglie le intestazioni rimaste senza voci
+static void PruneHeaders(void) {
+  int n = 0;
+  for (int i = 0; i < g_num_items; i++) {
+    if (g_items[i].id == kHeaderId && (i + 1 == g_num_items || g_items[i + 1].id == kHeaderId))
+      continue;
+    g_items[n++] = g_items[i];
+  }
+  g_num_items = n;
+}
+
+static void AddHeader(const char *label) {
+  AddItem(kHeaderId, label, NULL);
+}
+
+// Opzione di features0 (kFeatureOptions) con id = indice + off
+static void AddFeatureAt(uint32 bit, int off) {
+  if (!FeatureAvailable(bit))
+    return;
+  for (int i = 0; i < (int)countof(kFeatureOptions); i++)
+    if (kFeatureOptions[i].bit == bit) {
+      AddItem(i + off, kFeatureOptions[i].label, YesNo((g_config.features0 & bit) != 0));
+      return;
+    }
+}
+
+static void AddFeature(uint32 bit) {
+  AddFeatureAt(bit, 0);
+}
+
+// Voce della pagina Grafica (id come in Activate), con id + off
+static void AddGfx(int id, int off) {
+  char buf[64];
+  if (!GfxAvailable(id))
+    return;
+  const char *label = NULL, *value = NULL;
+  switch (id) {
+  case 1: label = "Schermo intero", value = YesNo(Host_IsFullscreen()); break;
+  case 2:
+    snprintf(buf, sizeof(buf), "%s%s%s", Tr(YesNo(g_config.enhanced_mode7)), Host_IsOpenGL() ? "" : " ", Host_IsOpenGL() ? "" : Tr("(al riavvio)"));
+    label = "Mode7 migliorato", value = buf;
+    break;
+  case 3: label = "Mostra FPS", value = YesNo(Host_GetDisplayPerf()); break;
+  case 4: label = "Testo nitido nei dialoghi", value = YesNo(g_config.hd_text); break;
+  case 22: label = "Testo moderno", value = YesNo(g_config.modern_text); break;
+  case 5: label = "Fluidit\xc3\xa0 oltre i 60 Hz", value = YesNo(g_config.high_refresh); break;
+  case 6: label = "Illuminazione dinamica", value = YesNo(g_config.dynamic_light); break;
+  case 7: label = "Effetto calore e fiamme", value = YesNo(g_config.fx_heat); break;
+  case 8: label = "Raggi dalle finestre", value = YesNo(g_config.fx_window_rays); break;
+  case 9: label = "Bagliore degli oggetti ricevuti", value = YesNo(g_config.fx_item_glow); break;
+  case 11: label = "Pioggia e lampi migliorati", value = YesNo(g_config.fx_rain); break;
+  case 10: label = "Nebbia migliorata", value = YesNo(g_config.fx_fog); break;
+  case 12: label = "Sfocatura dietro menu e dialoghi", value = YesNo(g_config.fx_menu_blur); break;
+  case 13: label = "Ombre di personaggi e nemici", value = YesNo(g_config.fx_sprite_shadows); break;
+  case 14: label = "Cerchio di transizione morbido", value = YesNo(g_config.fx_soft_iris); break;
+  case 15: label = "Suggerimenti dei tasti", value = g_zenv.ppu->extraLeftRight > 0 ? YesNo(g_config.fx_button_hints) : "Solo schermo largo"; break;
+  case 16: label = "Acqua e cascate realistiche", value = YesNo(g_config.fx_water); break;
+  case 17: label = "Distingui vortici da Zora", value = YesNo(g_config.fx_whirlpool); break;
+  case 23: label = "Stanza sotto le buche", value = YesNo(g_config.fx_pit); break;
+  case 19: label = "Link biondo", value = g_config.link_graphics ? "Link personalizzato" : YesNo(g_config.blond_link); break;
+  case 20: label = "Meno flash VC", value = YesNo((g_config.features0 & kFeatures0_DimFlashes) != 0); break;
+  case 21: label = "Meno flash GBA", value = YesNo((g_config.features0 & kFeatures0_DimFlashesGba) != 0); break;
+  default: return;
+  }
+  AddItem(id + off, label, value);
+}
+
+static void BuildItemsRaw(void);
+
 static void BuildItems() {
+  BuildItemsRaw();
+  PruneHeaders();
+}
+
+static void BuildItemsRaw(void) {
   char buf[64], buf2[64];
   g_num_items = 0;
   switch (g_page) {
   case kPage_Main:
     AddItem(0, "Riprendi", NULL);
     AddItem(1, "Grafica", ">");
-    AddItem(2, "Gioco", ">");
-    AddItem(3, "Audio", ">");
-    AddItem(4, "Controlli", ">");
-    AddItem(5, "Salvataggi", ">");
-    AddItem(6, "Esci dal gioco", NULL);
+    AddItem(kPage_Game, "Gioco", ">");
+    AddItem(kPage_Items, "Oggetti", ">");
+    AddItem(kPage_Audio, "Audio", ">");
+    AddItem(kPage_Controls, "Controlli", ">");
+    AddItem(kPage_Saves, "Salvataggi", ">");
+    AddItem(99, "Esci dal gioco", NULL);
     break;
   case kPage_Graphics:
-    AddItem(0, "Telecamera fluida", kSmoothCameraNames[g_config.smooth_camera & 3]);
-    AddItem(1, "Schermo intero", YesNo(Host_IsFullscreen()));
-    snprintf(buf, sizeof(buf), "%s%s%s", Tr(YesNo(g_config.enhanced_mode7)), Host_IsOpenGL() ? "" : " ", Host_IsOpenGL() ? "" : Tr("(al riavvio)"));
-    AddItem(2, "Mappa del mondo in HD", buf);
-    AddItem(3, "Mostra FPS", YesNo(Host_GetDisplayPerf()));
-    AddItem(4, "Testo nitido nei dialoghi", YesNo(g_config.hd_text));
-    AddItem(22, "Testo moderno", YesNo(g_config.modern_text));
-    AddItem(5, "Fluidit\xc3\xa0 oltre i 60 Hz", YesNo(g_config.high_refresh));
-    AddItem(6, "Illuminazione dinamica", YesNo(g_config.dynamic_light));
-    AddItem(7, "Effetto calore e fiamme", YesNo(g_config.fx_heat));
-    AddItem(8, "Raggi dalle finestre", YesNo(g_config.fx_window_rays));
-    AddItem(9, "Bagliore degli oggetti ricevuti", YesNo(g_config.fx_item_glow));
-    AddItem(11, "Pioggia e lampi migliorati", YesNo(g_config.fx_rain));
-    AddItem(10, "Nebbia migliorata", YesNo(g_config.fx_fog));
-    AddItem(12, "Sfocatura dietro menu e dialoghi", YesNo(g_config.fx_menu_blur));
-    AddItem(13, "Ombre di personaggi e nemici", YesNo(g_config.fx_sprite_shadows));
-    AddItem(14, "Cerchio di transizione morbido", YesNo(g_config.fx_soft_iris));
-    AddItem(15, "Suggerimenti dei tasti", g_zenv.ppu->extraLeftRight > 0 ? YesNo(g_config.fx_button_hints) : "Solo schermo largo");
-    AddItem(16, "Acqua e cascate realistiche", YesNo(g_config.fx_water));
-    AddItem(17, "Distingui vortici da Zora", YesNo(g_config.fx_whirlpool));
-    AddItem(18, "Aspetto dei disegni ufficiali", YesNo(g_config.official_artwork));
-    AddItem(19, "Link biondo", g_config.link_graphics ? "Link personalizzato" : YesNo(g_config.blond_link));
-    AddItem(20, "Meno flash VC", YesNo((g_config.features0 & kFeatures0_DimFlashes) != 0));
-    AddItem(21, "Meno flash GBA", YesNo((g_config.features0 & kFeatures0_DimFlashesGba) != 0));
+    // stesso ordine e sezioni della pagina Grafica del launcher
+    AddHeader("Generale");
+    AddGfx(1, 0);
+    AddGfx(3, 0);
+    AddHeader("Immagine");
+    AddGfx(2, 0);
+    AddGfx(20, 0);
+    AddGfx(21, 0);
+    AddHeader("Aspetto HD");
+    AddGfx(5, 0);
+    AddGfx(6, 0);
+    AddHeader("Effetti");
+    {
+      static const uint8 kEffects[] = { 7, 8, 9, 11, 10, 16, 17, 12, 13, 19 };
+      for (int i = 0; i < (int)countof(kEffects); i++)
+        AddGfx(kEffects[i], 0);
+    }
     break;
   case kPage_Game:
-    AddItem(100, "Velocit\xc3\xa0 del testo", kTextSpeedNames[g_config.text_speed % 3]);
+    // stesso ordine e sezioni delle pagine Gameplay e Oggetti del launcher
+    AddHeader("Mondo e transizioni");
+    AddFeature(kFeatures0_FastTransitions);
+    AddFeature(kFeatures0_ContinuousWorld);
+    AddGfx(14, kGfxInGame);
+    AddHeader("Dialoghi");
+    AddItem(100, "Velocit\xc3\xa0 dei dialoghi", kTextSpeedNames[g_config.text_speed % 3]);
+    AddGfx(4, kGfxInGame);
+    AddGfx(22, kGfxInGame);
     AddItem(101, "Lingua dei dialoghi", IsItalian() ? "Italiano" : "English");
-    for (int i = 0; i < countof(kFeatureOptions); i++) {
-      // tasto X, cambio con L e R, tasti L e R: le tre opzioni degli oggetti
-      // sui tasti stanno insieme
-      if (kFeatureOptions[i].bit == kFeatures0_SwitchLR)
-        AddItem(105, "Tasto X per gli oggetti", YesNo(g_config.item_on_x));
-      AddItem(i, kFeatureOptions[i].label, YesNo((g_config.features0 & kFeatureOptions[i].bit) != 0));
-      if (kFeatureOptions[i].bit == kFeatures0_SwitchLR)
-        AddItem(106, "Tasti L e R per gli oggetti", YesNo(g_config.item_on_lr));
-    }
+    AddHeader("Mappe");
+    AddFeature(kFeatures0_ImprovedWorldMap);
+    AddFeature(kFeatures0_ImprovedDungeonMap);
+    AddFeature(kFeatures0_ProgressiveMap);
+    AddGfx(23, kGfxInGame);
+    AddHeader("Interfaccia");
+    AddFeature(kFeatures0_ModernHud);
+    AddFeature(kFeatures0_DungeonNames);
+    AddGfx(15, kGfxInGame);
+    AddFeature(kFeatures0_ShowMaxItemsInYellow);
+    AddHeader("Salvataggi e avvio");
+    AddFeature(kFeatures0_SaveHeartsAndMagic);
+    break;
+  case kPage_Items:
+    // come la pagina Items del launcher (stessi id: li gestisce kPage_Game)
+    AddHeader("Selezione degli oggetti");
+    AddItem(105, "Tasto X per gli oggetti", YesNo(g_config.item_on_x));
+    AddFeature(kFeatures0_SwitchLR);
+    AddItem(106, "Tasti L e R per gli oggetti", YesNo(g_config.item_on_lr));
+    AddFeature(kFeatures0_SwitchLRLimit);
+    AddFeature(kFeatures0_ExtendedInventory);
+    AddHeader("Movimento e viaggi");
+    AddFeature(kFeatures0_TurnWhileDashing);
     AddItem(102, "Immersione con le pinne", YesNo(g_config.flipper_dive));
+    AddFeature(kFeatures0_MirrorToDarkworld);
+    AddFeature(kFeatures0_CancelBirdTravel);
+    AddFeature(kFeatures0_BirdTravel9);
+    AddHeader("Interazione con l'ambiente");
+    AddFeature(kFeatures0_SwordAndItems);
+    AddFeature(kFeatures0_BurnAndFreeze);
     AddItem(103, "Frecce piantate nei muri", YesNo(g_config.stuck_arrows));
-    AddItem(104, "Giravolta Tornado", YesNo(g_config.hurricane_spin));
     AddItem(107, "Rocce incantate", YesNo(g_config.enchanted_rocks));
+    AddHeader("Oggetti e combattimento");
+    AddFeature(kFeatures0_ItemsRefillResources);
+    AddFeature(kFeatures0_GoldPotion);
+    AddItem(108, "Danni dei nemici come su GBA", YesNo(g_config.gba_damage));
+    AddItem(104, "Giravolta Tornado", YesNo(g_config.hurricane_spin));
+    AddFeature(kFeatures0_MoreActiveBombs);
+    AddFeature(kFeatures0_CarryMoreRupees);
+    AddHeader("Correzioni");
+    AddFeature(kFeatures0_MiscBugFixes);
+    AddFeature(kFeatures0_GameChangingBugFixes);
+    AddFeature(kFeatures0_GbaMinorFixes);
     break;
   case kPage_Audio:
     snprintf(buf, sizeof(buf), "%d%%", Host_GetVolume());
     AddItem(0, "Volume", buf);
     snprintf(buf, sizeof(buf), "%s %s", Tr(YesNo(g_msu_on)), Tr("(al riavvio)"));
     AddItem(1, "Musica orchestrale MSU", buf);
+    // come nel launcher (Audio)
+    AddFeatureAt(kFeatures0_DisableLowHealthBeep, kGameInAudio);
     break;
   case kPage_Controls:
     for (int i = 0; i < 12; i++) {
@@ -684,7 +859,7 @@ static void BuildItems() {
     if (snprintf(buf, sizeof(buf), "%s   -   %s", buf2, Config_PadButtonName(Config_GetPadButtonForCmd(kKeys_HdMenu))) < 0)
       buf[0] = 0;
     AddItem(12, "Menu opzioni", buf);
-    AddItem(14, "Vibrazione del controller", kSmoothCameraNames[g_config.rumble & 3]);
+    AddItem(14, "Vibrazione del controller", kLevelNames[g_config.rumble & 3]);
     AddItem(13, "Ripristina tasti predefiniti", NULL);
     break;
   case kPage_Saves:
@@ -702,22 +877,31 @@ static void BuildItems() {
 
 // dir: -1/+1 per sinistra/destra, 0 per conferma
 static void Activate(int id, int dir) {
-  switch (g_page) {
+  if (id == kHeaderId)
+    return;
+  // nelle pagine delle opzioni A non cambia niente (solo Sinistra e Destra,
+  // come dice la riga di aiuto): A serve a entrare nelle pagine e per le azioni
+  if (dir == 0 && (g_page == kPage_Graphics || g_page == kPage_Game || g_page == kPage_Items || g_page == kPage_Audio))
+    return;
+  int page = g_page;
+  if (page == kPage_Game && id >= kGfxInGame && id < kGameInAudio)
+    page = kPage_Graphics, id -= kGfxInGame;
+  else if (page == kPage_Audio && id >= kGameInAudio)
+    page = kPage_Game, id -= kGameInAudio;
+  else if (page == kPage_Items)
+    page = kPage_Game;
+  switch (page) {
   case kPage_Main:
     if (dir != 0)
       return;
     if (id == 0) HdMenu_Close();
-    else if (id == 6) { HdMenu_Close(); Host_Quit(); }
+    else if (id == 99) { HdMenu_Close(); Host_Quit(); }
     else { g_page = id; g_scroll = 0; }
     break;
   case kPage_Graphics:
-    if (!g_config.new_renderer && (id == 0 || id == 5 || id == 6 || (id >= 7 && id <= 17))) {
+    if (!g_config.new_renderer && (id == 5 || id == 6 || (id >= 7 && id <= 17) || id == 23)) {
       // come nel launcher: servono gli strati e lo spostamento della vista
       ShowMessage("Richiede la PPU ottimizzata (NewRenderer)");
-    } else if (id == 0) {
-      int v = (g_config.smooth_camera + (dir < 0 ? 3 : 1)) & 3;
-      g_config.smooth_camera = v;
-      g_smooth_camera = v;
     } else if (id == 1) {
       Host_ToggleFullscreen();
     } else if (id == 2 && !g_config.new_renderer) {
@@ -739,9 +923,9 @@ static void Activate(int id, int dir) {
     } else if (id == 6) {
       g_config.dynamic_light = !g_config.dynamic_light;
       g_dynamic_light = g_config.dynamic_light;
-    } else if (id == 18) {
-      // Agahnim, re e medaglione dal prossimo caricamento
-      g_config.official_artwork = !g_config.official_artwork;
+    } else if (id == 23) {
+      g_config.fx_pit = !g_config.fx_pit;
+      HdMenu_ApplyConfig();
     } else if (id == 19 && g_config.link_graphics) {
       ShowMessage("Non con un Link personalizzato");
     } else if (id == 19) {
@@ -792,6 +976,10 @@ static void Activate(int id, int dir) {
       // spenta: la roccia accesa si spegne subito (GbaRock_Frame); accesa:
       // la prossima roccia nasce entrando in un'area
       g_config.enchanted_rocks = !g_config.enchanted_rocks;
+    } else if (id == 108) {
+      // subito: solo le voci GBA della tabella dei danni (overworld.c)
+      g_config.gba_damage = !g_config.gba_damage;
+      Overworld_ApplyGbaDamage(g_config.gba_damage);
     } else if (id == 105 || id == 106) {
       bool *opt = id == 105 ? &g_config.item_on_x : &g_config.item_on_lr;
       *opt = !*opt;
@@ -824,6 +1012,8 @@ static void Activate(int id, int dir) {
     break;
   case kPage_Controls:
     if (id == 14) {
+      if (dir == 0)  // scelta: solo Sinistra e Destra
+        return;
       // spenta, leggera, media, forte; una vibrazione di prova con la nuova forza
       g_config.rumble = (g_config.rumble + (dir < 0 ? 3 : 1)) & 3;
       Host_Rumble(1.0f, 1.0f, 300);
@@ -841,7 +1031,8 @@ static void Activate(int id, int dir) {
     break;
   case kPage_Saves:
     if (id == 103) {
-      g_slot_action_save = !g_slot_action_save;
+      if (dir != 0)  // scelta: solo Sinistra e Destra
+        g_slot_action_save = !g_slot_action_save;
     } else if (dir == 0) {
       QuickSlotAction(id);
     }
@@ -852,16 +1043,29 @@ static void Activate(int id, int dir) {
 // ---------------------------------------------------------------------------
 // Input
 
+// Cursore dentro l'elenco e non su un'intestazione (si va avanti nel verso dir)
+static void FixCursor(int *cur, int dir) {
+  if (*cur >= g_num_items) *cur = g_num_items - 1;
+  if (*cur < 0) *cur = 0;
+  for (int n = 0; n < g_num_items && g_items[*cur].id == kHeaderId; n++)
+    *cur = (*cur + dir + g_num_items) % g_num_items;
+}
+
 enum { kAct_None, kAct_Up, kAct_Down, kAct_Left, kAct_Right, kAct_Ok, kAct_Back, kAct_Close };
 
 static void DoAction(int act) {
   BuildItems();
   int *cur = &g_cursor[g_page];
-  if (*cur >= g_num_items) *cur = g_num_items - 1;
-  if (*cur < 0) *cur = 0;
+  FixCursor(cur, 1);
   switch (act) {
-  case kAct_Up: *cur = (*cur + g_num_items - 1) % g_num_items; break;
-  case kAct_Down: *cur = (*cur + 1) % g_num_items; break;
+  case kAct_Up:
+    *cur = (*cur + g_num_items - 1) % g_num_items;
+    FixCursor(cur, -1);
+    break;
+  case kAct_Down:
+    *cur = (*cur + 1) % g_num_items;
+    FixCursor(cur, 1);
+    break;
   case kAct_Left: Activate(g_items[*cur].id, -1); break;
   case kAct_Right: Activate(g_items[*cur].id, 1); break;
   case kAct_Ok: Activate(g_items[*cur].id, 0); break;
@@ -884,6 +1088,7 @@ void HdMenu_Open() {
   g_page = kPage_Main;
   g_scroll = 0;
   g_capture = -1;
+  g_open_anim = 0;
   Font_Load();
   Host_ClearInputs();
 }
@@ -1542,6 +1747,123 @@ static void DrawDungeonEntryName(Canvas *cv) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Riquadro del menu con le caselle dei riquadri dell'inventario (Hud_DrawBox:
+// angolo 0xFB, lati 0xFC e 0xF9, fondo 0xF5) e la palette dell'HUD, prese
+// dalla ROM (la VRAM puo' avere altro: mappa, titolo)
+
+enum { kOpenFrames = 10, kFramePal = 2, kFillPal = 1 };
+static uint8 g_hud_gfx[3 * 2048];  // caselle 2bpp 0-383 (pacchetti 0x6a, 0x6b, 0x69)
+static bool g_hud_gfx_ok;
+
+static void HudGfx_Load(void) {
+  if (g_hud_gfx_ok)
+    return;
+  static uint8 tmp[0x4000];
+  static const uint8 kPacks[3] = { 0x6a, 0x6b, 0x69 };
+  for (int i = 0; i < 3; i++) {
+    Decomp_spr(tmp, kPacks[i]);
+    memcpy(g_hud_gfx + i * 2048, tmp, 2048);
+  }
+  g_hud_gfx_ok = true;
+}
+
+static uint32 HudColor(int pal, int v) {
+  return HdFx_Bgr15ToRgb(kHudPalData[pal * 4 + v]);
+}
+
+// Casella t (con i bit di ribaltamento 0x4000/0x8000) in x, y
+static void DrawHudTile(Canvas *cv, int x, int y, int t, int pal) {
+  const uint8 *d = g_hud_gfx + (t & 0x1ff) * 16;
+  for (int r = 0; r < 8; r++) {
+    int rr = (t & 0x8000) ? 7 - r : r;
+    for (int c = 0; c < 8; c++) {
+      int b = (t & 0x4000) ? c : 7 - c;
+      int v = (d[rr * 2] >> b & 1) | (d[rr * 2 + 1] >> b & 1) << 1;
+      if (v)
+        Canvas_Pixel(cv, x + c, y + r, HudColor(pal, v));
+    }
+  }
+}
+
+// Colore del fondo del riquadro (per coprire il bordo dietro il titolo)
+static uint32 HudFrameFill(void) {
+  HudGfx_Load();
+  const uint8 *d = g_hud_gfx + 0xf5 * 16;
+  int v = (d[0] >> 7 & 1) | (d[1] >> 7 & 1) << 1;
+  return v ? HudColor(kFillPal, v) : 0x000000;
+}
+
+static void DrawHudFrame(Canvas *cv, int x, int y, int cols, int rows) {
+  HudGfx_Load();
+  for (int r = 0; r < rows; r++)
+    for (int c = 0; c < cols; c++) {
+      int px = x + c * 8, py = y + r * 8;
+      bool l = c == 0, rt = c == cols - 1, tp = r == 0, bt = r == rows - 1;
+      int t;
+      if ((l || rt) && (tp || bt))
+        t = 0xfb | (rt ? 0x4000 : 0) | (bt ? 0x8000 : 0);
+      else if (l || rt)
+        t = 0xfc | (rt ? 0x4000 : 0);
+      else if (tp || bt)
+        t = 0xf9 | (bt ? 0x8000 : 0);
+      else {
+        DrawHudTile(cv, px, py, 0xf5, kFillPal);
+        continue;
+      }
+      // sotto il bordo il fondo, come nel gioco (BG3 con caselle trasparenti)
+      DrawHudTile(cv, px, py, 0xf5, kFillPal);
+      DrawHudTile(cv, px, py, t, kFramePal);
+    }
+}
+
+// Voci con piu' di due valori: si scorrono con Sinistra e Destra
+static bool IsChoiceItem(int id) {
+  switch (g_page) {
+  case kPage_Game: return id == 100;             // velocita' dei dialoghi
+  case kPage_Audio: return id == 0;              // volume
+  case kPage_Controls: return id == 14;          // vibrazione
+  }
+  return false;
+}
+
+// Intestazioni col carattere piccolo dei riquadri dell'inventario
+// ("STRUMENTO"), in maiuscolo, con l'ombra: righe basse kHeaderH
+enum { kHeaderH = 10 };
+
+static int SmallTextWidth(const char *s) {
+  int w = 0;
+  for (; *s; s++) {
+    char c = *s >= 'a' && *s <= 'z' ? *s - 32 : *s;
+    const char *const *g = HudIt_SmallGlyph(c);
+    w += (g ? (int)strlen(g[0]) : 3) + 1;
+  }
+  return w;
+}
+
+static int DrawSmallText(Canvas *cv, int x, int y, const char *s, uint32 color) {
+  for (; *s; s++) {
+    char c = *s >= 'a' && *s <= 'z' ? *s - 32 : *s;
+    const char *const *g = HudIt_SmallGlyph(c);
+    if (!g) {
+      x += 4;
+      continue;
+    }
+    int w = (int)strlen(g[0]);
+    for (int pass = 0; pass < 2; pass++)
+      for (int r = 0; r < 5; r++)
+        for (int b = 0; b < w; b++)
+          if (g[r][b] == '#')
+            Canvas_Pixel(cv, x + b + (pass == 0), y + r + (pass == 0), pass ? color : 0x101018);
+    x += w + 1;
+  }
+  return x;
+}
+
+static int RowH(int i) {
+  return g_items[i].id == kHeaderId ? kHeaderH : kRowHeight;
+}
+
 void HdMenu_Draw(uint8 *pixels, int pitch, int width, int height, int scale) {
   Canvas cv = { pixels, pitch, width / scale, height / scale, scale };
   HdText_Draw(pixels, pitch, width, height, scale);
@@ -1558,60 +1880,127 @@ void HdMenu_Draw(uint8 *pixels, int pitch, int width, int height, int scale) {
   }
   if (!g_font_data)
     Font_Load();
-  // Scurisce il gioco sotto il menu
+  g_menu_modern = g_config.modern_text;
+  // Scurisce il gioco sotto il menu (meno se c'e' gia' la sfocatura)
+  bool blur = g_config.fx_menu_blur;
   for (int y = 0; y < height; y++) {
     uint32 *row = (uint32 *)(pixels + y * pitch);
     for (int x = 0; x < width; x++)
-      row[x] = (row[x] >> 2 & 0x3f3f3f) | (row[x] & 0xff000000);
+      row[x] = blur ? (row[x] >> 1 & 0x7f7f7f) | (row[x] & 0xff000000)
+                    : (row[x] >> 2 & 0x3f3f3f) | (row[x] & 0xff000000);
   }
   BuildItems();
   int *cur = &g_cursor[g_page];
-  if (*cur >= g_num_items) *cur = g_num_items - 1;
+  FixCursor(cur, 1);
 
-  int panel_w = IntMin(cv.width - 16, 360);
+  // riquadro di caselle da 8 pixel come i riquadri dell'inventario
+  int cols = IntMin(cv.width - 16, 360) / 8, rows = (cv.height - 8 - 30) / 8;
+  int panel_w = cols * 8, panel_h = rows * 8;
   int panel_x = (cv.width - panel_w) / 2;
-  int top = 8;
-  int visible = (cv.height - top - 44) / kRowHeight;
-  if (*cur < g_scroll) g_scroll = *cur;
-  if (*cur >= g_scroll + visible) g_scroll = *cur - visible + 1;
+  // all'apertura scende dall'alto come il menu degli oggetti
+  float t = g_open_anim >= kOpenFrames ? 1.0f : (float)g_open_anim / kOpenFrames;
+  g_open_anim++;
+  int top = 8 - (int)((1 - t) * (1 - t) * (panel_h + 8));
+  DrawHudFrame(&cv, panel_x, top, cols, rows);
+  // spazio per le righe (alte kRowHeight, le intestazioni kHeaderH)
+  int avail = panel_h - 16 - 6;
+  // l'intestazione sopra la voce scelta resta visibile
+  int first = *cur > 0 && g_items[*cur - 1].id == kHeaderId ? *cur - 1 : *cur;
+  if (first < g_scroll) g_scroll = first;
+  for (;;) {
+    int h = 0;
+    for (int i = g_scroll; i <= *cur; i++)
+      h += RowH(i);
+    if (h <= avail || g_scroll >= *cur)
+      break;
+    g_scroll++;
+  }
 
-  // Titolo
-  Canvas_Rect(&cv, panel_x, top, panel_w, 20, 0x30285c);
+  // Titolo nel bordo in alto, su un pezzo di fondo del riquadro
   const char *title = Tr(PageTitle());
-  DrawText(&cv, panel_x + (panel_w - TextWidth(title)) / 2, top + 1, title, 0xf8d878);
+  int tw = TextWidth(title);
+  Canvas_Rect(&cv, panel_x + (panel_w - tw) / 2 - 6, top, tw + 12, 8, HudFrameFill());
+  DrawText(&cv, panel_x + (panel_w - tw) / 2, top - 6, title, 0xf8d878);
 
-  int y = top + 24;
-  for (int i = g_scroll; i < g_num_items && i < g_scroll + visible; i++, y += kRowHeight) {
+  int y = top + 14, used = 0;
+  bool more = false;
+  for (int i = g_scroll; i < g_num_items; i++) {
     MenuItem *it = &g_items[i];
+    int rh = RowH(i);
+    // un'intestazione in fondo senza la sua prima voce sotto non si disegna
+    if (used + rh > avail || (it->id == kHeaderId && i + 1 < g_num_items && used + rh + RowH(i + 1) > avail)) {
+      more = true;
+      break;
+    }
+    used += rh;
+    if (it->id == kHeaderId) {
+      // intestazione di sezione: carattere piccolo dell'inventario, colore
+      // del titolo, e una riga
+      int ex = DrawSmallText(&cv, panel_x + 10, y + 1, it->label, 0xf8d878);
+      int lx = ex + 5;
+      if (lx < panel_x + panel_w - 12)
+        Canvas_Rect(&cv, lx, y + 3, panel_x + panel_w - 12 - lx, 1, 0x605890);
+      y += rh;
+      continue;
+    }
     bool sel = (i == *cur);
+    uint32 color = sel ? 0xf8f8f8 : 0xa8a8b8;
+    // cursore: la freccia delle scelte nei dialoghi, che ondeggia
     if (sel)
-      Canvas_Rect(&cv, panel_x, y - 1, panel_w, kRowHeight, 0x2050a0);
-    uint32 color = sel ? 0xf8f8f8 : 0xc8c8d0;
+      DrawText(&cv, panel_x + 10 + ((g_open_anim >> 4) & 1), y - 2, ">", 0xf8f8f8);
+    // Colonna dei valori sempre nello stesso punto: a destra resta lo spazio
+    // delle frecce < > dei valori a scelta (piu' di due), che si disegnano
+    // ai lati senza spostare il testo. Le pagine (>) stanno nella colonna
+    // della freccia
+    const char *value = it->value;
+    int arrow_x = panel_x + panel_w - 14 - TextWidth(">");
+    int value_r = arrow_x - 4;
+    bool page_link = strcmp(value, ">") == 0;
+    int vw = value[0] && !page_link ? TextWidth(value) : 0;
     // Se la scritta non ci sta accanto al valore si usa la forma breve
     const char *label = it->label;
-    int room = panel_w - 20 - (it->value[0] ? TextWidth(it->value) + 8 : 0);
+    int room = value_r - (panel_x + 22) - (vw ? vw + 8 + TextWidth("< ") : 0);
     if (TextWidth(label) > room)
       label = ShortLabel(label);
-    DrawText(&cv, panel_x + 10, y - 2, label, color);
-    if (it->value[0]) {
-      int vw = TextWidth(it->value);
-      DrawText(&cv, panel_x + panel_w - 10 - vw, y - 2, it->value, sel ? 0xf8e070 : 0x98c0f0);
+    DrawText(&cv, panel_x + 22, y - 2, label, color);
+    uint32 vcolor = sel ? 0xf8e070 : 0x98c0f0;
+    if (page_link) {
+      DrawText(&cv, arrow_x, y - 2, ">", vcolor);
+    } else if (vw) {
+      DrawText(&cv, value_r - vw, y - 2, value, vcolor);
+      if (sel && IsChoiceItem(it->id)) {
+        DrawText(&cv, value_r - vw - 4 - TextWidth("<"), y - 2, "<", vcolor);
+        DrawText(&cv, arrow_x, y - 2, ">", vcolor);
+      }
     }
+    y += rh;
   }
-  // Frecce di scorrimento
-  if (g_scroll > 0)
-    DrawText(&cv, panel_x + panel_w - 14, top + 2, "\xe2\x86\x91", 0xf8f8f8);
-  if (g_scroll + visible < g_num_items)
-    DrawText(&cv, panel_x + panel_w - 14, cv.height - 38, "\xe2\x86\x93", 0xf8f8f8);
+  // Frecce di scorrimento nel bordo in alto e in basso a destra, come il
+  // titolo (non coprono la colonna dei valori)
+  int sw = TextWidth("\xe2\x86\x93"), sx = panel_x + panel_w - 24 - sw;
+  if (g_scroll > 0) {
+    Canvas_Rect(&cv, sx - 2, top, sw + 4, 8, HudFrameFill());
+    DrawText(&cv, sx, top - 6, "\xe2\x86\x91", 0xf8f8f8);
+  }
+  if (more) {
+    Canvas_Rect(&cv, sx - 2, top + panel_h - 8, sw + 4, 8, HudFrameFill());
+    DrawText(&cv, sx, top + panel_h - 14, "\xe2\x86\x93", 0xf8f8f8);
+  }
 
-  // Riga di aiuto
-  const char *help = Tr(g_capture >= 0 ?
-      "Premi il nuovo tasto o pulsante  (Esc o Back annulla)" :
-      "A conferma   B indietro   Sinistra e Destra cambiano");
-  int hw = TextWidth(help);
-  if (g_capture >= 0)
+  // Riga di aiuto: i tasti assegnati, disegnati come i suggerimenti dei tasti
+  if (g_capture >= 0) {
+    const char *help = Tr("Premi il nuovo tasto o pulsante  (Esc o Back annulla)");
+    int hw = TextWidth(help);
     Canvas_Rect(&cv, (cv.width - hw) / 2 - 8, cv.height - 22, hw + 16, 20, 0x803020);
-  DrawText(&cv, (cv.width - hw) / 2, cv.height - 21, help, 0xf8f8f8);
+    DrawText(&cv, (cv.width - hw) / 2, cv.height - 21, help, 0xf8f8f8);
+  } else if (g_page == kPage_Main) {
+    Hint h[3] = { { kBtn_Dpad, "Scegli" }, { kBtn_A, "Conferma" }, { kBtn_B, "Indietro" } };
+    DrawHints(&cv, h, 3, 21);
+  } else {
+    // in 4:3 la forma breve: altrimenti la riga esce dallo schermo
+    Hint h[3] = { { kBtn_Dpad, cv.width > 300 ? "Scegli e cambia" : "Scegli" }, { kBtn_A, "Conferma" }, { kBtn_B, "Indietro" } };
+    DrawHints(&cv, h, 3, 21);
+  }
   DrawMessage(&cv);
 }
 

@@ -888,6 +888,9 @@ void OverworldOverlay_HandleRain() {  // 82a4cd
   static const uint8 kOverworld_DrawBadWeather_Y[4] = { 0, 17, 0, 17 };
   if (BYTE(overworld_screen_index) != 0x70 && sram_progress_indicator >= 2 || (save_ow_event_info[0x70] & 0x20))
     return;
+  if (enhanced_features0 & kFeatures0_DimFlashesGba)
+    GbaFlash_RainStep();  // lampi come il GBA
+  else
   // Con la pioggia migliorata i lampi li disegna hd_fx.c, piu' morbidi
   if (frame_counter == 3 || frame_counter == 88) {
     CGADSUB_copy = g_fx_rain ? 0x72 : 0x32;
@@ -3119,6 +3122,29 @@ void MirrorBonk_RecoverChangedTiles() {  // 82fe47
   }
 }
 
+// Danni come su GBA (GbaEnemyDamage): i valori che la versione GBA ha cambiato (tabella nemico x
+// classe a 0x817f18c), senza le Bacchette del Fuoco e del Ghiaccio
+static const uint16 kGbaDamage[][2] = {
+  {0x0ee, 2}, {0x13e, 2}, {0x22e, 2}, {0x8be, 2}, {0x8ee, 2},  // Etere: 64 invece di congelare
+  {0x4cd, 3}, {0x64d, 3}, {0x81d, 2}, {0xa1d, 2},  // Bombos
+  {0x647, 1},  // Rampino: stordisce Debirando
+  {0x64f, 3}, {0x71f, 3}, {0x85f, 3},  // Terremoto
+  {0x85a, 0},  // Polvere: non trasforma lo Stalfos giallo
+  // Mothula e la Spada d'Oro (0x884/0x885): c'e' gia' in GbaMinorFixes (Sprite_88_Mothula)
+  {0xc9d, 1}, {0xc9e, 3}, {0xc9f, 1},  // medaglioni sui Tektite
+};
+
+// Mette nella tabella le voci GBA (on) o quelle originali (dalla ROM): solo
+// quelle voci, cosi' dal menu in gioco vale subito senza toccare le altre (i
+// boss ne cambiano alcune durante il combattimento) e senza la RAM di appoggio
+void Overworld_ApplyGbaDamage(bool on) {
+  for (int i = 0; i < (int)(sizeof(kGbaDamage) / sizeof(kGbaDamage[0])); i++) {
+    int j = kGbaDamage[i][0];
+    uint8 t = kEnemyDamageData[j >> 1];
+    enemy_damage_data[j] = on ? (uint8)kGbaDamage[i][1] : (j & 1) ? t & 0xf : t >> 4;
+  }
+}
+
 void DecompressEnemyDamageSubclasses() {  // 82fe71
   uint8 *tmp = &g_ram[0x14000];
   memcpy(tmp, kEnemyDamageData, kEnemyDamageData_SIZE);
@@ -3127,21 +3153,8 @@ void DecompressEnemyDamageSubclasses() {  // 82fe71
     enemy_damage_data[i + 0] = t >> 4;
     enemy_damage_data[i + 1] = t & 0xf;
   }
-  // Danni come su GBA (GbaEnemyDamage): i valori che la versione GBA ha cambiato (tabella nemico x
-  // classe a 0x817f18c), senza le Bacchette del Fuoco e del Ghiaccio
-  if (g_config.gba_damage) {
-    static const uint16 kGbaDamage[][2] = {
-      {0x0ee, 2}, {0x13e, 2}, {0x22e, 2}, {0x8be, 2}, {0x8ee, 2},  // Etere: 64 invece di congelare
-      {0x4cd, 3}, {0x64d, 3}, {0x81d, 2}, {0xa1d, 2},  // Bombos
-      {0x647, 1},  // Rampino: stordisce Debirando
-      {0x64f, 3}, {0x71f, 3}, {0x85f, 3},  // Terremoto
-      {0x85a, 0},  // Polvere: non trasforma lo Stalfos giallo
-      // Mothula e la Spada d'Oro (0x884/0x885): c'e' gia' in GbaMinorFixes (Sprite_88_Mothula)
-      {0xc9d, 1}, {0xc9e, 3}, {0xc9f, 1},  // medaglioni sui Tektite
-    };
-    for (int i = 0; i < (int)(sizeof(kGbaDamage) / sizeof(kGbaDamage[0])); i++)
-      enemy_damage_data[kGbaDamage[i][0]] = (uint8)kGbaDamage[i][1];
-  }
+  if (g_config.gba_damage)
+    Overworld_ApplyGbaDamage(true);
 }
 
 int Decompress_bank02(uint8 *dst, const uint8 *src) {  // 82febb
@@ -3398,7 +3411,18 @@ void Overworld_DwDeathMountainPaletteAnimation() {  // 8ef582
   if (sc != 0x43 && sc != 0x45 && sc != 0x47)
     return;
   uint8 fc = frame_counter;
-  if (fc == 5 || fc == 44 || fc == 90) {
+  if (enhanced_features0 & kFeatures0_DimFlashesGba) {
+    // Meno flash GBA (0x81329a0): i colori vanno piano verso quelli del lampo
+    // e tornano, un lampo ogni 150-270 fotogrammi
+    // (GbaFlash_PaletteLightning), verso i colori di kDwPaletteAnim
+    static const uint8 kIdx[35] = {
+      0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x39, 0x3a, 0x3b, 0x3c, 0x3d, 0x3e, 0x3f,
+      0x49, 0x4a, 0x4b, 0x4c, 0x4d, 0x4e, 0x4f, 0x71, 0x72, 0x73, 0x74, 0x75, 0x76, 0x77,
+      0x79, 0x7a, 0x7b, 0x7c, 0x7d, 0x7e, 0x7f,
+    };
+    static GbaLightning lightning;
+    GbaFlash_PaletteLightning(&lightning, kIdx, kDwPaletteAnim, 35, true);
+  } else if (fc == 5 || fc == 44 || fc == 90) {
     for (int i = 1; i < 8; i++) {
       main_palette_buffer[0x30 + i] = aux_palette_buffer[0x30 + i];
       main_palette_buffer[0x38 + i] = aux_palette_buffer[0x38 + i];

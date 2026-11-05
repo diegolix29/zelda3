@@ -39,6 +39,7 @@ static void LoadLinkGraphics();
 static void RenderNumber(uint8 *dst, size_t pitch, int n, bool big);
 static void HandleInput(int keyCode, int modCode, bool pressed);
 static bool NameKeyDown(int sym, int mod);
+static bool g_name_key_as_button;  // tasto usato come pulsante nella schermata del nome
 static void NameTypeUtf8(const char *s);
 static void HandleCommand(uint32 j, bool pressed);
 static int RemapSdlButton(int button);
@@ -604,8 +605,10 @@ int main(int argc, char** argv) {
           HandleInput(event.key.keysym.sym, event.key.keysym.mod, true);
         break;
       case SDL_TEXTINPUT:
-        if (NameFile_IsTyping())
+        // il testo di un tasto usato come pulsante (NameKeyDown) non si scrive
+        if (NameFile_IsTyping() && !g_name_key_as_button)
           NameTypeUtf8(event.text.text);
+        g_name_key_as_button = false;
         break;
       case SDL_KEYUP:
         if (!HdMenu_HandleKey(event.key.keysym.sym, event.key.keysym.mod, false))
@@ -618,6 +621,8 @@ int main(int argc, char** argv) {
     }
 
     bool menu_open = HdMenu_IsOpen();
+    // col menu opzioni aperto l'audio e' in pausa: e' un menu "sopra" il
+    // gioco (niente musica e niente suoni, anche durante la navigazione)
     if ((g_paused || menu_open) != audiopaused) {
       audiopaused = g_paused || menu_open;
       if (device)
@@ -890,10 +895,20 @@ static void HandleCommand_Locked(uint32 j, bool pressed) {
 
 // Schermata del nome: i tasti dei caratteri scrivono il nome (il carattere
 // arriva con SDL_TEXTINPUT) invece di premere i tasti del joypad; Backspace
-// cancella. Frecce, Invio (Start) e i tasti con Ctrl o Alt restano quelli
+// cancella. Frecce, Invio (Start) e i tasti con Ctrl o Alt restano quelli.
+// Col cursore su una freccia o su FINE i tasti dei pulsanti A/B/X/Y premono
+// il pulsante (per scegliere FINE senza Start), altrove scrivono la lettera
 static bool NameKeyDown(int sym, int mod) {
+  g_name_key_as_button = false;
   if (!NameFile_IsTyping() || (mod & (KMOD_CTRL | KMOD_ALT)))
     return false;
+  if (NameFile_CursorOnControl()) {
+    int cmd = FindCmdForSdlKey(sym, mod);
+    if (cmd >= kKeys_Controls + 6 && cmd <= kKeys_Controls + 9) {
+      g_name_key_as_button = true;
+      return false;
+    }
+  }
   if (sym == SDLK_BACKSPACE) {
     NameFile_TypeChar('\b');
     return true;

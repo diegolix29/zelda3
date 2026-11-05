@@ -33,7 +33,7 @@ enum {
 void HdRumble(int kind);
 // Un momento in un punto del mondo: piena entro 3 caselle da Link, poi cala
 // fino a un terzo (il pan dei suoni del gioco guarda solo i 256 pixel della
-// sua schermata: col 16:9 e la telecamera fluida anche una bomba ai piedi di
+// sua schermata: col 16:9 anche una bomba ai piedi di
 // Link risultava "di lato")
 void HdRumble_At(int kind, uint16 x, uint16 y);
 // Suono in partenza verso il chip audio (nmi.c): le esplosioni

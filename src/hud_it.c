@@ -99,6 +99,7 @@ static const Glyph kSmall[] = {
   { 'Y', { "#.#", "#.#", ".#.", ".#.", ".#." } },
   { 'Z', { "###", "..#", ".#.", "#..", "###" } },
   { '.', { ".", ".", ".", ".", "#" } },
+  { '\'', { "#", "#", ".", ".", "." } },
   { ' ', { "..", "..", "..", "..", ".." } },
 };
 
@@ -107,6 +108,11 @@ static const Glyph *FindGlyph(const Glyph *font, int n, char c) {
     if (font[i].c == c)
       return &font[i];
   return NULL;
+}
+
+const char *const *HudIt_SmallGlyph(char c) {
+  const Glyph *g = FindGlyph(kSmall, (int)countof(kSmall), c);
+  return g ? g->rows : NULL;
 }
 
 // Larghezza in pixel del testo (1 pixel fra una lettera e l'altra)

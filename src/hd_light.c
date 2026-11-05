@@ -11,6 +11,7 @@
 #include "hd_burn.h"
 #include "hd_trans.h"
 #include "hd_world.h"
+#include "hd_water.h"
 
 bool g_dynamic_light;
 
@@ -109,7 +110,9 @@ static bool RoomLooksDark(int mod) {
 // li' che il gioco stesso capisce quale torcia si sta accendendo.
 static uint16 GetTorchMask() {
   uint16 mask = 0;
-  const uint8 *attr = dung_bg2_attr_table;
+  // nei passaggi la tabella in RAM e' ancora in parte della stanza di prima:
+  // si usa quella finita (hd_water.c)
+  const uint8 *attr = HdWater_AttrTable();
   for (int i = 0; i < 0x2000; i++)
     if ((attr[i] & 0xf0) == 0xc0)
       mask |= 1 << (attr[i] & 0xf);
@@ -288,8 +291,9 @@ static void CollectLights(const uint8 *pixels, int pitch, int height, int mod, b
   if (mod == 7) {
     // Torce accese della stanza
     int room = dungeon_room_index;
-    // stanza della telecamera (nello scorrimento 7/2 per un po' quella vecchia)
-    int ox = BG2HOFS_copy2 & ~0x1ff, oy = BG2VOFS_copy2 & ~0x1ff;
+    // origine della stanza caricata: torce e decorazioni sono sue (nei
+    // passaggi la telecamera e' per un po' ancora nella stanza di prima)
+    int ox = (room & 15) << 9, oy = (room >> 4 & 15) << 9;
     int start = dung_index_of_torches_start >> 1;
     uint16 torch_mask = GetTorchMask();
     for (int i = start; i < start + 16; i++) {
@@ -309,7 +313,10 @@ static void CollectLights(const uint8 *pixels, int pitch, int height, int mod, b
     }
     // Torce a muro e bracieri decorativi: un piccolo alone che pulsa come la
     // fiamma, per far capire che fanno luce. Nelle stanze buie illuminano di piu'.
-    if (g_decor_room != room || --g_decor_scan_timer <= 0) {
+    // Nei passaggi a ogni fotogramma: il numero della stanza cambia prima che
+    // le sue caselle siano caricate, e la prima scansione trovava torce finte
+    // (caselle della stanza di prima) per mezzo secondo
+    if (g_decor_room != room || HdFx_DungeonPassing() || --g_decor_scan_timer <= 0) {
       ScanDecorLights();
       g_decor_scan_timer = 30;
     }
@@ -547,8 +554,8 @@ static bool LavaShows(const uint8 *pixels, int pitch, int width, int height, int
 
 static void CollectLavaLights(const uint8 *pixels, int pitch, int width, int height,
                               bool dark, int ext, int cam_x, int cam_y, float t) {
-  // stanza della telecamera (nello scorrimento 7/2 per un po' quella vecchia)
-  int ox = BG2HOFS_copy2 & ~0x1ff, oy = BG2VOFS_copy2 & ~0x1ff;
+  // origine della stanza caricata (le caselle lette sono sue)
+  int ox = (dungeon_room_index & 15) << 9, oy = (dungeon_room_index >> 4 & 15) << 9;
   if (g_lava_room != dungeon_room_index) {
     g_lava_room = dungeon_room_index;
     memset(g_lava_known, 0, sizeof(g_lava_known));

@@ -239,6 +239,7 @@
     <ClCompile Include="src\screens_it.c" />
     <ClCompile Include="src\hd_fx.c" />
     <ClCompile Include="src\hd_water.c" />
+    <ClCompile Include="src\hd_pit.c" />
     <ClCompile Include="src\hd_par.c" />
     <ClCompile Include="src\hd_cheats.c" />
     <ClCompile Include="src\hd_rumble.c" />

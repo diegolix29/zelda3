@@ -586,7 +586,10 @@ static void SubWriteTile(uint16 *t, int col, int half) {
 }
 
 static void SubtitleBeforeRender(Ppu *ppu) {
-  if (!g_config.triforce_title || main_module_index != 0 || ppu->bgLayer[0].tilemapAdr != kSubMap)
+  // niente controllo del modulo: la dissolvenza del titolo verso il racconto
+  // e' gia' nel modulo 0x14 (Attract_Fade) e li' tornava "A LINK TO THE PAST";
+  // la mappa e le caselle controllate qui sotto bastano a riconoscere la scritta
+  if (!g_config.triforce_title || ppu->bgLayer[0].tilemapAdr != kSubMap)
     return;
   for (int i = 0; i < 16; i++)
     if (*SubMapEntry(ppu, kSubRow, kSubCol + i) != (0x1c00 | (kSubTiles + i)) ||

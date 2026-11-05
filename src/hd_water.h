@@ -28,8 +28,10 @@ bool HdWater_IsFlood(int pos);
 // fine ha ancora gli attributi della stanza di prima. wx, wy: punto del
 // mondo (nello scorrimento fra due stanze conta in quale delle due e')
 uint8 HdWater_DungAttr(int i, int wx, int wy);
-// Da chiamare una volta per frame prima di HdWater_DungAttr (HdFx_MarkWater)
+// Da chiamare una volta per frame prima di HdWater_DungAttr / HdWater_AttrTable
+// (zelda_rtl.c, prima degli effetti)
 void HdWater_PrepareAttrs(void);
+const uint8 *HdWater_AttrTable(void);
 // Vasche blu dentro le case (caselle BG2 0x1a0-0x1a3, 0x194-0x195 con la
 // palette 4): per il gioco sono muro (0x02), l'acqua HD le riempie. pos come
 // HdWater_IsFlood; c (0xRRGGBB): solo i pixel blu dell'interno sono acqua

@@ -132,6 +132,7 @@ void Map16ToMap8(const uint8 *src, int r20);
 void OverworldCopyMap16ToBuffer(const uint8 *src, uint16 r20, int r14, uint16 *r10);
 void MirrorBonk_RecoverChangedTiles();
 void DecompressEnemyDamageSubclasses();
+void Overworld_ApplyGbaDamage(bool on);
 int Decompress_bank02(uint8 *dst, const uint8 *src);
 uint8 Overworld_ReadTileAttribute(uint16 x, uint16 y);
 void Overworld_SetFixedColAndScroll();

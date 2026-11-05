@@ -19,6 +19,9 @@ enum {
 };
 // Scrive l'intestazione a partire da dst (n caselle)
 void HudIt_DrawLabel(uint16 *dst, int label);
+// Lettera del carattere piccolo delle intestazioni (5 righe, '#' acceso;
+// solo maiuscole, punto, apostrofo e spazio), NULL se manca
+const char *const *HudIt_SmallGlyph(char c);
 
 // Abilita' del riquadro AZIONE (0 ALZA, 1 LEGGI, 2 PARLA, 3 TIRA, 4 CORRI,
 // 5 NUOTA) nella riga di 5 caselle dst; level e' il livello di ALZA (1-3);

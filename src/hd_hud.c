@@ -353,33 +353,6 @@ static void DrawSmallText(Canvas *cv, int x, int y, const char *s, uint32 color)
   }
 }
 
-// "1/2" della barra della magia: caratteri 4x6, alti quanto l'interno della
-// barra (il contorno scuro cade sul bordo esterno)
-enum { kMagicTextW = 3 * 4 + 2 };
-
-static void DrawMagicText(Canvas *cv, int x, int y) {
-  static const uint8 kGlyphs[3][6] = {
-    { 2, 6, 2, 2, 2, 7 },     // 1
-    { 1, 1, 2, 4, 8, 8 },     // /
-    { 6, 9, 1, 2, 4, 15 },    // 2
-  };
-  for (int pass = 0; pass < 2; pass++)
-    for (int i = 0; i < 3; i++)
-      for (int r = 0; r < 6; r++)
-        for (int c = 0; c < 4; c++) {
-          if (!(kGlyphs[i][r] >> (3 - c) & 1))
-            continue;
-          int px = x + i * 5 + c, py = y + r;
-          if (pass == 0) {
-            for (int dy = -1; dy <= 1; dy++)
-              for (int dx = -1; dx <= 1; dx++)
-                Px(cv, px + dx, py + dy, 0x101010);
-          } else {
-            Px(cv, px, py, 0xf8f8f8);
-          }
-        }
-}
-
 #include "hd_hud_buttons.h"
 
 // Un'immagine ARGB di hd_hud_buttons.h (tasti o dorsali)
@@ -690,13 +663,20 @@ void HdHud_Draw(uint8 *pixels, int pitch, int width, int height, int scale) {
   TileFirstPixel(0x24A0, &heart_row, &heart_col);
   int top = y0 + heart_row, margin = x0 + heart_col;
 
-  // --- Magia: barra larga quanto 10 cuori, alta 8, con 1/2 o 1/4 al centro
+  // --- Magia: barra alta 8, larga quanto 10 cuori con la magia potenziata
+  // e la meta' con quella normale
   {
-    int bx = x0, by = y0 + rows * 8 + 2, bw = 79, bh = 8;
-    int iw = bw - 4, fill = (link_magic_power * iw + 0x7f) / 0x80;
+    // il verde comincia e finisce sui bordi dei cuori (10 cuori = 79 px:
+    // 8 per cuore, l'ultimo largo 7); il contorno sporge di 2 px per lato
+    int iw = link_magic_consumption >= 1 ? 79 : 40;
+    int bx = margin - 2, by = y0 + rows * 8 + 4, bw = iw + 4, bh = 8;
+    int fill = (link_magic_power * iw + 0x7f) / 0x80;
     if (fill > iw) fill = iw;
     for (int y = 0; y < bh; y++)
       for (int x = 0; x < bw; x++) {
+        // angoli appena arrotondati: il pixel dell'angolo resta il gioco
+        if ((x == 0 || x == bw - 1) && (y == 0 || y == bh - 1))
+          continue;
         uint32 col;
         bool outer = y == 0 || y == bh - 1 || x == 0 || x == bw - 1;
         bool inner = y == 1 || y == bh - 2 || x == 1 || x == bw - 2;
@@ -710,9 +690,6 @@ void HdHud_Draw(uint8 *pixels, int pitch, int width, int height, int scale) {
           col = 0x100c08;
         Px(&cv, bx + x, by + y, col);
       }
-    // come il gioco originale: "1/2" anche con il consumo a 1/4
-    if (link_magic_consumption >= 1)
-      DrawMagicText(&cv, bx + (bw - kMagicTextW) / 2, by + 1);
   }
 
   // --- Tasti: il punto piu' alto a filo con i cuori, il piu' a destra con
@@ -836,10 +813,30 @@ static bool ModernTextAlphabet(void) {
          StringEqualsNoCase(l, "redux");
 }
 
-// dialoghi (14/2) e menu Continua / Salva ed esci aperto con SELECT (14/11)
+// Racconto dell'intro (modulo 0x14): attivo finche' il testo originale e'
+// davvero sullo schermo (caselle del testo 0x180+ nel riquadro di BG3), non
+// secondo la scena: nelle dissolvenze prima del cambio scena il gioco e' gia'
+// in un altro stato e il testo originale si vedeva ancora. Non nella mappa
+// del mondo (modo 7, niente BG3)
+static bool MtIntroText(void) {
+  if (main_module_index != 20 || !(TM_copy & 4) || (BGMODE_copy & 7) == 7)
+    return false;
+  const uint16 *vram = g_zenv.ppu->vram;
+  for (int r = 0; r < kMtBoxH; r++)
+    for (int c = 0; c < kMtBoxW; c++) {
+      int t = vram[(text_msgbox_topleft + r * 32 + c) & 0x7fff] & 0x3ff;
+      if (t >= 0x180 && t < 0x180 + 126)
+        return true;
+    }
+  return false;
+}
+
+// dialoghi (14/2), menu Continua / Salva ed esci aperto con SELECT (14/11) e
+// testo dell'intro
 bool HdText_ModernActive(void) {
-  return g_config.modern_text && main_module_index == 14 &&
-         (submodule_index == 2 || submodule_index == 11) && ModernTextAlphabet();
+  return g_config.modern_text && ModernTextAlphabet() &&
+         (main_module_index == 14 && (submodule_index == 2 || submodule_index == 11) ||
+          MtIntroText());
 }
 
 static void MtClearLine(int line) {
@@ -1010,6 +1007,14 @@ static int GameGlyphWidth(int c) {
   return (unsigned)c < widths.size ? IntMin(widths.ptr[c], 8) : 0;
 }
 
+int HdText_ModernGlyph(int c, const uint16 **bits) {
+  if ((unsigned)c < kModernTextGlyphs && kModernTextWidth[c]) {
+    *bits = kModernTextFont[c];
+    return kModernTextWidth[c];
+  }
+  return 0;
+}
+
 static int MtAdvance(int c) {
   if (c == 74)
     return 8;  // le due meta' della faccia di Link sono attaccate
@@ -1103,7 +1108,8 @@ void HdText_Draw(uint8 *pixels, int pitch, int width, int height, int scale) {
   Canvas cv = { pixels, pitch, width / scale, height / scale, scale };
   MtRebuild();
   int bri = g_hud_bri;
-  g_hud_bri = 15;
+  // intro: il testo segue le dissolvenze delle scene
+  g_hud_bri = main_module_index == 20 ? (g_zenv.ppu->forcedBlank ? 0 : g_zenv.ppu->brightness) : 15;
   // riquadro originale (come HdText_GetRect): la fascia sta al centro in
   // orizzontale e a filo del suo bordo esterno (sotto o sopra, come il gioco)
   Ppu *ppu = g_zenv.ppu;
@@ -1121,7 +1127,11 @@ void HdText_Draw(uint8 *pixels, int pitch, int width, int height, int scale) {
   Text_MeasureMessage(MtAdvance, &lines, &first);
   if (mt_base_len[0] | mt_base_len[1] | mt_base_len[2])
     first = 0;
-  int w = IntMax(max_w - 1, 40) + 2 * kMtPadX, h = kMtLines * kMtPitch - 3 + 2 * kMtPadY;
+  // intro: righe alte come quelle originali (16 pixel), il testo occupa lo
+  // stesso spazio e scorre alla stessa altezza; lettere al centro della riga
+  bool intro = main_module_index == 20;
+  int lp = intro ? 16 : kMtPitch, yoff = intro ? 3 : 0;
+  int w = IntMax(max_w - 1, 40) + 2 * kMtPadX, h = kMtLines * lp - 3 + 2 * kMtPadY;
   int x = bx + kMtBoxW * 4 - w / 2;
   int y = (off >> 5) >= 16 ? by + kMtBoxH * 8 - 2 - h : by + 2;
   // senza fascia (telepatia) la prima riga sta dove comincia il testo originale
@@ -1150,10 +1160,10 @@ void HdText_Draw(uint8 *pixels, int pitch, int width, int height, int scale) {
     }
   }
   // righe: durante lo scorrimento salgono insieme al testo del gioco
-  int ty = y + (g_mt_border ? (h - ((lines - first) * kMtPitch - 3)) / 2 - first * kMtPitch : kMtPadY) - (byte_7E1CDF & 0xf) * kMtPitch / 16;
+  int ty = y + yoff + (g_mt_border ? (h - ((lines - first) * lp - 3)) / 2 - first * lp : kMtPadY) - (byte_7E1CDF & 0xf) * lp / 16;
   int clip0 = g_mt_border ? y + 2 : y, clip1 = g_mt_border ? y + h - 2 : y + h;
   for (int i = 0; i < kMtLines; i++)
-    DrawModernLine(&cv, x + kMtPadX, ty + i * kMtPitch, i, clip0, clip1);
+    DrawModernLine(&cv, x + kMtPadX, ty + i * lp, i, clip0, clip1);
   // triangolo bianco in basso al centro, sul bordo: il messaggio aspetta un
   // tasto (compare quando il testo e' tutto visibile, e va su e giu')
   if (Text_WaitingForKey() && !HdText_Revealing()) {

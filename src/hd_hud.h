@@ -30,6 +30,9 @@ void HdText_BeforeRender(Ppu *ppu);
 void HdText_AfterRender(Ppu *ppu);
 // true mentre un dialogo e' mostrato con il testo moderno
 bool HdText_ModernActive(void);
+// Simbolo c del font del testo moderno (9 righe di bit, il bit alto della
+// larghezza a sinistra): larghezza, 0 se il simbolo e' quello del gioco
+int HdText_ModernGlyph(int c, const uint16 **bits);
 // Disegna il dialogo nel frame (come HdHud_Draw)
 void HdText_Draw(uint8 *pixels, int pitch, int width, int height, int scale);
 

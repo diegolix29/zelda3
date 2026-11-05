@@ -42,7 +42,7 @@ static struct {
   int scroll_t;       // frame di scorrimento gia' fatti
   int steps_total;    // passi di scorrimento di tutta la transizione
   int cam_start, cam_end;
-  float b0x, b0y;     // spostamento della telecamera fluida a inizio transizione
+  float b0x, b0y;     // spostamento della vista a inizio transizione
   int bt;
 } s;
 
@@ -173,7 +173,7 @@ bool HdTrans_Update(int prev_dx, int prev_dy, int *bias_x, int *bias_y) {
   s.last_cam = cam;
   *(s.axis ? bias_y : bias_x) = bias;
 
-  // la telecamera fluida torna a zero in 10 frame invece che di colpo
+  // lo spostamento della vista di prima torna a zero in 10 frame invece che di colpo
   float k = s.bt < 10 ? 1.0f - (s.bt + 1) / 10.0f : 0;
   s.bt++;
   *bias_x += Round(s.b0x * k);

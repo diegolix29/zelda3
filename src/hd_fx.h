@@ -60,6 +60,13 @@ static inline int HdFx_GameGlyphPixel(const uint8 *font, int c, int row, int col
 
 // Colore (0-15) di un pixel di una tile 4bpp: p01 e p23 sono le due parole
 // della riga (piani 0-1 e 2-3, come nella VRAM), bit = 7 - colonna
+// Indirizzo in VRAM della casella (tx, ty) di 0..63 nella mappa di uno strato
+// (BgLayer *bg): mappe da 32x32 caselle affiancate come dicono Wider/Higher
+#define HdFx_VramMapAdr(bg, tx, ty) \
+  ((uint16)((bg)->tilemapAdr + (((ty) & 31) << 5 | ((tx) & 31)) + \
+            (((tx) & 32) && (bg)->tilemapWider ? 0x400 : 0) + \
+            (((ty) & 32) && (bg)->tilemapHigher ? ((bg)->tilemapWider ? 0x800 : 0x400) : 0)))
+
 static inline int HdFx_Pixel4bpp(uint16 p01, uint16 p23, int bit) {
   return (p01 >> bit & 1) | (p01 >> (8 + bit) & 1) << 1 | (p23 >> bit & 1) << 2 | (p23 >> (8 + bit) & 1) << 3;
 }
@@ -76,9 +83,6 @@ void HdFx_AfterLight(uint8 *pixels, int pitch, int width, int height, int bias_x
 int HdFx_SceneModule(void);
 // Morte di Link con il mondo ancora (o di nuovo) sullo schermo
 bool HdFx_DeathShowsWorld(void);
-// Gioco in vista ma fermo sotto menu, dialoghi, pozioni, dissolvenze...
-// (HdFx_SceneModule): telecamere e vista non si muovono
-bool HdFx_GameHeldInView(void);
 // Si gioca all'aperto (9/0): niente menu, transizioni o scene
 bool HdFx_LiveOverworld(void);
 // Una partita e' caricata: non titolo, scelta del file o dimostrazione

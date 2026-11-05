@@ -20,6 +20,9 @@ void HdWorld_ClampView(int *cam_x, int *cam_y);
 void HdWorld_Composite(uint8 *pixels, int pitch, int width, int height);
 // Vero se il punto del mondo e' dentro l'area corrente
 bool HdWorld_InsideCurrentArea(int wx, int wy);
+// Disegna in pix (w x h, 0x00RRGGBB) il pezzo di mondo (world 0 chiaro, 0x40
+// oscuro) dal punto (x0, y0): viste dalle stanze sopra il mondo (hd_pit.c)
+bool HdWorld_DrawWorldRect(int world, int x0, int y0, int w, int h, uint32 *pix);
 // Vero se in questo frame tutto il fondale viene dalle immagini delle aree
 // (passaggio fra aree): gli strati del gioco li' sono solo da coprire
 bool HdWorld_BackgroundFromImages(void);

@@ -4,7 +4,7 @@
 // suoi bordi. Qui la logica del gioco resta intatta:
 // - la telecamera "libera" segue Link con la stessa regola del gioco ma senza
 //   fermarsi ai bordi; la differenza rispetto alla telecamera del gioco viene
-//   applicata solo al disegno, come per la telecamera fluida;
+//   applicata solo al disegno;
 // - le aree vicine vengono disegnate in immagini: si salva lo stato (RAM e
 //   memoria video), si carica l'area con le funzioni del gioco (grafica,
 //   colori, mappa delle caselle), si disegna il terreno e si ripristina tutto;
@@ -683,6 +683,12 @@ void HdWorld_SpriteBegin(int k) {
   g_sight_k = -1;
   g_sight_lost = false;
   if (!sprite_state[k] || !SightOn(k))
+    return;
+  // chi sta cadendo, affogando, esplodendo, morendo o bruciando (stati 1-7)
+  // non guarda Link: un soldato ucciso mentre inseguiva restava in stato 3/4
+  // e perdendo Link riceveva sprite_delay_main 160, che allunga la morte
+  // (lo sbuffo di SpriteDeath_DrawPoof ricomincia ogni 32 e moriva 4 volte)
+  if (sprite_state[k] < 8)
     return;
   g_sight_k = k;
   g_sight_px = SpriteWorldX(k), g_sight_py = SpriteWorldY(k);
@@ -1986,6 +1992,37 @@ static void RenderArea(AreaImage *img, int head) {
   memcpy(ppu->vram, g_saved_vram, sizeof(g_saved_vram));
 }
 
+// Disegna in pix (w x h, 0x00RRGGBB) il pezzo di mondo (0 chiaro, 0x40
+// oscuro) che comincia nel punto (x0, y0), componendo le aree che tocca come
+// le disegna il mondo continuo (RenderArea, che salva e rimette RAM e VRAM: va
+// bene anche dentro un labirinto). Fuori dalla mappa resta nero. Per le viste
+// dalle stanze sopra il mondo (hd_pit.c)
+bool HdWorld_DrawWorldRect(int world, int x0, int y0, int w, int h, uint32 *pix) {
+  memset(pix, 0, (size_t)w * h * sizeof(uint32));
+  for (int sq = 0; sq < 64; sq++) {
+    if (Overworld_AreaHead(sq) != sq)
+      continue;  // un'area grande una volta sola (dalla sua testa)
+    int head = sq | world, ax, ay, as;
+    AreaRect(head, &ax, &ay, &as);
+    int lx = IntMax(x0, ax), ly = IntMax(y0, ay);
+    int rx = IntMin(x0 + w, ax + as), ry = IntMin(y0 + h, ay + as);
+    if (lx >= rx || ly >= ry)
+      continue;
+    AreaImage img = { 0 };
+    img.size = as, img.x = ax, img.y = ay;
+    img.pix = malloc((size_t)as * as * sizeof(uint32));
+    if (!img.pix)
+      return false;
+    RenderArea(&img, head);
+    for (int y = ly; y < ry; y++)
+      for (int x = lx; x < rx; x++)
+        pix[(y - y0) * w + (x - x0)] = img.pix[(y - ay) * as + (x - ax)] & 0xffffff;
+    free(img.pix);
+    free(img.anim);
+  }
+  return true;
+}
+
 static bool IsCached(int head) {
   uint32 key = AreaKey(head), ver = StateVersion(head);
   for (int i = 0; i < kMaxImages; i++)
@@ -2076,6 +2113,7 @@ typedef struct OverlayCtx {
   bool on;     // strato sommato a meta' a tutto (nebbia, pioggia, nuvole)
   bool sky;    // strato sommato solo allo sfondo (panorama della montagna)
   bool half;   // somma dimezzata
+  int blend;   // al posto della meta': fusione GBA in sedicesimi (Ppu.gbaBlend)
   int x0, y0;  // posizione nello strato del pixel 0,0 dello schermo
 } OverlayCtx;
 
@@ -2088,6 +2126,7 @@ static void OverlayBegin(OverlayCtx *o, int ext) {
   o->on = sub && (ppu->mathEnabled & 2) && (ppu->halfColor || Overworld_RainActive());
   o->sky = sub && !o->on && (ppu->mathEnabled & 0x20);
   o->half = ppu->halfColor;
+  o->blend = ppu->gbaBlend > 16 ? 16 : ppu->gbaBlend;
   o->x0 = ppu->bgLayer[0].hScroll + ppu->bgBiasX - ext;
   o->y0 = ppu->bgLayer[0].vScroll + ppu->bgBiasY + 1;
   // nebbia del Bosco Perduto migliorata: la disegna hd_fx.c su tutto
@@ -2102,9 +2141,7 @@ static int OverlayColor(const OverlayCtx *o, int sx, int sy) {
   const BgLayer *bg = &ppu->bgLayer[0];
   int px = (o->x0 + sx) & 0x3ff, py = (o->y0 + sy) & 0x3ff;
   int tx = px >> 3 & 63, ty = py >> 3 & 63;
-  uint16 adr = bg->tilemapAdr + ((ty & 31) << 5 | (tx & 31));
-  if ((tx & 32) && bg->tilemapWider) adr += 0x400;
-  if ((ty & 32) && bg->tilemapHigher) adr += bg->tilemapWider ? 0x800 : 0x400;
+  uint16 adr = HdFx_VramMapAdr(bg, tx, ty);
   uint16 e = ppu->vram[adr & 0x7fff];
   int row = (e & 0x8000) ? 7 - (py & 7) : (py & 7);
   int bit = (e & 0x4000) ? (px & 7) : 7 - (px & 7);
@@ -2164,6 +2201,10 @@ static inline uint32 OverlayBlend(const OverlayCtx *o, uint32 c, int sx, int sy)
   // resto dello schermo andava al nero (aprendo e chiudendo la mappa)
   oc = Dim(oc);
   int r = oc >> 16 & 255, g = oc >> 8 & 255, b = oc & 255;
+  if (o->blend) {  // lampi della pioggia con Meno flash GBA
+    r = ((c >> 16 & 255) + r) * o->blend >> 4, g = ((c >> 8 & 255) + g) * o->blend >> 4, b = ((c & 255) + b) * o->blend >> 4;
+    return (c & 0xff000000) | (r > 255 ? 255 : r) << 16 | (g > 255 ? 255 : g) << 8 | (b > 255 ? 255 : b);
+  }
   return (c & 0xff000000) | (((c >> 16 & 255) + r) >> 1) << 16 | (((c >> 8 & 255) + g) >> 1) << 8 | ((c & 255) + b) >> 1;
 }
 

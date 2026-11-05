@@ -118,6 +118,11 @@ void HdWater_PrepareAttrs(void) {
   g_attr_cached = true;
 }
 
+// Tabella degli attributi finita della stanza caricata (anche luci, buche...)
+const uint8 *HdWater_AttrTable(void) {
+  return g_attr_cached ? g_attr_cache : dung_bg2_attr_table;
+}
+
 uint8 HdWater_DungAttr(int i, int wx, int wy) {
   i &= 0x1fff;
   int room = (wy >> 9 & 15) << 4 | (wx >> 9 & 15);
@@ -704,20 +709,55 @@ static int SpoutIn(const uint16 *m, int pos) {
   return 0;
 }
 
-// bocche e getti sul pavimento (BG2) o sul piano di sopra (BG1, stanza 0x66)
+// Nei passaggi fra due stanze dung_bg1/dung_bg2 sono gia' della stanza
+// nuova: per quella che si lascia le caselle si leggono dalle mappe in VRAM,
+// cioe' da quello che c'e' sullo schermo (64x64 caselle = 512 pixel del mondo,
+// come gli indici di dung_bg2). Rifatte a ogni fotogramma solo nei passaggi
+static uint16 g_vmap[2][64 * 64];  // [0] BG1, [1] BG2
+static bool g_vmap_ok;
+
+static void CopyVramMaps(void) {
+  Ppu *ppu = g_zenv.ppu;
+  for (int n = 0; n < 2; n++) {
+    const BgLayer *bg = &ppu->bgLayer[n];
+    for (int ty = 0; ty < 64; ty++)
+      for (int tx = 0; tx < 64; tx++) {
+        uint16 adr = HdFx_VramMapAdr(bg, tx, ty);
+        g_vmap[n][ty * 64 + tx] = ppu->vram[adr & 0x7fff];
+      }
+  }
+}
+
+// bocche e getti sul pavimento (BG2) o sul piano di sopra (BG1, stanza 0x66);
+// nella stanza che si lascia (passaggi) dalle mappe in VRAM: prima la cascata
+// tornava quella del gioco appena si caricava la stanza nuova
 static int SpoutAt(int wx, int wy) {
-  if (!InLoadedRoom(wx, wy))
-    return 0;
   int pos = ((wy & 0x1f8) << 3) + ((wx & 0x1f8) >> 3);
+  if (!InLoadedRoom(wx, wy)) {
+    if (!g_vmap_ok)
+      return 0;
+    int v = SpoutIn(g_vmap[1], pos);
+    return v ? v : SpoutIn(g_vmap[0], pos);
+  }
   int v = SpoutIn(dung_bg2, pos);
   return v ? v : SpoutIn(dung_bg1, pos);
 }
 
-static bool RoomHasSpouts(void) {
-  for (int pos = 64; pos < 0x2000; pos++)
-    if ((pos & 0xfff) >= 64 && IsSpoutTile(dung_bg2[pos], 0x1b3) && IsSpoutTile(dung_bg2[pos - 64], 0x1b2))
+static bool MapHasSpouts(const uint16 *m, int n) {
+  for (int pos = 64; pos < n; pos++)
+    if ((pos & 0xfff) >= 64 && IsSpoutTile(m[pos], 0x1b3) && IsSpoutTile(m[pos - 64], 0x1b2))
       return true;
   return false;
+}
+
+static bool RoomHasSpouts(void) {
+  g_vmap_ok = false;
+  if (HdFx_DungeonPassing()) {
+    CopyVramMaps();
+    g_vmap_ok = true;
+  }
+  return MapHasSpouts(dung_bg2, 0x2000) ||
+         (g_vmap_ok && (MapHasSpouts(g_vmap[1], 64 * 64) || MapHasSpouts(g_vmap[0], 64 * 64)));
 }
 
 // Nei labirinti: acqua bassa (0x09) o alta (0x08) nel punto del mondo, dal
@@ -1784,9 +1824,7 @@ static int BgUnderSprite(int x, int y, int ext, int *layer, int *wx, int *wy) {
     // la riga 0 dello schermo e' la riga 1 del fondale (come HdWorld_Composite)
     int px = (x - ext + hofs + ppu->bgBiasX) & 0x3ff, py = (y + 1 + vofs + ppu->bgBiasY) & 0x3ff;
     int tx = px >> 3 & 63, ty = py >> 3 & 63;
-    uint16 adr = bg->tilemapAdr + ((ty & 31) << 5 | (tx & 31));
-    if ((tx & 32) && bg->tilemapWider) adr += 0x400;
-    if ((ty & 32) && bg->tilemapHigher) adr += bg->tilemapWider ? 0x800 : 0x400;
+    uint16 adr = HdFx_VramMapAdr(bg, tx, ty);
     uint16 e = ppu->vram[adr & 0x7fff];
     int row = (e & 0x8000) ? 7 - (py & 7) : (py & 7);
     int bit = (e & 0x4000) ? (px & 7) : 7 - (px & 7);
@@ -2132,9 +2170,14 @@ static void GrowBluishWater(int w, int h) {
 // d'acqua 0x1b0/0x1b1 con la palette 7 sono animate dal gioco come acqua che
 // scorre verso sinistra (a destra se ribaltate). -1 sinistra, 1 destra, 0 ferma
 static int FlowAt(int wx, int wy) {
-  if (!InLoadedRoom(wx, wy))
+  int pos = ((wy & 0x1f8) << 3) + ((wx & 0x1f8) >> 3);
+  uint16 e;
+  if (InLoadedRoom(wx, wy))
+    e = dung_bg2[0x1000 + pos];
+  else if (g_vmap_ok)
+    e = g_vmap[0][pos];  // stanza che si lascia: piano di sopra dalla VRAM
+  else
     return 0;
-  uint16 e = dung_bg2[0x1000 + ((wy & 0x1f8) << 3) + ((wx & 0x1f8) >> 3)];
   if ((e >> 10 & 7) != 7 || ((e & 0x3ff) != 0x1b0 && (e & 0x3ff) != 0x1b1))
     return 0;
   return e & 0x4000 ? 1 : -1;
@@ -2155,7 +2198,9 @@ typedef struct PaintJob {
 enum { kNoFloor = 0xffffffff };
 static uint32 FloorColor(int wx, int wy) {
   Ppu *ppu = g_zenv.ppu;
-  uint16 e = dung_bg2[((wy & 0x1f8) << 3) + ((wx & 0x1f8) >> 3)];
+  int pos = ((wy & 0x1f8) << 3) + ((wx & 0x1f8) >> 3);
+  // stanza che si lascia (passaggi): il pavimento e' quello in VRAM
+  uint16 e = !InLoadedRoom(wx, wy) && g_vmap_ok ? g_vmap[1][pos] : dung_bg2[pos];
   if ((e >> 10 & 7) == 7 && (e & 0x3f0) == 0x1b0)
     return kNoFloor;
   int r = e & 0x8000 ? 7 - (wy & 7) : wy & 7, bit = e & 0x4000 ? wx & 7 : 7 - (wx & 7);

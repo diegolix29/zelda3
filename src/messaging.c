@@ -1032,6 +1032,7 @@ void FluteMenu_HandleSelection() {  // 8ab78b
 
   uint16 ybak = link_y_coord_spexit;
   uint16 xbak = link_x_coord_spexit;
+  uint8 sel_flags = GbaFlash_FluteNumberFlags();  // numero scelto che lampeggia
   for (int i = 7; i >= 0; i--) {
     bird_travel_x_lo[i] = kBirdTravel_x_lo[i];
     bird_travel_x_hi[i] = kBirdTravel_x_hi[i];
@@ -1042,14 +1043,14 @@ void FluteMenu_HandleSelection() {  // 8ab78b
     link_y_coord_spexit = kBirdTravel_y_hi[i] << 8 | kBirdTravel_y_lo[i];
 
     if (WorldMap_CalculateOamCoordinates(&pt))
-      WorldMap_AddSprite(i, 0, (i == birdtravel_var1[0]) ? 0x30 + (frame_counter & 6) : 0x32, kBirdTravel_tab1[i], pt.x, pt.y);
+      WorldMap_AddSprite(i, 0, (i == birdtravel_var1[0]) ? sel_flags : 0x32, kBirdTravel_tab1[i], pt.x, pt.y);
   }
   // Il 9 non c'e' tra le cifre della mappa: e' il 6 capovolto
   if (BirdTravel9_Open()) {
     link_x_coord_spexit = kBirdTravel9_x;
     link_y_coord_spexit = kBirdTravel9_y;
     if (WorldMap_CalculateOamCoordinates(&pt))
-      WorldMap_AddSprite(8, 0, ((birdtravel_var1[0] == 8) ? 0x30 + (frame_counter & 6) : 0x32) | 0xc0, kBirdTravel_tab1[5], pt.x, pt.y);
+      WorldMap_AddSprite(8, 0, ((birdtravel_var1[0] == 8) ? sel_flags : 0x32) | 0xc0, kBirdTravel_tab1[5], pt.x, pt.y);
   }
   link_x_coord_spexit = xbak;
   link_y_coord_spexit = ybak;
@@ -3221,7 +3222,9 @@ void RenderText_Draw_MessageCharacters() {  // 8ec984
   // testo moderno: il gioco scrive subito tutte le lettere e la comparsa
   // (1,25 lettere per fotogramma, hd_hud.c) da' il ritmo
   bool modern = HdText_ModernActive();
-  bool fast = Text_WantFast() || modern;
+  // nell'intro le lettere vanno al ritmo del gioco: le scene sono a tempo
+  bool intro = modern && main_module_index == 20;
+  bool fast = Text_WantFast() || modern && !intro;
   if (modern)
     HdText_Tick();
 RESTART:;
@@ -3231,7 +3234,7 @@ RESTART:;
   // testo moderno: scorrimento, scelte e attese del tasto aspettano che le
   // lettere siano comparse; un tasto premuto intanto le mostra tutte
   int k = TEXTCMD_CMD(cmd);
-  if (modern && HdText_Revealing() && k != kTextCmd_IsLetter && k != kTextCmd_Wait &&
+  if (modern && !intro && HdText_Revealing() && k != kTextCmd_IsLetter && k != kTextCmd_Wait &&
       k != kTextCmd_ScrollSpd && k != kTextCmd_Sound && k != kTextCmd_Speed && k != kTextCmd_1 &&
       k != kTextCmd_2 && k != kTextCmd_3) {
     if (filtered_joypad_H | filtered_joypad_L)

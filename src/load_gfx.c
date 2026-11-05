@@ -2248,6 +2248,82 @@ void GbaFlash_DimHold(uint8 v) {
     g_gba_dim_timer = v;
 }
 
+uint16 GbaFlash_StepColor(uint16 c, uint16 t) {
+  for (int sh = 0; sh < 15; sh += 5) {
+    int a = c >> sh & 31, b = t >> sh & 31;
+    a += a < b ? 1 : a > b ? -1 : 0;
+    c = (c & ~(31 << sh)) | a << sh;
+  }
+  return c;
+}
+
+uint16 GbaFlash_MixColor(uint16 a, uint16 b, int f, int n) {
+  uint16 c = 0;
+  for (int sh = 0; sh < 15; sh += 5) {
+    int x = a >> sh & 31, y = b >> sh & 31;
+    c |= (x + ((y - x) * f + (y > x ? n / 2 : -n / 2)) / n) << sh;
+  }
+  return c;
+}
+
+// Il GBA tiene fase e contatore nella sua RAM e sceglie l'attesa con un suo
+// byte (0x996 & 3, tabella 0x82a776e); qui stanno fuori dalla RAM del gioco e
+// l'attesa si sceglie con frame_counter, senza toccare i numeri casuali
+static int GbaFlash_Lightning(GbaLightning *l) {
+  static const uint8 kWaits[4] = {120, 160, 80, 200};
+  int act = l->phase;
+  if (l->phase == kGbaLightning_Rise) {
+    if (++l->count >= 0x20)
+      l->phase = kGbaLightning_Fall, l->count = 0;
+  } else if (l->phase == kGbaLightning_Fall) {
+    if (++l->count > 0x24)
+      l->phase = kGbaLightning_Wait, l->count = kWaits[frame_counter & 3];
+  } else if (--l->count == 0) {
+    l->phase = kGbaLightning_Rise;
+  }
+  return act;
+}
+
+int GbaFlash_PaletteLightning(GbaLightning *l, const uint8 *idx, const uint16 *flash, int n, bool thunder) {
+  if (thunder && l->phase == kGbaLightning_Rise && l->count == 4)
+    sound_effect_1 = 54;
+  int act = GbaFlash_Lightning(l);
+  if (act != kGbaLightning_Wait) {
+    for (int i = 0; i < n; i++)
+      main_palette_buffer[idx[i]] = GbaFlash_StepColor(main_palette_buffer[idx[i]],
+          act == kGbaLightning_Rise ? flash[i] : aux_palette_buffer[idx[i]]);
+    flag_update_cgram_in_nmi++;
+  }
+  return act;
+}
+
+// Il GBA salta a 31 (oltre 16 vale 16: somma piena) a frame_counter 3, con il
+// tuono, e 92, e scende di 1 nei fotogrammi dispari fino a 10 (10/16 di
+// schermo e pioggia, un po' piu' chiaro della meta' dello SNES)
+static uint8 g_gba_rain_blend = 10;
+void GbaFlash_RainStep(void) {
+  if (frame_counter == 3)
+    sound_effect_1 = 54, g_gba_rain_blend = 31;
+  else if (frame_counter == 92)
+    g_gba_rain_blend = 31;
+  else if ((frame_counter & 1) && g_gba_rain_blend > 10)
+    g_gba_rain_blend--;
+  CGADSUB_copy = 0x72;
+}
+
+uint8 GbaFlash_RainBlend(void) {
+  return (enhanced_features0 & kFeatures0_DimFlashesGba) && main_module_index == 9 &&
+         Overworld_RainActive() ? g_gba_rain_blend : 0;
+}
+
+// SNES 0x30 + (frame_counter & 6): cambia palette ogni 2 fotogrammi. GBA:
+// palette 3 e quella normale ogni 16, accesa quando l'icona di Link e' nascosta
+uint8 GbaFlash_FluteNumberFlags(void) {
+  if (enhanced_features0 & kFeatures0_DimFlashesGba)
+    return (frame_counter & 0x10) ? 0x32 : 0x36;
+  return 0x30 + (frame_counter & 6);
+}
+
 void GbaFlash_Bolt(uint8 len) {
   g_gba_bolt_timer = g_gba_bolt_len = len;
 }

@@ -188,6 +188,11 @@ struct Ppu {
   // store 31 extra entries to remove the need for clamp
   uint8_t brightnessMult[32 + 31];
   uint8_t brightnessMultHalf[32 * 2];
+  // Fusione come il GBA (BLDALPHA con EVA = EVB = gbaBlend/16, al massimo 16):
+  // se non e' 0 prende il posto della somma a meta' (halfColor) fra schermo
+  // principale e secondario. Lampi della pioggia con Meno flash GBA
+  uint8_t gbaBlend, lastGbaBlend, lastGbaBlendBrightness;
+  uint8_t brightnessMultBlend[32 * 2];
   uint16_t cgram[0x100];
   uint8_t mosaicModulo[kPpuXPixels];
   uint32_t colorMapRgb[256];

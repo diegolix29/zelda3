@@ -202,6 +202,6 @@ static const ArtLinkTile kArtLinkTiles[188] = {
 };
 
 // kPalette_ArmorAndGloves: indice e colore cambiati
-static const uint16 kArtArmorColors[6][2] = { {5, 0x65e}, {7, 0x6fe}, {20, 0x65e}, {22, 0x6fe}, {35, 0x65e}, {37, 0x6fe} };
+static const uint16 kArtArmorColors[6][2] = { {5, 0x1efa}, {7, 0x2f5c}, {20, 0x1efa}, {22, 0x2f5c}, {35, 0x1efa}, {37, 0x2f5c} };
 static const uint16 kArtAgahnimPal[7] = { 0x7fff, 0x6fd, 0x7272, 0x5d8d, 0x14a5, 0x219d, 0x8d7 };
 #define kArtKingOamFlags 0x37

@@ -110,9 +110,7 @@ int HdFx_OwShownEntry(int wx, int wy) {
     return -1;
   const BgLayer *bg = &g_zenv.ppu->bgLayer[1];
   int tx = wx >> 3 & 63, ty = wy >> 3 & 63;
-  uint16 adr = bg->tilemapAdr + ((ty & 31) << 5 | (tx & 31));
-  if ((tx & 32) && bg->tilemapWider) adr += 0x400;
-  if ((ty & 32) && bg->tilemapHigher) adr += bg->tilemapWider ? 0x800 : 0x400;
+  uint16 adr = HdFx_VramMapAdr(bg, tx, ty);
   return g_zenv.ppu->vram[adr & 0x7fff];
 }
 
@@ -842,17 +840,6 @@ bool HdFx_DeathShowsWorld(void) {
   return main_module_index == 18 && (TM_copy & 3) != 0;
 }
 
-// Il gioco e' in vista ma fermo sotto qualcos'altro (menu, dialoghi, pozioni,
-// preghiera, cerchio che si chiude, Mano e buche che si scuriscono, vittorie,
-// Salva ed esci): la vista resta dov'e'. Non vale quando arriva una scena
-// nuova (cerchio che si apre, 17 dalla fase 3): li' la vista riparte
-bool HdFx_GameHeldInView(void) {
-  int m = main_module_index, scene = HdFx_SceneModule();
-  if (m == 7 || m == 9 || m == 11 || m == 16 || (m == 17 && subsubmodule_index >= 3))
-    return false;
-  return scene == 7 || scene == 9 || scene == 11;
-}
-
 bool HdFx_LiveOverworld(void) {
   return main_module_index == 9 && submodule_index == 0;
 }
@@ -886,7 +873,6 @@ void HdFx_MarkWater(uint8 *pixels, int pitch, int width, int height, int bias_x,
   // anche durante il cerchio di transizione e l'arrivo con l'Ocarina:
   // altrimenti lo shader dipingerebbe l'acqua per qualche fotogramma
   // 11: aree speciali all'aperto (Dominio di Zora, bosco della Spada Suprema...)
-  HdWater_PrepareAttrs();
   int mod = HdFx_SceneModule();
   if (mod != 7 && mod != 9 && mod != 11)
     return;

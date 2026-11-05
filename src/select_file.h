@@ -39,6 +39,8 @@ void FileSelect_DrawFairy(uint8 x, uint8 y);
 void Module04_NameFile();
 // Nome scritto con la tastiera (main.c): vero nella schermata del nome
 bool NameFile_IsTyping(void);
+// cursore della tastiera sullo schermo su una freccia o su FINE
+bool NameFile_CursorOnControl(void);
 // Un carattere ASCII da scrivere nel nome; '\b' cancella l'ultimo
 void NameFile_TypeChar(char c);
 void NameFile_EraseSave();

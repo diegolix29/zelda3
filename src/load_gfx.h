@@ -162,9 +162,34 @@ void Palette_LoadForFileSelect_Shield(int k, uint8 shield);
 void Palette_LoadAgahnim();
 void HandleScreenFlash();
 void Palette_ApplyDimFlashFloor(bool on);
+// ---------------------------------------------------------------------------
+// "Meno flash GBA" (kFeatures0_DimFlashesGba): tutti i comportamenti copiati
+// dalla versione GBA stanno in load_gfx.c, i punti del gioco li chiamano soltanto
 extern uint8 g_gba_dim_timer;
+// Sfondo che si scurisce poco a poco (Etere, telewarp, introduzione)
 void GbaFlash_DimStep(uint8 mask, uint8 min);
 void GbaFlash_DimHold(uint8 v);
+// Fulmini di Agahnim: lo sfondo si scurisce e si rischiara
 void GbaFlash_Bolt(uint8 len);
+// Colore c spostato di un passo (1 per canale a 5 bit) verso t, come il GBA
+uint16 GbaFlash_StepColor(uint16 c, uint16 t);
+// Colore fra a (f = 0) e b (f = n), canale per canale
+uint16 GbaFlash_MixColor(uint16 a, uint16 b, int f, int n);
+// Lampi a palette (stanza del secondo Agahnim 0x80abf64, Monte della Morte
+// oscuro 0x81329a0: stessa macchina e stessa tabella delle attese nel GBA):
+// i colori idx[] vanno di un passo per fotogramma verso flash[] per 32
+// fotogrammi, tornano verso quelli della stanza (aux) per 37, poi un'attesa di
+// 80-200 fotogrammi. Con thunder il tuono al quinto fotogramma della salita.
+// Ritorna kGbaLightning_Rise/Fall/Wait (cosa e' stato fatto ai colori)
+typedef struct GbaLightning { uint8 phase, count; } GbaLightning;
+enum { kGbaLightning_Rise, kGbaLightning_Fall, kGbaLightning_Wait };
+int GbaFlash_PaletteLightning(GbaLightning *l, const uint8 *idx, const uint16 *flash, int n, bool thunder);
+// Lampi della pioggia (prologo e area 0x70, 0x8074c4c): fusione come BLDALPHA
+// del GBA. GbaFlash_RainStep ogni fotogramma con la pioggia, GbaFlash_RainBlend
+// per la PPU (Ppu.gbaBlend, 0 = somma a meta' dello SNES)
+void GbaFlash_RainStep(void);
+uint8 GbaFlash_RainBlend(void);
+// Numero scelto nella mappa dell'uccello: attributi dello sprite (palette)
+uint8 GbaFlash_FluteNumberFlags(void);
 
 #endif // ZELDA3_LOAD_GFX_H_

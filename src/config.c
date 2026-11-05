@@ -442,6 +442,8 @@ static bool HandleIniConfig(int section, const char *key, char *value) {
       return ParseBool(value, &g_config.fx_button_hints);
     } else if (StringEqualsNoCase(key, "FxWhirlpoolGlow")) {
       return ParseBool(value, &g_config.fx_whirlpool);
+    } else if (StringEqualsNoCase(key, "FxPitDepth")) {
+      return ParseBool(value, &g_config.fx_pit);
     } else if (StringEqualsNoCase(key, "OfficialArtwork")) {
       return ParseBool(value, &g_config.official_artwork);
     } else if (StringEqualsNoCase(key, "TriforceTitle")) {
@@ -457,9 +459,6 @@ static bool HandleIniConfig(int section, const char *key, char *value) {
       return ParseBool(value, &g_config.hd_text);
     } else if (StringEqualsNoCase(key, "ModernText")) {
       return ParseBool(value, &g_config.modern_text);
-    } else if (StringEqualsNoCase(key, "SmoothCamera")) {
-      g_config.smooth_camera = (uint8)strtol(value, (char**)NULL, 10);
-      return true;
     }
   } else if (section == 2) {
     if (StringEqualsNoCase(key, "EnableAudio")) {
@@ -667,7 +666,7 @@ static bool ParseOneConfigFile(const char *filename, int depth) {
 // - cambio oggetti con L e R e tasti L e R per gli oggetti non insieme;
 // - mappa del mondo in HD e schermo largo solo con la PPU ottimizzata (il
 //   vecchio renderer disegna 256 pixel e lascia neri i lati);
-// - anche gli effetti HD, la telecamera fluida, la fluidita' oltre i 60 Hz, il
+// - anche gli effetti HD, la fluidita' oltre i 60 Hz, il
 //   mondo continuo e le transizioni rapide: lavorano sull'immagine sapendo da
 //   quale strato viene ogni pixel (HUD, sprite, acqua) e spostano la vista,
 //   cose che il vecchio renderer non fa;
@@ -708,11 +707,11 @@ static void ApplyConfigRules(void) {
     g_config.extended_aspect_ratio = 0;
     g_config.features0 &= ~(kFeatures0_ExtendScreen64 | kFeatures0_WidescreenVisualFixes |
                             kFeatures0_ContinuousWorld | kFeatures0_FastTransitions);
-    g_config.smooth_camera = 0;
     g_config.high_refresh = g_config.dynamic_light = false;
     g_config.fx_heat = g_config.fx_window_rays = g_config.fx_item_glow = g_config.fx_rain = false;
     g_config.fx_menu_blur = g_config.fx_sprite_shadows = g_config.fx_soft_iris = false;
     g_config.fx_button_hints = g_config.fx_water = g_config.fx_whirlpool = g_config.fx_fog = false;
+    g_config.fx_pit = false;
   }
   if (g_config.enable_msu)
     g_config.audio_freq = (g_config.enable_msu & kMsuEnabled_Opuz) ? 48000 : 44100;

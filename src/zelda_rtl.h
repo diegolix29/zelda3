@@ -28,7 +28,6 @@ typedef struct ZeldaEnv {
 } ZeldaEnv;
 extern ZeldaEnv g_zenv;
 extern int frame_ctr_dbg;
-extern int g_smooth_camera;
 extern float g_interp_alpha;
 void ZeldaUpdateCamera();
 extern int g_text_speed;

@@ -1064,7 +1064,9 @@ void Sprite_SimulateSoldier(int k, uint16 x, uint16 y, uint8 dir, uint8 flags, u
   sprite_flags3[k] = 16;
   sprite_obj_prio[k] = 0;
   sprite_oam_flags[k] = flags | 0x30;
-  sprite_type[k] = (flags == 9) ? 0x41 : 0x43;
+  // GBA: nell intro tutti i soldati hanno il forcone del soldato rosso
+  // (l arma dipende solo dal tipo, Guard_AnimateWeapon; il colore resta)
+  sprite_type[k] = (flags == 9 && !(enhanced_features0 & kFeatures0_GbaMinorFixes)) ? 0x41 : 0x43;
   sprite_flags2[k] = 7;
   int oam_idx = k * 8;
   oam_cur_ptr = 0x800 + oam_idx * 4;

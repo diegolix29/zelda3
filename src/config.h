@@ -71,7 +71,6 @@ typedef struct Config {
   uint8 msuvolume;
   uint32 features0;
   // Migliorie HD
-  uint8 smooth_camera;      // 0 = spenta, 1-3 = intensita'
   bool hd_text;
   bool modern_text;         // dialoghi con la fascia trasparente e il carattere del contatore
   bool high_refresh;
@@ -80,7 +79,7 @@ typedef struct Config {
   // fx_heat: braci da torce, bracieri, fuoco e lava, calore sopra la lava e
   // animazioni del fondale al chiuso a meta' velocita'
   bool fx_heat, fx_window_rays, fx_item_glow, fx_rain;
-  bool fx_menu_blur, fx_sprite_shadows, fx_soft_iris, fx_button_hints, fx_water, fx_whirlpool, fx_fog;
+  bool fx_menu_blur, fx_sprite_shadows, fx_soft_iris, fx_button_hints, fx_water, fx_whirlpool, fx_fog, fx_pit;
   // aspetto dei disegni ufficiali (hd_art.c): Agahnim rosso, re in rosso,
   // medaglione con la stella della versione giapponese; Link biondo a parte
   bool official_artwork, blond_link;

@@ -20,6 +20,7 @@
 #include "hd_menu.h"
 #include "hd_icegba.h"
 #include "hd_fx.h"
+#include "hd_pit.h"
 
 // todo: move to config
 static const uint16 kBossRooms[] = {
@@ -2676,6 +2677,7 @@ void Dungeon_LoadRoom() {  // 81873a
   } while (i != 0x120);
 
   dung_load_ptr_offs = 0x120;
+  HdPit_RoomLoaded();  // le caselle in dung_bg2 sono ora di questa stanza
 }
 
 void RoomDraw_DrawAllObjects(const uint8 *level_data) {  // 8188e4
@@ -8917,7 +8919,34 @@ void LayerEffect_Trinexx() {  // 8afeee
   dung_floor_y_vel = 0;
 }
 
+// Lampi lenti come su GBA (0x80abf64), con "Meno flash GBA" (GbaFlash_PaletteLightning):
+// il cielo (0x6F e 0x77) va al rosso 0x1A e torna. Il GBA accende i colori
+// 0x6D-0x6E del pavimento di colpo solo al culmine; qui seguono il cielo
+// (stessa frazione del suo rosso), cosi' pavimento e sfondo vanno insieme
+static GbaLightning g_agah2_lightning;
+static void LayerEffect_Agahnim2Gba(void) {
+  static const uint8 kIdx[1] = {0x6f};
+  static const uint16 kFlash[1] = {0x1a};
+  int act = GbaFlash_PaletteLightning(&g_agah2_lightning, kIdx, kFlash, 1, false);
+  if (act != kGbaLightning_Wait) {
+    main_palette_buffer[0x77] = main_palette_buffer[0x6f];  // come il GBA
+    // frazione del lampo: rosso del cielo da quello della stanza a 0x1A
+    int r0 = aux_palette_buffer[0x6f] & 31, n = 0x1a - r0;
+    int f = (main_palette_buffer[0x6f] & 31) - r0;
+    f = f < 0 ? 0 : f > n ? n : f;
+    if (n > 0) {
+      main_palette_buffer[0x6d] = GbaFlash_MixColor(aux_palette_buffer[0x6d], 0x1d59, f, n);
+      main_palette_buffer[0x6e] = GbaFlash_MixColor(aux_palette_buffer[0x6e], 0x25ff, f, n);
+    }
+  }
+  TS_copy = 2;
+}
+
 void LayerEffect_Agahnim2() {  // 8aff0d
+  if (enhanced_features0 & kFeatures0_DimFlashesGba) {
+    LayerEffect_Agahnim2Gba();
+    return;
+  }
   int j = frame_counter & 0x7f;
   if (j == 3 || j == 36) {
     main_palette_buffer[0x6d] = 0x1d59;

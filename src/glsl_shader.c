@@ -590,7 +590,7 @@ static void GlslShader_SetShaderVars(GlslShader *gs, RenderCtx *ctx, int pass) {
   if (p->unif.FrameDirection >= 0)
     glUniform1i(p->unif.FrameDirection, 1);
   if (p->unif.ScrollOffset >= 0) {
-    // Telecamera fluida e interpolazione spostano il fondale disegnato
+    // Vista spostata e interpolazione spostano il fondale disegnato
     float scroll_offset[2] = { (float)(ZELDA_BG2HOFS + g_render_bias_x), (float)(ZELDA_BG2VOFS + g_render_bias_y) };
     if (ZELDA_MAIN_MODULE == 20)  // prologo: sala del trono che scorre (Attract_ThroneRoom)
       scroll_offset[0] = (float)ZELDA_BG2HOFS_REG, scroll_offset[1] = (float)ZELDA_BG2VOFS_REG;

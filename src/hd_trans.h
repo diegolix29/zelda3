@@ -37,9 +37,8 @@ int HdTrans_ScrollSteps(const HdTransPlan *p);
 extern int g_trans_link_dx, g_trans_link_dy;
 
 // Una volta per frame di gioco. prev_dx/prev_dy: spostamento della vista nel
-// frame precedente (telecamera fluida). Vera se la vista va spostata di
-// (*bias_x, *bias_y) rispetto alla telecamera del gioco al posto della
-// telecamera fluida.
+// frame precedente. Vera se la vista va spostata di (*bias_x, *bias_y)
+// rispetto alla telecamera del gioco.
 bool HdTrans_Update(int prev_dx, int prev_dy, int *bias_x, int *bias_y);
 
 #endif  // ZELDA3_HD_TRANS_H_

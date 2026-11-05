@@ -150,6 +150,15 @@ void PpuBeginDrawing(Ppu *ppu, uint8_t *pixels, size_t pitch, uint32_t render_fl
     memset(&ppu->brightnessMult[32], ppu->brightnessMult[31], 31);
   }
 
+  if (ppu->gbaBlend && (ppu->gbaBlend != ppu->lastGbaBlend || ppu->brightness != ppu->lastGbaBlendBrightness)) {
+    ppu->lastGbaBlend = ppu->gbaBlend, ppu->lastGbaBlendBrightness = ppu->brightness;
+    int k = ppu->gbaBlend > 16 ? 16 : ppu->gbaBlend;
+    for (int i = 0; i < 64; i++) {
+      int v = i * k >> 4;
+      ppu->brightnessMultBlend[i] = ppu->brightnessMult[v > 31 ? 31 : v];
+    }
+  }
+
   if (PpuGetCurrentRenderScale(ppu, ppu->renderFlags) == 4) {
     for (int i = 0; i < 256; i++) {
       uint32 color = ppu->cgram[i];
@@ -1187,7 +1196,8 @@ static NOINLINE void PpuDrawWholeLine(Ppu *ppu, uint y) {
                  ppu->brightnessMult[(color >> 10) & clip_color_mask];
       } while (dst++, ++i < right);
     } else {
-      uint8 *half_color_map = ppu->halfColor ? ppu->brightnessMultHalf : ppu->brightnessMult;
+      uint8 *half_color_map = !ppu->halfColor ? ppu->brightnessMult :
+                              ppu->gbaBlend ? ppu->brightnessMultBlend : ppu->brightnessMultHalf;
       // Store this in locals
       math_enabled_cur |= ppu->addSubscreen << 8 | ppu->subtractColor << 9;
       // Need to check for each pixel whether to use math or not based on the main screen layer.
@@ -1286,9 +1296,14 @@ static void ppu_handlePixel(Ppu* ppu, int x, int y) {
         b += (ppu->addSubscreen && secondLayer != 5) ? b2 : ppu->fixedColorB;
       }
       if (ppu->halfColor && (secondLayer != 5 || !ppu->addSubscreen)) {
-        r >>= 1;
-        g >>= 1;
-        b >>= 1;
+        if (ppu->gbaBlend) {
+          int k = ppu->gbaBlend > 16 ? 16 : ppu->gbaBlend;
+          r = r * k >> 4, g = g * k >> 4, b = b * k >> 4;
+        } else {
+          r >>= 1;
+          g >>= 1;
+          b >>= 1;
+        }
       }
       if (r > 31) r = 31;
       if (g > 31) g = 31;
