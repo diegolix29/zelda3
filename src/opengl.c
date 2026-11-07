@@ -20,8 +20,6 @@ static GlTextureWithSize g_texture;
 static GlslShader *g_glsl_shader;
 static bool g_opengl_es;
 static unsigned int g_overlay_texture;
-static uint32 *g_overlay_pixels;
-static int g_overlay_cap;
 
 static void GL_APIENTRY MessageCallback(GLenum source,
                 GLenum type,
@@ -248,33 +246,39 @@ static void OpenGLRenderer_EndDraw() {
 
   // Con il gioco sfocato dietro inventario e menu lo shader non si applica:
   // torna appena la sfocatura finisce. Neanche nella nebbia del bosco
-  if (g_glsl_shader == NULL || HdFx_MenuBlurActive() || HdFx_ForestFogScene()) {
+  // While the blur fades in and out the shader picture and the plain one are
+  // mixed by the blur amount, so the shader fades instead of switching at once
+  float plain = (g_glsl_shader == NULL || HdFx_ForestFogScene()) ? 1.0f : HdFx_MenuBlurAmount();
+  if (plain < 1.0f)
+    GlslShader_Render(g_glsl_shader, &g_texture, viewport_x, viewport_y, viewport_width, viewport_height);
+  if (plain > 0.0f) {
     glViewport(viewport_x, viewport_y, viewport_width, viewport_height);
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, g_texture.gl_texture);
     int filter = g_config.linear_filtering ? GL_LINEAR : GL_NEAREST;
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
+    if (plain < 1.0f) {
+      glEnable(GL_BLEND);
+      glBlendColor(0, 0, 0, plain);
+      glBlendFunc(GL_CONSTANT_ALPHA, GL_ONE_MINUS_CONSTANT_ALPHA);
+    }
     DrawQuad();
-  } else {
-    GlslShader_Render(g_glsl_shader, &g_texture, viewport_x, viewport_y, viewport_width, viewport_height);
+    glDisable(GL_BLEND);
   }
 
   // Testo nitido: il riquadro dei dialoghi viene ridisegnato sopra, ingrandito
   // 4x con un algoritmo per pixel art e senza passare dallo shader.
   int rx, ry, rw, rh;
-  if (HdText_GetRect(g_draw_width, g_draw_height, &rx, &ry, &rw, &rh)) {
-    if (rw * rh * 16 > g_overlay_cap) {
-      g_overlay_cap = rw * rh * 16;
-      free(g_overlay_pixels);
-      g_overlay_pixels = malloc(g_overlay_cap * 4);
-    }
-    HdText_Scale4x(g_screen_buffer, g_draw_width * 4, rx, ry, rw, rh, g_overlay_pixels);
+  const uint32 *overlay_pixels = NULL;
+  if (HdText_GetRect(g_draw_width, g_draw_height, &rx, &ry, &rw, &rh))
+    overlay_pixels = HdText_Scale4x(g_screen_buffer, g_draw_width * 4, rx, ry, rw, rh);
+  if (overlay_pixels) {
     if (!g_overlay_texture)
       glGenTextures(1, &g_overlay_texture);
     glBindTexture(GL_TEXTURE_2D, g_overlay_texture);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, rw * 4, rh * 4, 0, GL_BGRA,
-                 g_opengl_es ? GL_UNSIGNED_BYTE : GL_UNSIGNED_INT_8_8_8_8_REV, g_overlay_pixels);
+                 g_opengl_es ? GL_UNSIGNED_BYTE : GL_UNSIGNED_INT_8_8_8_8_REV, overlay_pixels);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);

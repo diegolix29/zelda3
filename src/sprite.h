@@ -56,9 +56,15 @@ extern bool g_view_valid, g_hd_neighbor_tick;
 // restava senza corpo); si azzera a ogni frame con il buffer OAM
 extern uint8 g_oam_real_f0[128];
 
+// The piece at screen row y is drawn: inside the game camera or, with the
+// continuous world view (not in a neighbour area's copy), anywhere
+static inline bool SpriteDraw_YVisible(uint16 y) {
+  return (uint16)(y + 0x10) < 0x100 || (g_view_valid && !g_hd_neighbor_tick);
+}
+
 static inline void SetOamHelper0(OamEnt *oam, uint16 x, uint16 y, uint8 charnum, uint8 flags, uint8 big) {
   oam->x = x;
-  oam->y = (uint16)(y + 0x10) < 0x100 || (g_view_valid && !g_hd_neighbor_tick) ? y : 0xf0;
+  oam->y = SpriteDraw_YVisible(y) ? y : 0xf0;
   if (!g_hd_neighbor_tick)
     g_oam_real_f0[oam - oam_buf] = (uint8)y == 0xf0 && g_view_valid;
   oam->charnum = charnum;
@@ -283,6 +289,7 @@ void Sprite_OverworldReloadAll_justLoad();
 void Overworld_LoadSprites();
 void Sprite_ActivateAllProxima();
 int Sprite_WideMargin(void);
+int Sprite_WideBand(void);
 void Sprite_ProximityActivation();
 void Sprite_ActivateWhenProximal();
 void Sprite_ActivateWhenProximalBig();

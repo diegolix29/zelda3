@@ -6,7 +6,6 @@
 
 typedef struct Ppu Ppu;
 
-extern bool g_dynamic_light;
 
 // Prima e dopo il disegno della PPU: sospende il buio originale delle stanze buie
 void HdLight_BeforeRender(Ppu *ppu);
@@ -27,5 +26,11 @@ extern int g_hd_num_fire;
 // Colore sottratto da HdLight_Apply nel frame (stanze buie con 1-2 torce),
 // 0 se non c'e'. L'acqua HD lo usa per rifare la stessa luce sui suoi colori
 extern int g_hd_light_sub;
+
+// After loading a quick save (zelda_rtl.c LoadSnesState)
+void HdLight_ResetAfterLoad(void);
+// Dark room without the Lantern and with no torch lit: the game shows it all
+// black, so the HD scenery effects (water, pits, ice, fog...) are not drawn
+bool HdLight_PitchBlack(void);
 
 #endif  // ZELDA3_HD_LIGHT_H_

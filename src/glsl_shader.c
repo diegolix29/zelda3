@@ -24,9 +24,6 @@ extern uint8 g_ram[131072];
 // Spostamento del fondale nel frame disegnato (zelda_rtl.c)
 extern int g_render_bias_x, g_render_bias_y;
 
-// Modulo da comunicare allo shader: quello della scena sullo schermo
-// (HdFx_SceneModule), cosi' l'effetto si accende e si spegne esattamente
-// quando compare o sparisce il mondo di gioco
 // Mosaico del gioco (registro MOSAIC, RAM 0x95): 0 senza, 1 dai quadrati di 4
 static float ZeldaMosaicForShader() {
   uint8 m = g_ram[0x95];
@@ -39,6 +36,9 @@ static float ZeldaMosaicForShader() {
 // sono stanze vere del gioco e hanno lo shader come i labirinti
 #define ZELDA_ATTRACT_SEQUENCE (g_ram[0x23])
 #define ZELDA_SUBMODULE (g_ram[0x11])
+// Modulo da comunicare allo shader: quello della scena sullo schermo
+// (HdFx_SceneModule), cosi' l'effetto si accende e si spegne esattamente
+// quando compare o sparisce il mondo di gioco
 static int ZeldaModuleForShader() {
   int m = HdFx_SceneModule();
   if (m == 20 && ZELDA_ATTRACT_SEQUENCE >= 2 && ZELDA_ATTRACT_SEQUENCE <= 5)
@@ -48,6 +48,9 @@ static int ZeldaModuleForShader() {
   // menu. Le scene dei luoghi prima dei nomi restano dipinte
   if (m == 26 && ZELDA_SUBMODULE >= 32)
     return 14;
+  // the places before the names: outdoors or a room (HdFx_EndingScene)
+  if (HdFx_EndingScene())
+    return HdFx_EndingScene();
   return m;
 }
 

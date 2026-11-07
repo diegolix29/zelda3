@@ -23,6 +23,10 @@ bool HdWorld_InsideCurrentArea(int wx, int wy);
 // Disegna in pix (w x h, 0x00RRGGBB) il pezzo di mondo (world 0 chiaro, 0x40
 // oscuro) dal punto (x0, y0): viste dalle stanze sopra il mondo (hd_pit.c)
 bool HdWorld_DrawWorldRect(int world, int x0, int y0, int w, int h, uint32 *pix);
+// Save and put back the whole game RAM and VRAM around loading another area
+// or room just to draw it (one saved copy: calls must not nest)
+void HdWorld_SaveRamVram(void);
+void HdWorld_RestoreRamVram(void);
 // Vero se in questo frame tutto il fondale viene dalle immagini delle aree
 // (passaggio fra aree): gli strati del gioco li' sono solo da coprire
 bool HdWorld_BackgroundFromImages(void);
@@ -60,6 +64,10 @@ int HdWorld_WorldTile(int px, int py);
 bool HdWorld_SeamlessOn(void);
 // Vero se il punto e' fuori dall'area corrente (solo col mondo unico)
 bool HdWorld_OutsideArea(int px, int py);
+// Regola unica per gli oggetti di Link oltre il bordo dell'area: vero se il
+// terreno nel punto e' noto (area corrente, o col mondo unico la mappa del
+// mondo); falso solo oltre la fine del mondo
+bool HdWorld_TerrainKnown(int px, int py);
 // Al cambio d'area, prima che il gioco carichi la nuova
 void HdWorld_LeaveArea(void);
 // Angolo della vista nel mondo all'ultimo frame (zelda_rtl.c), se valido
@@ -83,6 +91,10 @@ bool HdWorld_ProbeMoreSlots(int k);
 // che deve nascere, -1 se non si puo'. Le azioni di Link hanno la precedenza
 // (g_hd_spawner: sprite che fa il suo passo in Sprite_Main, -1 fuori)
 int HdWorld_FreeSlot(int k, int last);
+// Fixed rule of the 16 sprite slots: enemies loaded or brought back by the
+// world always leave kHdSpareSlots free (HdWorld_FreeSlotCount = free now)
+enum { kHdSpareSlots = 4 };
+int HdWorld_FreeSlotCount(void);
 // Effetti su tutto lo schermo (medaglioni...): nel gioco normale valgono per
 // gli sprite caricati, cioe' quelli inquadrati (il gioco toglie gli altri);
 // col mondo continuo per quelli nella vista, anche nelle aree vicine

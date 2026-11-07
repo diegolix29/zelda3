@@ -1048,6 +1048,9 @@ static const ItemBoxGfx *Hud_GetIconForItem(int i) {
     return &kHudItemBottles[link_bottle_info[i - kHudItem_Bottle1]];
   if (i == kHudItem_Shovel && kNewStyleInventory)
     return &kHudItemFlute[link_item_flute >= 1];
+  // the flute's own slot: with only the shovel (1) it showed a second shovel
+  if (i == kHudItem_Flute && kNewStyleInventory && link_item_flute < 2)
+    return kHudItemEmpty;
 
   uint8 item_val = (&link_item_bow)[i - 1];
   if (i == kHudItem_Bombs) // bombs

@@ -107,8 +107,8 @@ void Text_LoadCharacterBuffer();
 // lingua, quindi prima di usarli si controlla con Dialogue_HasMessage
 enum { kMsg_GoldPotion = 397 };
 bool Dialogue_HasMessage(int i);
-// Testo moderno: larghezza della riga piu' lunga e righe del messaggio caricato
-int Text_MeasureMessage(int (*adv)(int c), int *lines, int *first);
+// Modern text: lines used by the loaded message and the first one with text
+void Text_MeasureMessage(int *lines, int *first);
 // Testo moderno: la riga piu' lunga di tutti i messaggi del gioco
 int Text_MaxLineWidth(int (*adv)(int c));
 // Testo moderno: il messaggio aspetta un tasto

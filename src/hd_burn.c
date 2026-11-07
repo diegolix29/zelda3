@@ -120,10 +120,7 @@ static int TilePos(uint16 x, uint16 y) {
 }
 
 // Mondo unico: il fuoco passa da un'area all'altra e non si spegne quando
-// Link cambia area
-static bool Seamless(void) {
-  return HdWorld_SeamlessOn();
-}
+// Link cambia area (HdWorld_SeamlessOn)
 
 // Mappa16 della tile, anche nelle aree vicine col mondo unico; -1 se non si sa
 static int TileAt(uint16 x, uint16 y) {
@@ -154,16 +151,16 @@ uint8 HdBurn_WaterCells(uint16 x, uint16 y) {
   const uint8 *attr = GetMap8toTileAttr();
   uint8 mask = 0;
   for (int i = 0; i < 4; i++) {
-    int e = m8[i], c = e & 0x3ff;
+    int e = m8[i];
     // acqua alta o bassa, ma non le cascate (caselle 0x1ca-0x1cd, palette 7)
-    if ((attr[e & 0x1ff] == 0x08 || attr[e & 0x1ff] == 0x09) && !((e >> 10 & 7) == 7 && c >= 0x1ca && c <= 0x1cd))
+    if (HdWater_IsWaterAttr(attr[e & 0x1ff]) && !HdWater_IsWaterfallEntry(e))
       mask |= 1 << i;
   }
   return mask;
 }
 
 bool HdBurn_TileShown(const HdBurnTile *t) {
-  if (Seamless())
+  if (HdWorld_SeamlessOn())
     return !((t->area ^ overworld_area_index) & 0x40);
   return t->area == (uint8)overworld_area_index;
 }
@@ -176,7 +173,7 @@ static void ClearAll(void) {
 // Il fuoco resta nell'area in cui e' nato; col mondo unico si spegne solo
 // passando all'altro mondo
 static bool FireInOtherArea(void) {
-  return Seamless() ? ((g_burn_area ^ overworld_area_index) & 0x40) != 0 : g_burn_area != overworld_area_index;
+  return HdWorld_SeamlessOn() ? ((g_burn_area ^ overworld_area_index) & 0x40) != 0 : g_burn_area != overworld_area_index;
 }
 
 // Aggiunge in fondo a una lista piena a max togliendo il piu' vecchio
@@ -220,9 +217,15 @@ static int FindFrozen(uint16 x, uint16 y) {
   int b = HintBit(x, y);
   if (!(g_frozen_hint[b >> 3] & 1 << (b & 7)))
     return -1;
-  for (int i = 0; i < g_num_frozen; i++)
-    if (g_frozen[i].x == x && g_frozen[i].y == y && g_frozen[i].area == AreaOf(x, y))
+  int area = -1;  // AreaOf(x, y), computed at the first match
+  for (int i = 0; i < g_num_frozen; i++) {
+    if (g_frozen[i].x != x || g_frozen[i].y != y)
+      continue;
+    if (area < 0)
+      area = AreaOf(x, y);
+    if (g_frozen[i].area == area)
       return i;
+  }
   return -1;
 }
 
@@ -554,13 +557,12 @@ void HdBurn_Update(void) {
     g_seen_area = overworld_area_index;
     RevealRemoteSecrets();
   }
-  bool seamless = Seamless();
   // Terreno annerito dell'area: si fa definitivo e sparisce solo se il
   // cespuglio e' ricresciuto (il gioco li fa ricrescere rientrando nell'area)
   int n = 0;
   for (int i = 0; i < g_num_scorched; i++) {
     HdBurnTile s = g_scorched[i];
-    if (s.area == (uint8)overworld_area_index || seamless && HdBurn_TileShown(&s)) {
+    if (HdBurn_TileShown(&s)) {
       if (IsBurnable(s.x, s.y))
         continue;
       if (s.age < kHdScorchTime)
@@ -574,7 +576,7 @@ void HdBurn_Update(void) {
   n = 0;
   for (int i = 0; i < g_num_frozen; i++) {
     HdBurnTile s = g_frozen[i];
-    if (s.area == (uint8)overworld_area_index || seamless && HdBurn_TileShown(&s)) {
+    if (HdBurn_TileShown(&s)) {
       if (s.water ? HdBurn_IceLeft(&s) <= 0 || !HdBurn_WaterCells(s.x, s.y) : !IsBurnable(s.x, s.y))
         continue;
       if (s.age < 0xffff)

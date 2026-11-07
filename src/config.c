@@ -329,7 +329,49 @@ static bool g_fx_heat_key_seen;  // l'ini ha gia' FxHeatAndFlames
 static bool g_blond_link_seen, g_gba_damage_seen, g_flipper_dive_seen, g_stuck_arrows_seen, g_hurricane_spin_seen;
 static bool g_item_on_x_seen;
 
+// Plain on/off options added by the HD port, by section: a bool of g_config
+// (offs) or a bit of features0 (bit != 0)
+typedef struct PlainOption {
+  int8 section;
+  const char *name;
+  uint16 offs;
+  uint32 bit;
+} PlainOption;
+
+static const PlainOption kPlainOptions[] = {
+#define OPT(s, n, f) { s, n, offsetof(Config, f), 0 }
+#define BIT(s, n, b) { s, n, 0, kFeatures0_##b }
+  BIT(1, "DimFlashesGba", DimFlashesGba),
+  OPT(1, "FxWindowRays", fx_window_rays), OPT(1, "FxItemGlow", fx_item_glow),
+  OPT(1, "FxRain", fx_rain), OPT(1, "FxForestFog", fx_fog), OPT(1, "FxWater", fx_water),
+  OPT(1, "FxMenuBlur", fx_menu_blur), OPT(1, "FxSpriteShadows", fx_sprite_shadows),
+  OPT(1, "FxSoftIris", fx_soft_iris), OPT(1, "FxButtonHints", fx_button_hints),
+  OPT(1, "FxWhirlpoolGlow", fx_whirlpool), OPT(1, "FxPitDepth", fx_pit),
+  OPT(1, "OfficialArtwork", official_artwork), OPT(1, "TriforceTitle", triforce_title),
+  OPT(1, "DynamicLighting", dynamic_light), OPT(1, "HighRefreshInterpolation", high_refresh),
+  OPT(1, "HdText", hd_text), OPT(1, "ModernText", modern_text),
+  BIT(4, "SwordAndItemsInteraction", SwordAndItems),
+  OPT(4, "ItemOnLR", item_on_lr), OPT(4, "GbaHud", gba_hud),
+  BIT(4, "GoldPotion", GoldPotion), BIT(4, "ItemsRefillResources", ItemsRefillResources),
+  BIT(4, "IcePalaceGba", IcePalaceGba), BIT(4, "SaveHeartsAndMagic", SaveHeartsAndMagic),
+  OPT(4, "FsaBoomerang", fsa_boomerang), OPT(4, "EnchantedRocks", enchanted_rocks), OPT(4, "LakeClearing", lake_clearing),
+  BIT(4, "GbaMinorFixes", GbaMinorFixes), BIT(4, "BirdTravelPoint9", BirdTravel9),
+  BIT(4, "FastTransitions", FastTransitions), BIT(4, "ContinuousWorld", ContinuousWorld),
+  BIT(4, "ModernHud", ModernHud), BIT(4, "DungeonNames", DungeonNames),
+  BIT(4, "ExtendedInventory", ExtendedInventory), BIT(4, "ImprovedWorldMap", ImprovedWorldMap),
+  BIT(4, "ImprovedDungeonMap", ImprovedDungeonMap), BIT(4, "ProgressiveMap", ProgressiveMap),
+  BIT(4, "BurnAndFreezeInteraction", BurnAndFreeze),
+#undef OPT
+#undef BIT
+};
+
 static bool HandleIniConfig(int section, const char *key, char *value) {
+  for (int i = 0; i < countof(kPlainOptions); i++) {
+    const PlainOption *o = &kPlainOptions[i];
+    if (section == o->section && StringEqualsNoCase(key, o->name))
+      return o->bit ? ParseBoolBit(value, &g_config.features0, o->bit) :
+                      ParseBool(value, (bool *)((uint8 *)&g_config + o->offs));
+  }
   if (section == 0) {
     for (int i = 0; i < countof(kKeyNameId); i++) {
       if (StringEqualsNoCase(key, kKeyNameId[i].name)) {
@@ -409,8 +451,6 @@ static bool HandleIniConfig(int section, const char *key, char *value) {
       return true;
     } else if (StringEqualsNoCase(key, "DimFlashes")) {
       return ParseBoolBit(value, &g_config.features0, kFeatures0_DimFlashes);
-    } else if (StringEqualsNoCase(key, "DimFlashesGba")) {
-      return ParseBoolBit(value, &g_config.features0, kFeatures0_DimFlashesGba);
     } else if (StringEqualsNoCase(key, "FxHeatAndFlames")) {
       g_fx_heat_key_seen = true;
       return ParseBool(value, &g_config.fx_heat);
@@ -422,43 +462,9 @@ static bool HandleIniConfig(int section, const char *key, char *value) {
       if (!g_fx_heat_key_seen)
         g_config.fx_heat = on;
       return true;
-    } else if (StringEqualsNoCase(key, "FxWindowRays")) {
-      return ParseBool(value, &g_config.fx_window_rays);
-    } else if (StringEqualsNoCase(key, "FxItemGlow")) {
-      return ParseBool(value, &g_config.fx_item_glow);
-    } else if (StringEqualsNoCase(key, "FxRain")) {
-      return ParseBool(value, &g_config.fx_rain);
-    } else if (StringEqualsNoCase(key, "FxForestFog")) {
-      return ParseBool(value, &g_config.fx_fog);
-    } else if (StringEqualsNoCase(key, "FxWater")) {
-      return ParseBool(value, &g_config.fx_water);
-    } else if (StringEqualsNoCase(key, "FxMenuBlur")) {
-      return ParseBool(value, &g_config.fx_menu_blur);
-    } else if (StringEqualsNoCase(key, "FxSpriteShadows")) {
-      return ParseBool(value, &g_config.fx_sprite_shadows);
-    } else if (StringEqualsNoCase(key, "FxSoftIris")) {
-      return ParseBool(value, &g_config.fx_soft_iris);
-    } else if (StringEqualsNoCase(key, "FxButtonHints")) {
-      return ParseBool(value, &g_config.fx_button_hints);
-    } else if (StringEqualsNoCase(key, "FxWhirlpoolGlow")) {
-      return ParseBool(value, &g_config.fx_whirlpool);
-    } else if (StringEqualsNoCase(key, "FxPitDepth")) {
-      return ParseBool(value, &g_config.fx_pit);
-    } else if (StringEqualsNoCase(key, "OfficialArtwork")) {
-      return ParseBool(value, &g_config.official_artwork);
-    } else if (StringEqualsNoCase(key, "TriforceTitle")) {
-      return ParseBool(value, &g_config.triforce_title);
     } else if (StringEqualsNoCase(key, "BlondLink")) {
       g_blond_link_seen = true;
       return ParseBool(value, &g_config.blond_link);
-    } else if (StringEqualsNoCase(key, "DynamicLighting")) {
-      return ParseBool(value, &g_config.dynamic_light);
-    } else if (StringEqualsNoCase(key, "HighRefreshInterpolation")) {
-      return ParseBool(value, &g_config.high_refresh);
-    } else if (StringEqualsNoCase(key, "HdText")) {
-      return ParseBool(value, &g_config.hd_text);
-    } else if (StringEqualsNoCase(key, "ModernText")) {
-      return ParseBool(value, &g_config.modern_text);
     }
   } else if (section == 2) {
     if (StringEqualsNoCase(key, "EnableAudio")) {
@@ -544,8 +550,6 @@ static bool HandleIniConfig(int section, const char *key, char *value) {
       return ParseBoolBit(value, &g_config.features0, kFeatures0_TurnWhileDashing);
     } else if (StringEqualsNoCase(key, "MirrorToDarkworld")) {
       return ParseBoolBit(value, &g_config.features0, kFeatures0_MirrorToDarkworld);
-    } else if (StringEqualsNoCase(key, "SwordAndItemsInteraction")) {
-      return ParseBoolBit(value, &g_config.features0, kFeatures0_SwordAndItems);
     } else if (StringEqualsNoCase(key, "GbaEnemyDamage")) {
       g_gba_damage_seen = true;
       return ParseBool(value, &g_config.gba_damage);
@@ -555,22 +559,12 @@ static bool HandleIniConfig(int section, const char *key, char *value) {
     } else if (StringEqualsNoCase(key, "ItemOnX")) {
       g_item_on_x_seen = true;
       return ParseBool(value, &g_config.item_on_x);
-    } else if (StringEqualsNoCase(key, "ItemOnLR")) {
-      return ParseBool(value, &g_config.item_on_lr);
     } else if (StringEqualsNoCase(key, "HurricaneSpin")) {
       g_hurricane_spin_seen = true;
       return ParseBool(value, &g_config.hurricane_spin);
     } else if (StringEqualsNoCase(key, "StuckArrows")) {
       g_stuck_arrows_seen = true;
       return ParseBool(value, &g_config.stuck_arrows);
-    } else if (StringEqualsNoCase(key, "GoldPotion")) {
-      return ParseBoolBit(value, &g_config.features0, kFeatures0_GoldPotion);
-    } else if (StringEqualsNoCase(key, "ItemsRefillResources")) {
-      return ParseBoolBit(value, &g_config.features0, kFeatures0_ItemsRefillResources);
-    } else if (StringEqualsNoCase(key, "IcePalaceGba")) {
-      return ParseBoolBit(value, &g_config.features0, kFeatures0_IcePalaceGba);
-    } else if (StringEqualsNoCase(key, "SaveHeartsAndMagic")) {
-      return ParseBoolBit(value, &g_config.features0, kFeatures0_SaveHeartsAndMagic);
     } else if (StringEqualsNoCase(key, "DisableLowHealthBeep")) {
       return ParseBoolBit(value, &g_config.features0, kFeatures0_DisableLowHealthBeep);
     } else if (StringEqualsNoCase(key, "SkipIntroOnKeypress")) {
@@ -585,34 +579,8 @@ static bool HandleIniConfig(int section, const char *key, char *value) {
       return ParseBoolBit(value, &g_config.features0, kFeatures0_MiscBugFixes);
     } else if (StringEqualsNoCase(key, "GameChangingBugFixes")) {
       return ParseBoolBit(value, &g_config.features0, kFeatures0_GameChangingBugFixes);
-    } else if (StringEqualsNoCase(key, "EnchantedRocks")) {
-      return ParseBool(value, &g_config.enchanted_rocks);
-    } else if (StringEqualsNoCase(key, "LakeClearing")) {
-      return ParseBool(value, &g_config.lake_clearing);
-    } else if (StringEqualsNoCase(key, "GbaMinorFixes")) {
-      return ParseBoolBit(value, &g_config.features0, kFeatures0_GbaMinorFixes);
     } else if (StringEqualsNoCase(key, "CancelBirdTravel")) {
       return ParseBoolBit(value, &g_config.features0, kFeatures0_CancelBirdTravel);
-    } else if (StringEqualsNoCase(key, "BirdTravelPoint9")) {
-      return ParseBoolBit(value, &g_config.features0, kFeatures0_BirdTravel9);
-    } else if (StringEqualsNoCase(key, "FastTransitions")) {
-      return ParseBoolBit(value, &g_config.features0, kFeatures0_FastTransitions);
-    } else if (StringEqualsNoCase(key, "ContinuousWorld")) {
-      return ParseBoolBit(value, &g_config.features0, kFeatures0_ContinuousWorld);
-    } else if (StringEqualsNoCase(key, "ModernHud")) {
-      return ParseBoolBit(value, &g_config.features0, kFeatures0_ModernHud);
-    } else if (StringEqualsNoCase(key, "DungeonNames")) {
-      return ParseBoolBit(value, &g_config.features0, kFeatures0_DungeonNames);
-    } else if (StringEqualsNoCase(key, "ExtendedInventory")) {
-      return ParseBoolBit(value, &g_config.features0, kFeatures0_ExtendedInventory);
-    } else if (StringEqualsNoCase(key, "ImprovedWorldMap")) {
-      return ParseBoolBit(value, &g_config.features0, kFeatures0_ImprovedWorldMap);
-    } else if (StringEqualsNoCase(key, "ImprovedDungeonMap")) {
-      return ParseBoolBit(value, &g_config.features0, kFeatures0_ImprovedDungeonMap);
-    } else if (StringEqualsNoCase(key, "ProgressiveMap")) {
-      return ParseBoolBit(value, &g_config.features0, kFeatures0_ProgressiveMap);
-    } else if (StringEqualsNoCase(key, "BurnAndFreezeInteraction")) {
-      return ParseBoolBit(value, &g_config.features0, kFeatures0_BurnAndFreeze);
     } else if (StringEqualsNoCase(key, "TextSpeed")) {
       g_config.text_speed = (uint8)strtol(value, (char**)NULL, 10);
       return true;
@@ -696,6 +664,9 @@ static void ApplyConfigRules(void) {
     g_config.features0 &= ~kFeatures0_SwitchLR;
   if (!(g_config.features0 & kFeatures0_SwitchLR))
     g_config.features0 &= ~kFeatures0_SwitchLRLimit;
+  // modern HUD or GBA HUD, not both: the modern one wins
+  if (g_config.features0 & kFeatures0_ModernHud)
+    g_config.gba_hud = false;
   // meno flash: GBA o Virtual Console, non tutti e due
   if (g_config.features0 & kFeatures0_DimFlashesGba)
     g_config.features0 &= ~kFeatures0_DimFlashes;
@@ -778,6 +749,12 @@ static void KeyMapHash_Rebuild(int drop_cmd, int drop_key) {
   free(old);
 }
 
+// Gives key to cmd only: cmd loses its other keys and other commands lose key
+static void KeyMap_Assign(int cmd, int key) {
+  KeyMapHash_Rebuild(cmd, key);
+  KeyMapHash_Add(key, cmd);
+}
+
 void Config_SetKeyForCmd(int cmd, SDL_Keycode code, SDL_Keymod mod) {
   int key = 0;
   if (code != SDLK_LALT && code != SDLK_RALT)
@@ -788,8 +765,7 @@ void Config_SetKeyForCmd(int cmd, SDL_Keycode code, SDL_Keymod mod) {
     key |= mod & KMOD_SHIFT ? kKeyMod_Shift : 0;
   key |= REMAP_SDL_KEYCODE(code);
   // Il tasto viene tolto da qualunque altro comando lo usasse
-  KeyMapHash_Rebuild(cmd, key);
-  KeyMapHash_Add(key, cmd);
+  KeyMap_Assign(cmd, key);
 }
 
 int Config_GetPadButtonForCmd(int cmd) {
@@ -837,15 +813,13 @@ void Config_SetPadButtonForCmd(int cmd, int button) {
 void Config_ResetControlsToDefault() {
   for (int i = 0; i < 12; i++) {
     int key = kDefaultKbdControls[kKeys_Controls + i];
-    KeyMapHash_Rebuild(kKeys_Controls + i, key);
-    KeyMapHash_Add(key, kKeys_Controls + i);
+    KeyMap_Assign(kKeys_Controls + i, key);
     Config_SetPadButtonForCmd(kKeys_Controls + i, kDefaultGamepadCmds[i]);
   }
   // anche il tasto del menu opzioni (Esc e R3): altrimenti, se era stato
   // spostato su un tasto dei comandi, il menu non si aprirebbe piu'
   int menu_key = kDefaultKbdControls[kKeys_HdMenu];
-  KeyMapHash_Rebuild(kKeys_HdMenu, menu_key);
-  KeyMapHash_Add(menu_key, kKeys_HdMenu);
+  KeyMap_Assign(kKeys_HdMenu, menu_key);
   Config_SetPadButtonForCmd(kKeys_HdMenu, kGamepadBtn_R3);
 }
 

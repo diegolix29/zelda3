@@ -1005,12 +1005,10 @@ int Decomp_spr(uint8 *dst, int gfx) {  // 80e772
   MemBlk blk = kSprGfx(gfx);
   const uint8 *sprite_data = GetCompSpritePtr(gfx);
   // If the size is not 0x600 then it's compressed
-  int len = 0x600;
   if (gfx >= 103 || blk.size != 0x600)
-    len = Decompress(dst, blk.ptr);
-  else
-    memcpy(dst, blk.ptr, 0x600);
-  return len;
+    return Decompress(dst, blk.ptr);
+  memcpy(dst, blk.ptr, 0x600);
+  return 0x600;
 }
 
 int Decomp_bg(uint8 *dst, int gfx) {  // 80e78f
@@ -2214,8 +2212,7 @@ void Palette_LoadAgahnim() {  // 9bf0c2
 // scurisce lo sfondo poco a poco (Etere, telewarp di Agahnim, introduzione:
 // 0x8134a58 e 0x81333ec), per i fulmini di Agahnim lo scurisce e lo rischiara
 // (0x80cb1b8) e il lampo del pipistrello resta bianco fisso (0x80cb398)
-uint8 g_gba_dim_timer;
-static uint8 g_gba_bolt_timer, g_gba_bolt_len;
+// g_gba_dim_timer, g_gba_bolt_timer, g_gba_bolt_len: in free RAM (variables.h)
 
 static uint16 GbaFlash_DarkenColor(uint16 c) {  // 0x8133374
   int r = c & 0x1f, g = c & 0x3e0, b = c & 0x7c00;
@@ -2228,18 +2225,31 @@ static uint16 GbaFlash_DarkenColor(uint16 c) {  // 0x8133374
   return r | g | b;
 }
 
-void GbaFlash_DimStep(uint8 mask, uint8 min) {  // 0x8134a58
-  if (!g_gba_dim_timer || submodule_index != 0)
-    return;
-  if (!--g_gba_dim_timer) {
+// One frame of a dim/bolt timer: false if it is stopped (or not in the main
+// submodule) or has just run out, in which case the palette is restored
+static bool GbaFlash_TimerTick(uint8 *timer) {
+  if (!*timer || submodule_index != 0)
+    return false;
+  if (!--*timer) {
     Palette_Restore_BG_And_HUD();
-    return;
+    return false;
   }
+  return true;
+}
+
+// Backdrop colour follows the changed BG palette, then upload it
+static void GbaFlash_PaletteDone(void) {
+  main_palette_buffer[0] = aux_palette_buffer[0] ? main_palette_buffer[32] : 0;
+  flag_update_cgram_in_nmi++;
+}
+
+void GbaFlash_DimStep(uint8 mask, uint8 min) {  // 0x8134a58
+  if (!GbaFlash_TimerTick(&g_gba_dim_timer))
+    return;
   if (g_gba_dim_timer >= min && !(g_gba_dim_timer & mask)) {
     for (int i = 32; i < 128; i++)
       main_palette_buffer[i] = GbaFlash_DarkenColor(main_palette_buffer[i]);
-    main_palette_buffer[0] = aux_palette_buffer[0] ? main_palette_buffer[32] : 0;
-    flag_update_cgram_in_nmi++;
+    GbaFlash_PaletteDone();
   }
 }
 
@@ -2248,7 +2258,7 @@ void GbaFlash_DimHold(uint8 v) {
     g_gba_dim_timer = v;
 }
 
-uint16 GbaFlash_StepColor(uint16 c, uint16 t) {
+static uint16 GbaFlash_StepColor(uint16 c, uint16 t) {
   for (int sh = 0; sh < 15; sh += 5) {
     int a = c >> sh & 31, b = t >> sh & 31;
     a += a < b ? 1 : a > b ? -1 : 0;
@@ -2329,12 +2339,8 @@ void GbaFlash_Bolt(uint8 len) {
 }
 
 static void GbaFlash_BoltStep() {  // 0x80cb1b8
-  if (!g_gba_bolt_timer || submodule_index != 0)
+  if (!GbaFlash_TimerTick(&g_gba_bolt_timer))
     return;
-  if (!--g_gba_bolt_timer) {
-    Palette_Restore_BG_And_HUD();
-    return;
-  }
   // entra in un quarto del tempo, resta a 15 e se ne va nell'ultimo quarto
   int t = g_gba_bolt_timer, q = g_gba_bolt_len >> 2, d;
   if (t < q)
@@ -2348,8 +2354,7 @@ static void GbaFlash_BoltStep() {  // 0x80cb1b8
     int r = (c & 0x1f) - d, g = (c & 0x3e0) - (d << 5), b = (c & 0x7c00) - (d << 10);
     main_palette_buffer[i] = (r > 0 ? r : 0) | (g > 0 ? g : 0) | (b > 0 ? b : 0);
   }
-  main_palette_buffer[0] = aux_palette_buffer[0] ? main_palette_buffer[32] : 0;
-  flag_update_cgram_in_nmi++;
+  GbaFlash_PaletteDone();
 }
 
 void HandleScreenFlash() {  // 9de9b6

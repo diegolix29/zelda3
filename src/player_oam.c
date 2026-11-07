@@ -771,8 +771,21 @@ uint8 g_link_oam_real_f0[128];
 // Link nascosto in questo frame (lampeggio dopo un colpo, porta, mantello):
 // i suoi pezzi a 0xF0 sono nascosti davvero, anche vicino alla telecamera
 static bool g_link_oam_hidden;
+// Link pieces drawn on the ground (shadow, grass and water under the feet):
+// with Link in the air they refer to the ground, the others to where he is
+uint8 g_link_oam_ground[128];
 
 static void LinkOam_MainInner();
+
+// How high Link is drawn (0 = on the ground). The game subtracts the low byte
+// of link_z_coord from the 8 bit OAM y, so 0x00f0-0x00ff put him 16-1 pixels
+// lower, not 240-255 higher: the game leaves 0x00ff in many places (area and
+// room loading) and during the barrier's shock, taken as 255 pixels up Link
+// vanished. Higher heights stay whole (long falls from cliffs)
+int LinkOam_DrawnHeight(void) {
+  int z = (int16)link_z_coord;
+  return z <= 0 || (z >= 0xf0 && z < 0x100) ? 0 : z;
+}
 
 void LinkOam_Main() {
   static OamEnt saved[128];
@@ -782,6 +795,7 @@ void LinkOam_Main() {
   for (int i = 0; i < 128; i++)
     WORD(oam_buf[i].charnum) = 0xffff;
   g_link_oam_hidden = false;
+  memset(g_link_oam_ground, 0, sizeof(g_link_oam_ground));
   LinkOam_MainInner();
   int rel = (int16)(link_y_coord - BG2VOFS_copy2);
   // 0xF0 e' una posizione vera se cade fra 16 pixel sopra e 32 sotto Link
@@ -789,6 +803,11 @@ void LinkOam_Main() {
   // di due aree sta proprio sul bordo della telecamera, e i pezzi nascosti
   // comparivano 16 pixel piu' su, come un secondo Link che lampeggia)
   bool f0_is_real = ((0xf0 - (rel - 16)) & 0xff) <= 48 && !g_link_oam_hidden;
+  // Link in the air (falls, jumps) is drawn link_z_coord higher: near there
+  // too (in a long fall from a cliff his body crossed 0xF0 and vanished)
+  int z = LinkOam_DrawnHeight();
+  if (z > 0 && !g_link_oam_hidden)
+    f0_is_real |= ((0xf0 - (rel - z - 16)) & 0xff) <= 48;
   for (int i = 0; i < 128; i++) {
     g_link_oam_mask[i] = (WORD(oam_buf[i].charnum) != 0xffff);
     g_link_oam_real_f0[i] = g_link_oam_mask[i] && oam_buf[i].y == 0xf0 && f0_is_real;
@@ -1086,7 +1105,7 @@ continue_after_set:
           LinkOam_DrawDungeonFallShadow(r4loc, xcoord);
           r4loc = 2; // wtf
         }
-      } else if (!g_fx_sprite_shadows || g_link_dive_timer) {  // con le ombre morbide (hd_fx.c) l'ovale serve solo sott'acqua
+      } else if (!g_config.fx_sprite_shadows || g_link_dive_timer) {  // con le ombre morbide (hd_fx.c) l'ovale serve solo sott'acqua
         // draw shadow
         int shadow_idx = (link_auxiliary_state != 0) && (link_auxiliary_state != 1 || !link_cape_mode);
         uint16 oam_y = link_y_coord - BG2VOFS_copy2 + kOffsToShadowGivenDir_Y[link_direction_facing_mirror >> 1];
@@ -1103,6 +1122,7 @@ continue_after_set:
           WORD(oam_buf[oam_pos+1].x) = (uint8)(oam_x + 8) | oam_y << 8;
           bytewise_extended_oam[oam_pos+0] = 0;
           bytewise_extended_oam[oam_pos+1] = 0;
+          g_link_oam_ground[oam_pos] = g_link_oam_ground[oam_pos + 1] = 1;
         }
       }
     }
@@ -1275,6 +1295,7 @@ void LinkOam_DrawDungeonFallShadow(int r4loc, uint8 xcoord) {  // 8dae3b
   int oam_pos = ((draw_water_ripples_or_grass ? kShadow_oam_indexes_1 : kShadow_oam_indexes_0)[r4loc] + sort_sprites_offset_into_oam_buffer)>>2;
 
   yv *= 2;
+  g_link_oam_ground[oam_pos] = g_link_oam_ground[oam_pos + 1] = 1;
   for (int i = 0; i != 2; i++, oam_pos++, yv++) {
     uint16 td = kLinkShadows_Chardata[yv];
     if (td != 0xffff) {
@@ -1313,6 +1334,7 @@ void LinkOam_DrawFootObject(int r4loc, uint8 oam_x, uint8 oam_y) {  // 8daed1
   }
 
   OamEnt *oam = &oam_buf[oam_pos];
+  g_link_oam_ground[oam_pos] = g_link_oam_ground[oam_pos + 1] = 1;
 
   if (yv >= 11) {
     // OOB read

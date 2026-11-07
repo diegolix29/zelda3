@@ -18,26 +18,64 @@
 #include "snes/ppu.h"
 #include "hd_fx.h"
 #include "hd_rumble.h"
+#include "config.h"
 
 // Con il mondo continuo la vista e' piu' larga della telecamera del gioco e
 // spostata rispetto a lei (fino al bordo dell'area la telecamera del gioco
 // si ferma, la vista no): le armi di Link escono dallo schermo quando escono
 // dalla vista, e fino a li' urtano i muri. Non nelle copie delle aree vicine
-static bool Ancilla_LiveView(void) {
-  return HdWorld_LiveView();
-}
+// (HdWorld_LiveView)
 
-// Quanto sporgono le fasce dello schermo largo (85 pixel in 16:9) per il
-// disegno delle ancille e l'uccello: anche con "unchanged_sprites" la fascia
-// si vede, quindi conta anche solo con le correzioni visive
-static int Ancilla_WideExt(void) {
-  return (enhanced_features0 & (kFeatures0_ExtendScreen64 | kFeatures0_WidescreenVisualFixes)) ?
-      g_zenv.ppu->extraLeftRight : 0;
+// Width of the wide-screen bands for game logic (an ancilla that leaves them
+// is removed): only with ExtendScreen64, like the original 0x40. Drawing uses
+// Sprite_WideBand, which also counts the visual fixes
+static int Ancilla_LogicBand(void) {
+  return (enhanced_features0 & kFeatures0_ExtendScreen64) ? g_zenv.ppu->extraLeftRight : 0;
 }
 
 // Vero se il punto del mondo (x, y) e' fuori dalla vista
 static bool Ancilla_OutsideView(uint16 x, uint16 y) {
   return !HdWorld_BoxInView(x, y, 1, 1, 0);
+}
+
+// Regola unica per le armi di Link al bordo dello schermo (boomerang,
+// bacchette, muri urtati...): vero se il punto del mondo (x, y) e' fuori
+// dallo schermo. Col mondo continuo conta la vista che segue Link (oltre il
+// bordo dell'area la telecamera del gioco si ferma e le armi tornavano
+// indietro o sparivano subito), altrimenti i w x h pixel della telecamera del
+// gioco, come nell'originale
+static bool Ancilla_OffScreen(uint16 x, uint16 y, uint16 w, uint16 h) {
+  if (HdWorld_LiveView())
+    return Ancilla_OutsideView(x, y);
+  return (uint16)(x - BG2HOFS_copy2) >= w || (uint16)(y - BG2VOFS_copy2) >= h;
+}
+
+// Elenco unico degli oggetti di Link col mondo continuo (vedi ancilla.h).
+// Il blocco di Somaria 0x2c non resta: sparisce al cambio d'area come nel
+// gioco normale (restano i pezzi che si rompono, 0x2d e 0x2e)
+uint8 Ancilla_WorldRules(uint8 type) {
+  enum { K = kAncWorld_Keep, H = kAncWorld_Hits, W = kAncWorld_Wide };
+  switch (type) {
+  case 0x01: return K | H;      // colpo del bastone di Somaria
+  case 0x02: return K | H;      // fiammata della Bacchetta del Fuoco
+  case 0x04: return K;          // scoppio di un colpo
+  case 0x05: return K | H;      // boomerang
+  case 0x06: return K;          // colpo sul muro
+  case 0x07: return K | H | W;  // bomba
+  case 0x09: return K | H;      // freccia
+  case 0x0a: return K;          // freccia piantata
+  case 0x0b: return K | H;      // colpo della Bacchetta del Ghiaccio
+  case 0x0c: return K | H;      // raggio della spada
+  case 0x11: return K;          // ghiaccio sul muro
+  case 0x13: return K;          // scintille del ghiaccio
+  case 0x1a: return H;          // Polvere Magica
+  case 0x1f: return K | H;      // rampino
+  case 0x2d: case 0x2e: return K;  // blocco di Somaria che si rompe
+  case 0x2f: return H;          // fiamma della Lanterna
+  case 0x30: return K;          // Bastone di Byrna: partenza delle scintille
+  case 0x31: return K | H;      // Bastone di Byrna: scintilla attorno a Link
+  }
+  return 0;
 }
 
 // Bacchette del Fuoco e del Ghiaccio: il colpo vola fino al bordo della
@@ -46,9 +84,9 @@ static bool Ancilla_OutsideView(uint16 x, uint16 y) {
 // telecamera del gioco). Vale per il colpo, l'esplosione, le scintille e lo
 // scoppio del ghiaccio sul muro
 static bool Ancilla_ShotOutside(uint16 x, uint16 y) {
-  if (Ancilla_LiveView())
+  if (HdWorld_LiveView())
     return Ancilla_OutsideView(x, y);
-  int ext = g_zenv.ppu->extraLeftRight;
+  int ext = Ancilla_LogicBand();
   return (uint16)(x - BG2HOFS_copy2 + ext) >= 256 + 2 * ext || (uint16)(y - BG2VOFS_copy2) >= 0xf0;
 }
 
@@ -69,11 +107,11 @@ static void Ancilla_SetOam(OamEnt *oam, uint16 x, uint16 y, uint8 charnum, uint8
 
 // Pezzo del colpo nel punto (x, y) relativo alla telecamera del gioco
 static void Ancilla_ShotOam(OamEnt *oam, uint16 x, uint16 y, uint8 charnum, uint8 flags, uint8 big) {
-  if (Ancilla_LiveView()) {
+  if (HdWorld_LiveView()) {
     Ancilla_SetOam(oam, x, y, charnum, flags, big);
     return;
   }
-  int ext = g_zenv.ppu->extraLeftRight;
+  int ext = Sprite_WideBand();
   uint8 yval = 0xf0;
   if ((uint16)(x + ext + 16) < 256 + 2 * ext + 16 && y < 0xf0) {
     big |= (x >> 8) & 1;
@@ -422,20 +460,27 @@ int Ancilla_AllocHigh() {
   return -1;
 }
 
+// la posizione vera si ricostruisce al disegno (ResolveSpritePositions,
+// nella finestra da 128 pixel prima a 384 dopo la vista)
+// Continuous world piece of Ancilla_SetOam / Ancilla_SetOam_Safe: true if
+// (x, y) is in that window, with *big and *yval set
+static bool Ancilla_LiveOamPos(OamEnt *oam, uint16 x, uint16 y, uint8 *big, uint8 *yval) {
+  int dx = g_view_wx - BG2HOFS_copy2, dy = g_view_wy - BG2VOFS_copy2;
+  if (!((uint16)(x - dx + 0x80) < 0x200 && (uint16)(y - dy + 0x40) < 0x140))
+    return false;
+  *big |= (x >> 8) & 1;
+  *yval = y;
+  g_oam_real_f0[oam - oam_buf] = *yval == 0xf0;
+  return true;
+}
+
 static void Ancilla_SetOam(OamEnt *oam, uint16 x, uint16 y, uint8 charnum, uint8 flags, uint8 big) {
   uint8 yval = 0xf0;
   // fasce dello schermo largo: quanto sporgono davvero (85 pixel in 16:9), non 0x40 fissi
-  int xt = Ancilla_WideExt();
-  if (Ancilla_LiveView()) {
-    // la posizione vera si ricostruisce al disegno (ResolveSpritePositions,
-    // nella finestra da 128 pixel prima a 384 dopo la vista)
-    int dx = g_view_wx - BG2HOFS_copy2, dy = g_view_wy - BG2VOFS_copy2;
-    if ((uint16)(x - dx + 0x80) < 0x200 && (uint16)(y - dy + 0x40) < 0x140) {
-      big |= (x >> 8) & 1;
+  int xt = Sprite_WideBand();
+  if (HdWorld_LiveView()) {
+    if (Ancilla_LiveOamPos(oam, x, y, &big, &yval))
       oam->x = x;
-      yval = y;
-      g_oam_real_f0[oam - oam_buf] = yval == 0xf0;
-    }
   } else if ((uint16)(x + xt) < 256 + xt * 2 && y < 256) {
     big |= (x >> 8) & 1;
     oam->x = x;
@@ -451,14 +496,9 @@ static void Ancilla_SetOam(OamEnt *oam, uint16 x, uint16 y, uint8 charnum, uint8
 static void Ancilla_SetOam_Safe(OamEnt *oam, uint16 x, uint16 y, uint8 charnum, uint8 flags, uint8 big) {
   uint8 yval = 0xf0;
   oam->x = x;
-  int xt = Ancilla_WideExt() ? Ancilla_WideExt() + 8 : 0;
-  if (Ancilla_LiveView()) {
-    int dx = g_view_wx - BG2HOFS_copy2, dy = g_view_wy - BG2VOFS_copy2;
-    if ((uint16)(x - dx + 0x80) < 0x200 && (uint16)(y - dy + 0x40) < 0x140) {
-      big |= (x >> 8) & 1;
-      yval = y;
-      g_oam_real_f0[oam - oam_buf] = yval == 0xf0;
-    }
+  int xt = Sprite_WideBand() ? Sprite_WideBand() + 8 : 0;
+  if (HdWorld_LiveView()) {
+    Ancilla_LiveOamPos(oam, x, y, &big, &yval);
   } else if ((uint16)(x + 0x80) < (0x180 + xt)) {
     big |= (x >> 8) & 1;
     if ((uint16)(y + 0x10) < 0x100)
@@ -548,14 +588,21 @@ void AddDashingDustEx(uint8 a, uint8 y, uint8 flag) {
 // Quanto lo schermo largo sporge a sinistra: l'uccello parte da li' fuori.
 // In origine 0x40 fissi (16:10) e solo senza "unchanged_sprites": col 16:9
 // compariva dentro lo schermo
-static int Bird_ScreenExt(void) {
-  return Ancilla_WideExt();
-}
-
+// (the band width is Sprite_WideBand)
 static int Bird_ScreenLeft(void) {
   int x, y, w, h;
   HdWorld_ScreenRect(&x, &y, &w, &h);  // bordo sinistro dello schermo mostrato
   return x;
+}
+
+// Right edge of the shown screen, relative to the game camera (as info.x of
+// Ancilla_PrepOamCoord): 256 on the original screen. One rule for the birds
+// leaving to the right (the weathervane bird and the one carrying Link): any
+// aspect ratio, and the continuous world's view off the game camera
+static int Bird_ScreenRightRel(void) {
+  int x, y, w, h;
+  HdWorld_ScreenRect(&x, &y, &w, &h);
+  return x + w - BG2HOFS_copy2;
 }
 
 void AddBirdCommon(int k) {
@@ -889,9 +936,26 @@ void Ancilla01_SomariaBullet(int k) {  // 88851b
   SomarianBlast_Draw(k);
 }
 
+// Pezzo (dx, dy) dell'ancilla k col mondo continuo: in coordinate vere, anche
+// oltre la telecamera del gioco ferma al bordo dell'area (i disegni a 8 bit
+// dell'originale finivano nel punto sbagliato). Vale per i disegni che usano
+// Ancilla_ReturnIfOutsideBounds
+static void Ancilla_LivePiece(OamEnt *oam, int k, int dx, int dy, uint8 ch, uint8 flags, uint8 big) {
+  Ancilla_SetOam(oam, (uint16)(Ancilla_GetX(k) + dx - BG2HOFS_copy2), (uint16)(Ancilla_GetY(k) + dy - BG2VOFS_copy2),
+                 ch, flags, big);
+}
+
 bool Ancilla_ReturnIfOutsideBounds(int k, AncillaOamInfo *info) {  // 88862a
   static const uint8 kAncilla_FloorFlags[2] = {0x20, 0x10};
   info->flags = kAncilla_FloorFlags[ancilla_floor[k]];
+  if (HdWorld_LiveView()) {
+    info->x = ancilla_x_lo[k] - BG2HOFS_copy2, info->y = ancilla_y_lo[k] - BG2VOFS_copy2;
+    if (Ancilla_OutsideView(Ancilla_GetX(k), Ancilla_GetY(k))) {
+      ancilla_type[k] = 0;
+      return true;
+    }
+    return false;
+  }
   if ((info->x = ancilla_x_lo[k] - BG2HOFS_copy2) >= 0xf4 ||
       (info->y = ancilla_y_lo[k] - BG2VOFS_copy2) >= 0xf0) {
     ancilla_type[k] = 0;
@@ -942,6 +1006,19 @@ void SomarianBlast_Draw(int k) {  // 888650
   };
   OamEnt *oam = GetOamCurPtr();
   int j = ancilla_dir[k] * 6 + ancilla_step[k];
+  if (HdWorld_LiveView()) {
+    if (sign8(kSomarianBlast_Draw_Y0[j]))
+      SetOamPlain(oam + 0, 0, 0xf0, 0, 0, 0);
+    else
+      Ancilla_LivePiece(oam + 0, k, kSomarianBlast_Draw_X0[j], kSomarianBlast_Draw_Y0[j],
+                        0x82 + kSomarianBlast_Draw_Char0[j], info.flags | kSomarianBlast_Draw_Flags0[j], 0);
+    if (sign8(kSomarianBlast_Draw_Y1[j]))
+      SetOamPlain(oam + 1, 0, 0xf0, 0, 0, 0);
+    else
+      Ancilla_LivePiece(oam + 1, k, kSomarianBlast_Draw_X1[j], kSomarianBlast_Draw_Y1[j],
+                        0x82 + kSomarianBlast_Draw_Char1[j], info.flags | kSomarianBlast_Draw_Flags1[j], 0);
+    return;
+  }
   SetOamPlain(oam + 0, info.x + kSomarianBlast_Draw_X0[j], sign8(kSomarianBlast_Draw_Y0[j]) ? 0xf0 : info.y + kSomarianBlast_Draw_Y0[j],
               0x82 + kSomarianBlast_Draw_Char0[j], info.flags | kSomarianBlast_Draw_Flags0[j], 0);
   SetOamPlain(oam + 1, info.x + kSomarianBlast_Draw_X1[j], sign8(kSomarianBlast_Draw_Y1[j]) ? 0xf0 : info.y + kSomarianBlast_Draw_Y1[j],
@@ -951,21 +1028,27 @@ void SomarianBlast_Draw(int k) {  // 888650
 // La fiammata della Bacchetta del Fuoco attraversa cespugli ed erba e li
 // incendia: brucia subito quelli nei punti in cui controlla i muri, cosi'
 // non la fermano
+// Fire and Ice Rod shots: the two wall probe points per direction, and the
+// row of three water tiles across the direction centered on (cx, cy)
+static const int8 kRodProbe_X[2][4] = {{4, 4, 4, 12}, {12, 12, 4, 12}};
+static const int8 kRodProbe_Y[2][4] = {{4, 12, 5, 5}, {4, 12, 12, 12}};
+
+static void RodShot_WaterRow(int cx, int cy, int d, void Fn(uint16 x, uint16 y)) {
+  int sx = d & 2 ? 0 : 16, sy = d & 2 ? 16 : 0;
+  Fn(cx, cy);
+  Fn(cx - sx, cy - sy);
+  Fn(cx + sx, cy + sy);
+}
+
 static void FireRodShot_BurnAhead(int k) {
-  static const int8 kProbe8_X[4] = {4, 4, 4, 12}, kProbe8_Y[4] = {4, 12, 5, 5};
-  static const int8 kProbe12_X[4] = {12, 12, 4, 12}, kProbe12_Y[4] = {4, 12, 12, 12};
   if (ancilla_type[k] != 2)
     return;
   int d = ancilla_dir[k] & 3;
   uint16 x = Ancilla_GetX(k), y = Ancilla_GetY(k);
-  HdBurn_Ignite(x + kProbe8_X[d], y + kProbe8_Y[d], true);
-  HdBurn_Ignite(x + kProbe12_X[d], y + kProbe12_Y[d], true);
+  for (int i = 0; i < 2; i++)
+    HdBurn_Ignite(x + kRodProbe_X[i][d], y + kRodProbe_Y[i][d], true);
   // l'acqua ghiacciata si scioglie dove si congela: al centro e ai lati
-  int cx = x + 8, cy = y + 8;
-  int sx = d & 2 ? 0 : 16, sy = d & 2 ? 16 : 0;
-  HdBurn_MeltWater(cx, cy);
-  HdBurn_MeltWater(cx - sx, cy - sy);
-  HdBurn_MeltWater(cx + sx, cy + sy);
+  RodShot_WaterRow(x + 8, y + 8, d, HdBurn_MeltWater);
 }
 
 // Spada e oggetti: come su GBA (0x81186fe) la fiammata in volo taglia le
@@ -1105,9 +1188,8 @@ bool Ancilla_CheckTileCollisionOneFloor(int k) {  // 888a03
 }
 
 bool Ancilla_CheckTileCollision_targeted(int k, uint16 x, uint16 y) {  // 888a26
-  if (Ancilla_LiveView() ? Ancilla_OutsideView(x, y) :
-      Ancilla_IsRodShot(k) ? Ancilla_ShotOutside(x, y) || !Ancilla_ShotOnMap(x, y) :
-      (uint16)(y - BG2VOFS_copy2) >= 224 || (uint16)(x - BG2HOFS_copy2) >= 256)
+  if (HdWorld_LiveView() || !Ancilla_IsRodShot(k) ? Ancilla_OffScreen(x, y, 256, 224) :
+      Ancilla_ShotOutside(x, y) || !Ancilla_ShotOnMap(x, y))
     return 0;
   uint8 tile_attr;
   if (!player_is_indoors) {
@@ -1179,7 +1261,7 @@ bool Ancilla_CheckTileCollision_Class2_Inner(int k) {  // 888c43
   uint16 x = Ancilla_GetX(k) + kAncilla_CheckTileColl_X[ancilla_dir[k]];
   uint16 y = Ancilla_GetY(k) + kAncilla_CheckTileColl_Y[ancilla_dir[k]];
 
-  if ((uint16)(y - BG2VOFS_copy2) >= 224 || (uint16)(x - BG2HOFS_copy2) >= 256)
+  if (Ancilla_OffScreen(x, y, 256, 224))
     return false;
   uint8 tile_attr;
   if (!player_is_indoors) {
@@ -1223,6 +1305,13 @@ void Ancilla04_BeamHit(int k) {  // 888d19
   }
   OamEnt *oam = GetOamCurPtr();
   int j = ancilla_timer[k] >> 1;
+  if (HdWorld_LiveView()) {
+    for (int i = 3; i >= 0; i--, oam++) {
+      int m = j * 4 + i;
+      Ancilla_LivePiece(oam, k, kBeamHit_X[m], kBeamHit_Y[m], kBeamHit_Char[m] + 0x82, kBeamHit_Flags[m] | 2 | info.flags, 0);
+    }
+    return;
+  }
   uint16 ancilla_x = Ancilla_GetX(k);
   uint16 ancilla_y = Ancilla_GetY(k);
   uint8 r7 = ancilla_x - BG2HOFS_copy2;
@@ -1434,6 +1523,11 @@ void Ancilla_MoveZ(int k) {  // 8890b7
 // su GBA (0x8122e2c): taglia cespugli ed erba alta e, come la spada a mano
 // vuota, rompe i cartelli dalla Spada Suprema e i vasi con la Spada d'Oro
 // (Overworld_BoomerangCut): -1 niente, 0 tagliato, 1 c'era qualcosa
+// Smashes the pot on the tile at world pixel (x, y), on ancilla k's floor
+static bool Ancilla_SmashPotAt(int k, uint16 x, uint16 y) {
+  return Dungeon_SmashPotAtPos((ancilla_floor[k] ? 0x1000 : 0) + ((x & 0x1f8) >> 3) + ((y & 0x1f8) << 3));
+}
+
 static int Boomerang_CutGrass(int k) {
   if (!(enhanced_features0 & kFeatures0_SwordAndItems) || !ancilla_G[k])
     return -1;
@@ -1441,9 +1535,27 @@ static int Boomerang_CutGrass(int k) {
   if (player_is_indoors) {
     if (link_sword_type != 4 || link_position_mode != 0 || link_item_in_hand & 2)
       return -1;
-    return Dungeon_SmashPotAtPos((ancilla_floor[k] ? 0x1000 : 0) + ((x & 0x1f8) >> 3) + ((y & 0x1f8) << 3)) ? 0 : -1;
+    return Ancilla_SmashPotAt(k, x, y) ? 0 : -1;
   }
   return Overworld_BoomerangCut(x, y);
+}
+
+// Boomerang as in Four Swords Adventures (FsaBoomerang): while the button
+// that threw it stays held, the boomerang waits in mid-air at the end of its
+// flight and comes back when the button is let go. Button 0 = Y, 1 = X,
+// 2 = L, 3 = R (an item assigned to X, L or R: GetCurrentItemButtonIndex)
+static bool g_boom_held, g_boom_hover;
+static uint8 g_boom_btn;
+
+void Boomerang_NoteThrow(int btn) {
+  g_boom_btn = btn;
+  g_boom_held = g_config.fsa_boomerang;
+  g_boom_hover = false;
+}
+
+static bool Boomerang_ButtonDown(void) {
+  static const uint8 kKeys[4] = { 0, kJoypadL_X, kJoypadL_L, kJoypadL_R };
+  return g_boom_btn ? (joypad1L_last & kKeys[g_boom_btn & 3]) != 0 : (joypad1H_last & kJoypadH_Y) != 0;
 }
 
 void Ancilla05_Boomerang(int k) {  // 8890fc
@@ -1457,6 +1569,10 @@ void Ancilla05_Boomerang(int k) {  // 8890fc
   }
   if (submodule_index)
     goto exit_and_draw;
+
+  // once let go, the button no longer holds the boomerang
+  if (g_boom_held && !Boomerang_ButtonDown())
+    g_boom_held = false;
 
   if (!(frame_counter & 7))
     Ancilla_Sfx2_Pan(k, 0x9);
@@ -1500,15 +1616,22 @@ void Ancilla05_Boomerang(int k) {  // 8890fc
   int cut = Boomerang_CutGrass(k);
 
   if (!ancilla_item_to_link[k]) {
+    if (g_boom_hover) {
+      // waiting in mid-air (FsaBoomerang): back when the button is let go
+      if (!g_boom_held)
+        g_boom_hover = false, ancilla_item_to_link[k] = 1;
     // dopo un cespuglio che nascondeva qualcosa torna indietro (e lo raccoglie)
-    if (hit_spr >= 0 || cut > 0) {
+    } else if (hit_spr >= 0 || cut > 0) {
       ancilla_item_to_link[k] ^= 1;
     } else if (cut < 0 && Ancilla_CheckTileCollision(k)) {
       AncillaAdd_BoomerangWallClink(k);
       Ancilla_Sfx2_Pan(k, (ancilla_tile_attr[k] == 0xf0) ? 6 : 5);
       ancilla_item_to_link[k] ^= 1;
     } else if (Boomerang_ScreenEdge(k) || --ancilla_step[k] == 0) {
-      ancilla_item_to_link[k] ^= 1;
+      if (g_boom_held)
+        g_boom_hover = true, ancilla_x_vel[k] = ancilla_y_vel[k] = 0, ancilla_K[k] = 0;
+      else
+        ancilla_item_to_link[k] ^= 1;
     } else {
       if (ancilla_step[k] < 5)
         ancilla_K[k]--;
@@ -1527,15 +1650,25 @@ exit_and_draw:
   Boomerang_Draw(k);
 }
 
+// Il boomerang torna indietro al bordo dello schermo SNES (256 x 224 px). Col
+// mondo continuo lo schermo e' quello dello SNES con Link al centro (la
+// telecamera originale lo tiene li'), anche oltre il bordo dell'area: la
+// gittata e' quella originale e uguale sui due lati (scelta dell'utente: non
+// fino al bordo dello schermo largo, ne' secondo dove si trova la vista)
 bool Boomerang_ScreenEdge(int k) {  // 88924b
   uint16 x = Ancilla_GetX(k), y = Ancilla_GetY(k);
+  uint16 cam_x = BG2HOFS_copy2, cam_y = BG2VOFS_copy2;
+  if (HdWorld_LiveView()) {
+    cam_x = link_x_coord + 8 - 128;
+    cam_y = link_y_coord + 12 - 112;
+  }
   if (hookshot_effect_index & 3) {
-    uint16 t = x + (hookshot_effect_index & 1 ? 16 : 0) - BG2HOFS_copy2;
+    uint16 t = x + (hookshot_effect_index & 1 ? 16 : 0) - cam_x;
     if (t >= 0x100)
       return true;
   }
   if (hookshot_effect_index & 12) {
-    uint16 t = y + (hookshot_effect_index & 4 ? 16 : 0) - BG2VOFS_copy2;
+    uint16 t = y + (hookshot_effect_index & 4 ? 16 : 0) - cam_y;
     if (t >= 0xe2)
       return true;
   }
@@ -1551,6 +1684,7 @@ void Boomerang_StopOffScreen(int k) {  // 8892ab
 
 void Boomerang_Terminate(int k) {  // 8892f5
   ancilla_type[k] = 0;
+  g_boom_held = g_boom_hover = false;
   flag_for_boomerang_in_place = 0;
   if (link_item_in_hand & 0x80) {
     link_item_in_hand = 0;
@@ -2110,8 +2244,7 @@ static bool Arrow_SmashPot(int k) {
   uint16 y = Ancilla_GetY(k) + kArrowTip_Y[d];
   if ((uint16)(y - BG2VOFS_copy2) >= 224 || (uint16)(x - BG2HOFS_copy2) >= 256)
     return false;
-  uint16 pos = (ancilla_floor[k] ? 0x1000 : 0) + ((x & 0x1f8) >> 3) + ((y & 0x1f8) << 3);
-  return Dungeon_SmashPotAtPos(pos);
+  return Ancilla_SmashPotAt(k, x, y);
 }
 
 void Ancilla09_Arrow(int k) {  // 88a131
@@ -2288,27 +2421,20 @@ void Ancilla0A_ArrowInTheWall(int k) {  // 88a45b
 // incontra in linea retta, nei punti in cui controlla i muri, e l'acqua sotto
 // il suo centro: una fila di lastre larga tre tile
 static void IceRodShot_FreezeAhead(int k) {
-  static const int8 kProbe8_X[4] = {4, 4, 4, 12}, kProbe8_Y[4] = {4, 12, 5, 5};
-  static const int8 kProbe12_X[4] = {12, 12, 4, 12}, kProbe12_Y[4] = {4, 12, 12, 12};
   int d = ancilla_dir[k] & 3;
   uint16 x = Ancilla_GetX(k), y = Ancilla_GetY(k);
-  HdBurn_Freeze(x + kProbe8_X[d], y + kProbe8_Y[d]);
-  HdBurn_Freeze(x + kProbe12_X[d], y + kProbe12_Y[d]);
+  for (int i = 0; i < 2; i++)
+    HdBurn_Freeze(x + kRodProbe_X[i][d], y + kRodProbe_Y[i][d]);
   // tre lastre affiancate: dall'acqua Link ci arriva col salto, che lo porta
   // avanti di circa 22 pixel (Link_HopInOrOutOfWater_X/Y)
   int cx = x + 8, cy = y + 8;
-  int sx = d & 2 ? 0 : 16, sy = d & 2 ? 16 : 0;
-  HdBurn_FreezeWater(cx, cy);
-  HdBurn_FreezeWater(cx - sx, cy - sy);
-  HdBurn_FreezeWater(cx + sx, cy + sy);
+  RodShot_WaterRow(cx, cy, d, HdBurn_FreezeWater);
   // e la fila dietro: il colpo nasce gia' avanti e fra Link e la prima lastra
   // restava una striscia d'acqua (Link a piedi ci cadeva). Non mentre Link
   // nuota: si congelerebbe l'acqua sotto di lui
   if (!link_is_in_deep_water) {
     int bx = cx + (d == 2 ? 16 : d == 3 ? -16 : 0), by = cy + (d == 0 ? 16 : d == 1 ? -16 : 0);
-    HdBurn_FreezeWater(bx, by);
-    HdBurn_FreezeWater(bx - sx, by - sy);
-    HdBurn_FreezeWater(bx + sx, by + sy);
+    RodShot_WaterRow(bx, by, d, HdBurn_FreezeWater);
   }
 }
 
@@ -4409,6 +4535,9 @@ void Ancilla38_CutsceneDuck(int k) {  // 88d1d8
     ancilla_K[k] ^= 1;
   }
 
+  // ancilla_S = 2: past the game's edge, flying straight out (see below)
+  if (ancilla_S[k] == 2)
+    goto after_stuff;
   if (!--ancilla_aux_timer[k]) {
     ancilla_aux_timer[k] = 1;
     if (!ancilla_L[k]) {
@@ -4448,7 +4577,19 @@ after_stuff:
                  kTravelBird_Draw_Flags[0] | 0x30 | kTravelBirdIntro_Tab0[ancilla_dir[k] & 1], 2);
   oam++;
   AncillaDraw_Shadow(oam, 1, info.x, info.y + 48, 0x30);
-  if (!sign16(info.x) && info.x >= 248) {
+  // Wide screen: at 248 the bird vanished in the middle of the right band.
+  // From there it flies on straight (its path would turn back) until 8
+  // pixels before the right edge of the shown screen (Bird_ScreenRightRel);
+  // the scene, which holds Link, ends when it leaves, as originally
+  int right = Bird_ScreenRightRel() - 8;
+  if (sign16(info.x))
+    return;
+  if (ancilla_S[k] != 2 && info.x >= 248) {
+    ancilla_S[k] = 2;
+    ancilla_x_vel[k] = IntMax((int8)ancilla_x_vel[k], 24);
+    ancilla_z_vel[k] = 0;
+  }
+  if ((int16)info.x >= right) {
     ancilla_type[k] = 0;
     submodule_index = 0;
     link_item_flute = 3;
@@ -5060,7 +5201,8 @@ endif_5:
   if (ancilla_step[k])
     AncillaDraw_Shadow(oam, 1, info.x - 7, info.y + 28, 0x30);
 
-  if (!sign16(info.x) && info.x >= 0x130 + Bird_ScreenExt()) {
+  // gone 48 pixels past the right edge of the shown screen (Bird_ScreenRightRel)
+  if (!sign16(info.x) && (int16)info.x >= Bird_ScreenRightRel() + 0x30) {
     ancilla_type[k] = 0;
     if (!ancilla_L[k] && ancilla_step[k]) {
       submodule_index = 10;
@@ -6009,6 +6151,12 @@ OamEnt *HitStars_UpdateOamBufferPosition(OamEnt *oam) {  // 88fa00
 
 bool Hookshot_ShouldIEvenBotherWithTiles(int k) {  // 88fa2d
   uint16 x = Ancilla_GetX(k), y = Ancilla_GetY(k);
+  if (HdWorld_SeamlessOn()) {  // (false indoors)
+    // Mondo continuo: il rampino guarda le caselle anche oltre il bordo
+    // dell'area (vengono dalla mappa del mondo, tile_detect.c); si ferma
+    // solo dove non c'e' mappa (fine del mondo)
+    return !HdWorld_TerrainKnown((int16)x, (int16)y) || !HdWorld_TerrainKnown((int16)x + 15, (int16)y + 15);
+  }
   if (!player_is_indoors) {
     if (!(ancilla_dir[k] & 2)) {
       uint16 t = y - kOverworld_OffsetBaseY[BYTE(current_area_of_player) >> 1];
@@ -6812,7 +6960,7 @@ void AddBirdTravelSomething(uint8 a, uint8 y) {  // 89951d
     link_cant_change_direction &= ~1;
     ancilla_L[k] = 1;
 
-    if (Bird_ScreenExt()) {
+    if (Sprite_WideBand()) {
       // todo: tune these better so the angle of attack is better
       ancilla_z_vel[k] = 58;
       ancilla_z[k] = -105;
@@ -6824,8 +6972,8 @@ void AddBirdTravelSomething(uint8 a, uint8 y) {  // 89951d
     AddBirdCommon(k);
     // la discesa e' tarata per partire 0x40 pixel fuori e posare Link al centro
     // dopo lo stesso numero di fotogrammi: piu' strada, un po' piu' veloce
-    if (Bird_ScreenExt())
-      ancilla_x_vel[k] = 56 * (Bird_ScreenExt() + 144) / (0x40 + 144);
+    if (Sprite_WideBand())
+      ancilla_x_vel[k] = 56 * (Sprite_WideBand() + 144) / (0x40 + 144);
   }
 }
 
@@ -6879,6 +7027,10 @@ void AncillaAdd_BlastWall() {  // 899692
   ancilla_type[3] = 0;
   ancilla_type[4] = 0;
   ancilla_type[5] = 0;
+  // Link's slots were extended: clear the rest too (same range as
+  // Ancilla_TerminateSelectInteractives)
+  for (int i = 6; i <= kAncilla_LinkSlots; i++)
+    ancilla_type[i] = 0;
 
   ancilla_item_to_link[0] = 0;
   flag_is_ancilla_to_pick_up = 0;
@@ -6974,7 +7126,7 @@ void AncillaAdd_IceRodShot(uint8 a, uint8 y) {  // 899863
     uint16 x = link_x_coord + kIceRod_X[j];
     uint16 y = link_y_coord + kIceRod_Y[j];
 
-    if (((x - BG2HOFS_copy2) | (y - BG2VOFS_copy2)) & 0xff00) {
+    if (Ancilla_OffScreen(x, y, 0x100, 0x100)) {
       ancilla_type[k] = 0;
       return;
     }
@@ -7135,6 +7287,10 @@ void FireRodShot_BecomeSkullWoodsFire(int k) {  // 899c4f
   ancilla_type[3] = 0;
   ancilla_type[4] = 0;
   ancilla_type[5] = 0;
+  // Link's slots were extended: clear the rest too (same range as
+  // Ancilla_TerminateSelectInteractives)
+  for (int i = 6; i <= kAncilla_LinkSlots; i++)
+    ancilla_type[i] = 0;
   flag_for_boomerang_in_place = 0;
   ancilla_numspr[0] = kAncilla_Pflags[0x34];
   skullwoodsfire_var0[0] = 253;
@@ -7497,12 +7653,12 @@ int DashTremor_TwiddleOffset(int k) {  // 8ffafe
 }
 
 void Ancilla_TerminateIfOffscreen(int j) {  // 8ffd52
-  if (Ancilla_LiveView()) {
+  if (HdWorld_LiveView()) {
     if (Ancilla_OutsideView(Ancilla_GetX(j), Ancilla_GetY(j)))
       ancilla_type[j] = 0;
     return;
   }
-  int xt = (enhanced_features0 & kFeatures0_ExtendScreen64) ? g_zenv.ppu->extraLeftRight : 0;
+  int xt = Ancilla_LogicBand();
   uint16 x = Ancilla_GetX(j) - BG2HOFS_copy2 + xt;
   uint16 y = Ancilla_GetY(j) - BG2VOFS_copy2;
   if (x >= 244 + xt * 2 || y >= 240)

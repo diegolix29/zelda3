@@ -5,7 +5,6 @@
 
 #include "types.h"
 
-extern bool g_fx_water;
 
 struct Ppu;
 // Prima e dopo il disegno della PPU: raccoglie gli sprite trasparenti sommati
@@ -20,6 +19,19 @@ void HdWater_Apply(uint8 *pixels, int pitch, int width, int height, int bias_x, 
 // Acqua della chiusa (stanza della diga): il gioco la disegna sul piano di
 // sopra senza cambiare gli attributi delle caselle. Si segnano qui le caselle
 // 8x8 (posizione nella mappa 64x64 della stanza) per l'acqua HD
+// Index (0-0xfff) of the 8x8 cell of the 64x64 room map at world point wx, wy
+static inline int HdWater_DungPos(int wx, int wy) {
+  return ((wy & 0x1f8) << 3) + ((wx & 0x1f8) >> 3);
+}
+// Tile attribute of deep (0x08) or shallow (0x09) water
+static inline bool HdWater_IsWaterAttr(uint8 a) {
+  return a == 0x08 || a == 0x09;
+}
+// Outdoor waterfall cell (map8 entry e): tiles 0x1ca-0x1cd with palette 7
+static inline bool HdWater_IsWaterfallEntry(int e) {
+  int t = e & 0x3ff;
+  return e >= 0 && (e >> 10 & 7) == 7 && t >= 0x1ca && t <= 0x1cd;
+}
 void HdWater_ClearFlood(void);
 void HdWater_MarkFlood(int pos);
 bool HdWater_IsFlood(int pos);

@@ -134,6 +134,11 @@ int PpuGetCurrentRenderScale(Ppu *ppu, uint32_t render_flags) {
   return hq ? 4 : 1;
 }
 
+// GBA blend weight in 16ths (above 16: full add)
+static inline int PpuGbaBlendWeight(Ppu *ppu) {
+  return ppu->gbaBlend > 16 ? 16 : ppu->gbaBlend;
+}
+
 void PpuBeginDrawing(Ppu *ppu, uint8_t *pixels, size_t pitch, uint32_t render_flags) {
   ppu->renderFlags = render_flags;
   ppu->renderPitch = (uint)pitch;
@@ -152,7 +157,7 @@ void PpuBeginDrawing(Ppu *ppu, uint8_t *pixels, size_t pitch, uint32_t render_fl
 
   if (ppu->gbaBlend && (ppu->gbaBlend != ppu->lastGbaBlend || ppu->brightness != ppu->lastGbaBlendBrightness)) {
     ppu->lastGbaBlend = ppu->gbaBlend, ppu->lastGbaBlendBrightness = ppu->brightness;
-    int k = ppu->gbaBlend > 16 ? 16 : ppu->gbaBlend;
+    int k = PpuGbaBlendWeight(ppu);
     for (int i = 0; i < 64; i++) {
       int v = i * k >> 4;
       ppu->brightnessMultBlend[i] = ppu->brightnessMult[v > 31 ? 31 : v];
@@ -180,6 +185,49 @@ static inline void ClearBackdrop(PpuPixelPrioBufs *buf) {
     *(uint64*)&buf->data[i] = 0x0500050005000500;
 }
 
+// OAM entry at index (y = yy) is hidden: y 0xf0, unless the real position
+// was rebuilt and says it is shown
+static inline bool PpuObj_Hidden(Ppu *ppu, int index, int yy) {
+  return yy == 0xf0 && !(ppu->objYValid && ppu->objShowF0[(index >> 1) & 127]);
+}
+
+// How far a sprite of this size scaled by scale/256 (0: not scaled) sticks out
+// on each side
+static inline int PpuObj_ScaleExt(int scale, int size) {
+  return scale ? IntMax(((size * scale >> 8) - size + 1) >> 1, 0) : 0;
+}
+
+// Screen y of the OAM entry when it must not wrap around: the rebuilt real
+// position, or yy with the rows below the screen taken as above it
+static inline int PpuObj_ScreenY(Ppu *ppu, int index, int yy) {
+  int bottom = (ppu->renderFlags & kPpuRenderFlags_Height240) ? 240 : 224;
+  return ppu->objYValid ? ppu->objY[(index >> 1) & 127] : yy >= bottom ? yy - 256 : yy;
+}
+
+void PpuObjRows(Ppu *ppu, int height, int *y0, int *y1) {
+  int r0 = height, r1 = 0;
+  for (int index = 0; index < 256; index += 2) {
+    int yy = ppu->oam[index] >> 8;
+    if (PpuObj_Hidden(ppu, index, yy))
+      continue;
+    int highOam = ppu->oam[0x100 + (index >> 4)] >> (index & 15);
+    int size = kSpriteSizes[ppu->objSize][(highOam >> 1) & 1];
+    int ext = PpuObj_ScaleExt(ppu->objScale[(index >> 1) & 127], size);
+    int top;
+    if (ppu->objBiasY == 0 && !ppu->objYValid) {
+      if (yy - ext < 0 || yy + size + ext > 256) {
+        r0 = 0, r1 = height;  // wraps around: every row
+        break;
+      }
+      top = yy;
+    } else {
+      top = PpuObj_ScreenY(ppu, index, yy) - ppu->objBiasY;
+    }
+    r0 = IntMin(r0, IntMax(top - ext, 0));
+    r1 = IntMax(r1, IntMin(top + size + ext, height));
+  }
+  *y0 = r0, *y1 = r1;
+}
 
 void ppu_runLine(Ppu *ppu, int line) {
   if(line != 0) {
@@ -461,9 +509,85 @@ static bool PpuHudBoxRowSrc(Ppu *ppu, int x, int ty, int *sx, int *sy) {
   return x >= 0 && x < 256 && !(x >= 64 && x < 160 && ty >= 32 && ty < 48);
 }
 
+// GBA HUD (Ppu.hudGba, option GbaHud): the pieces of the original HUD where
+// the GBA version puts them (measured with mGBA on its 240 x 160 screen),
+// anchored to the edges of the whole picture (side bands included): magic
+// meter 5 px from the left edge, counters 33 px from it, hearts on the right
+// without the LIFE label, item box 5 px from the right edge with the boxes of
+// X, L and R as in kHudSplitBoxes. The left part moves up 10 rows (top of the
+// HUD 5 px from the edge on every side, the GBA has 4 on the left and at the
+// top), the hearts 18 (no LIFE label); the Y box frame goes from map row 21
+// to 11. Sources in the BG3 map: magic x 20-36, counters x 64-159
+// rows 16-31, hearts with floor / super bomb indicator x 160-247 rows 24-55.
+// In 4:3 and 3:2 (Ppu.hudBoxRow) the boxes of X, L and R go under
+// the counters as in the classic HUD. The hearts end 5 px before the item
+// box as on GBA; if they would touch the counters they go under them.
+enum {
+  kGbaHudTop = 5, kGbaHudLeftDy = 10, kGbaHudHeartsDy = 18,
+  kGbaHudMarginL = 5, kGbaHudCountersX = 33, kGbaHudMarginR = 5,
+  kGbaHudBoxTop = 11, kGbaHudHeartsGap = 6,  // 5 empty pixels before the boxes, as on GBA
+};
+
+static int PpuHudGbaSrc(Ppu *ppu, int x, int ty, int *sx, int *sy) {
+  int oty = ty;
+  ty -= ppu->hudGbaDrop;  // START menu: pieces pushed fully off the screen
+  int lx = x + ppu->hudSplitExt;  // 0 = left edge of the picture
+  int ly = ty + kGbaHudLeftDy;
+  if (ly >= 16 && ly < 64 && (unsigned)(lx - kGbaHudMarginL) < 17) {
+    *sx = lx - kGbaHudMarginL + 20, *sy = ly;  // magic
+    return true;
+  }
+  if (ly >= 16 && ly < 32 && lx >= kGbaHudCountersX && lx < kGbaHudCountersX + ppu->hudGbaCountersW) {
+    *sx = lx - kGbaHudCountersX + 64, *sy = ly;  // counters
+    return true;
+  }
+  // narrow formats (Ppu.hudBoxRow): as in the classic HUD the boxes of L, X
+  // and R go in a row under the counters (PpuHudBoxRowSrc, moved with them)
+  // and only the Y box stays on the right
+  if (ppu->hudBoxRow) {
+    static const uint8 kOrder[3] = { 2, 1, 3 };  // L, X, R
+    int fx = lx - kGbaHudCountersX + 64 - kHudBoxRowX, fy = ly - 33;
+    if (fx >= 0 && fx < kHudBoxStep * 3 && fx % kHudBoxStep < 22 && (unsigned)fy < 22) {
+      int k = kOrder[fx / kHudBoxStep];
+      if (k == 1 ? (ppu->hudSplitButtons & 1) : (ppu->hudSplitButtons & 2)) {
+        PpuHudBoxPixel(k, fx % kHudBoxStep, fy, sx, sy);
+        return true;
+      }
+    }
+  }
+  const int8 (*boxes)[2] = kHudSplitBoxes[ppu->hudBoxRow ? 0 : ppu->hudSplitButtons & 3];
+  int cols = 0;
+  for (int k = 0; k < 4; k++)
+    cols = IntMax(cols, boxes[k][0] + 1);
+  int grid_x = 256 + ppu->hudSplitExt - kGbaHudMarginR - (cols * kHudBoxStep - kHudBoxGap);
+  for (int k = 0; k < 4; k++) {
+    if (boxes[k][0] < 0)
+      continue;
+    int fx = x - grid_x - boxes[k][0] * kHudBoxStep, fy = ty - kGbaHudBoxTop - boxes[k][1] * kHudBoxRowStep;
+    if ((unsigned)fx < 22 && (unsigned)fy < 22) {
+      PpuHudBoxPixel(k, fx, fy, sx, sy);
+      return true;
+    }
+  }
+  // hearts: last pixel (239 in the map) 5 px before the boxes as on GBA;
+  // under the counters if the first one (161) would touch them
+  int hx = grid_x - kGbaHudHeartsGap - 239, hy = ty + kGbaHudHeartsDy;
+  if (hx + 161 < kGbaHudCountersX + ppu->hudGbaCountersW + 2 - ppu->hudSplitExt)
+    hx = kGbaHudCountersX - ppu->hudSplitExt - 160, hy = ty + 24 - (32 - kGbaHudLeftDy + 3);
+  *sx = x - hx, *sy = hy;
+  if (*sy >= 24 && *sy < 56 && *sx >= 160 && *sx < 248)
+    return true;
+  // above and below the HUD the map stays as it is
+  ty = oty;
+  *sx = x, *sy = ty;
+  return (ty < 16 || ty >= 64) && x >= 0 && x < 256;
+}
+
 // Punto della mappa (sx, sy) da mostrare alla x dello schermo (da -ext a
 // 255 + ext) nella riga ty della mappa, o false
 static bool PpuHudSplitSrc(Ppu *ppu, int x, int ty, int *sx, int *sy) {
+  if (ppu->hudGba)
+    return PpuHudGbaSrc(ppu, x, ty, sx, sy);
   if (ppu->hudBoxRow)
     return PpuHudBoxRowSrc(ppu, x, ty, sx, sy);
   int ext = ppu->hudSplitExt, margin = ppu->hudSplitMargin;
@@ -483,12 +607,22 @@ static bool PpuHudSplitSrc(Ppu *ppu, int x, int ty, int *sx, int *sy) {
     PpuHudBoxPixel(k, fx, fy, sx, sy);
     return true;
   }
-  *sx = x - ext - 16 + margin;  // 239 = ultimo pixel dei cuori
+  *sx = x - ext - 16 + ppu->hudSplitMarginR;  // 239 = ultimo pixel dei cuori
   if (*sx >= 64 && *sx < 248 && ty < 64)
     return !(*sx < 160 && ty >= 32 && ty < 48);  // senza le icone di X/L/R
   // sotto l'HUD (riga 64) la mappa resta com'e'
   *sx = x;
   return ty >= 64 && x >= 0 && x < 256;
+}
+
+// HUD pixel in colour 2 of palette 5 (0x16) of BG3 (bg3MaxDigits)
+static inline bool PpuMaxDigit_Color(PpuZbufType z) {
+  return (z & 0xff) == 0x16 && (z >> 8 & 0xf) == 2;
+}
+
+// BG3 tile of a digit (0x90-0x99) in palette 5 (bg3MaxDigits)
+static inline bool PpuMaxDigit_Tile(uint16 tile) {
+  return (tile & 0x1c00) == 0x1400 && (uint16)((tile & 0x3ff) - 0x90) < 10;
 }
 
 static void PpuDrawHudSplit(Ppu *ppu, bool sub, int ty, PpuZbufType zhi, PpuZbufType zlo) {
@@ -513,8 +647,7 @@ static void PpuDrawHudSplit(Ppu *ppu, bool sub, int ty, PpuZbufType zhi, PpuZbuf
       continue;
     dstz[x] = z + pixel;
     // cifre al massimo (come in PpuDrawBackground_2bpp)
-    if (ppu->bg3MaxDigits && (dstz[x] & 0xff) == 0x16 && (dstz[x] >> 8 & 0xf) == 2 &&
-        (tile & 0x1c00) == 0x1400 && (uint16)((tile & 0x3ff) - 0x90) < 10)
+    if (ppu->bg3MaxDigits && PpuMaxDigit_Color(dstz[x]) && PpuMaxDigit_Tile(tile))
       dstz[x] -= 6;
   }
 }
@@ -564,7 +697,8 @@ static void PpuDrawBackground_2bpp(Ppu *ppu, uint y, bool sub, uint layer, PpuZb
   int tileadr = ppu->bgLayer[layer].tileAdr, pixel;
   int tileadr1 = tileadr + 7 - (y & 0x7), tileadr0 = tileadr + (y & 0x7);
   int ty = y & (bglayer->tilemapHigher ? 0x1ff : 0xff);
-  if (layer == 2 && (ppu->hudSplitExt || ppu->hudBoxRow) && ty >= 16 && ty < kHudSplitBottom) {
+  if (layer == 2 && (ppu->hudSplitExt || ppu->hudBoxRow || ppu->hudGba) &&
+      ty >= (ppu->hudGba ? kGbaHudTop : 16) && ty < kHudSplitBottom) {
     PpuDrawHudSplit(ppu, sub, ty, zhi, zlo);
     return;
   }
@@ -646,11 +780,11 @@ static void PpuDrawBackground_2bpp(Ppu *ppu, uint y, bool sub, uint layer, PpuZb
       PpuZbufType *dstz = ppu->bgBuffers[sub].data + kPpuExtraLeftRight;
       for (int sx = win.edges[windex]; sx < win.edges[windex + 1]; sx++) {
         PpuZbufType v = dstz[sx];
-        if ((v & 0xff) != 0x16 || (v >> 8 & 0xf) != 2)
+        if (!PpuMaxDigit_Color(v))
           continue;
         uint x = sx + bglayer->hScroll + BG_BIAS_X(ppu, layer);
         uint16 tile = tps[x >> 8 & 1][(x >> 3) & 0x1f];
-        if ((tile & 0x1c00) == 0x1400 && (uint16)((tile & 0x3ff) - 0x90) < 10)
+        if (PpuMaxDigit_Tile(tile))
           dstz[sx] = v - 6;
       }
     }
@@ -1113,10 +1247,10 @@ static void PpuDrawBackgrounds(Ppu *ppu, int y, bool sub) {
   }
 }
 
-// Layer di un pixel per il buffer (bit 24-27): quello del pixel, o 1 (fondale)
-// per gli sprite con objAsBg (0x900 sopra il 4 o il 6)
+// Layer di un pixel per il buffer (bit 24-27): quello del pixel, o
+// kPpuLayerObjAsBg per gli sprite con objAsBg (0x900 sopra il 4 o il 6)
 static inline uint32 PpuOutLayer(uint32 z) {
-  return (z & 0x900) == 0x900 ? 1 : z >> 8 & 7;
+  return (z & 0x900) == 0x900 ? kPpuLayerObjAsBg : z >> 8 & 7;
 }
 
 // Sprite sommato allo schermo secondario (Ppu.objMathOut): colore dello sprite
@@ -1183,6 +1317,7 @@ static NOINLINE void PpuDrawWholeLine(Ppu *ppu, uint y) {
     if (math_enabled_cur == 0 || fixed_color == 0 && !ppu->halfColor && !rendered_subscreen) {
       // Math is disabled (or has no effect), so can avoid the per-pixel maths check
       uint32 i = left;
+      uint32 prio_mask = ppu->objPrioOut ? 0xf000 : 0;  // see Ppu.objPrioOut
       do {
         uint32 z = ppu->bgBuffers[0].data[i];
         uint32 color = ppu->cgram[z & 0xff];
@@ -1190,7 +1325,7 @@ static NOINLINE void PpuDrawWholeLine(Ppu *ppu, uint y) {
         // (0=BG1, 1=BG2, 2=BG3, 3=BG4, 4=OBJ/sprite, 5=backdrop). Il byte
         // alto era inutilizzato; la texture viene caricata come BGRA, quindi
         // lo shader lo legge come canale alpha e sa cosa non deve dipingere.
-        dst[0] = PpuOutLayer(z) << 24 |
+        dst[0] = PpuOutLayer(z) << 24 | (z & prio_mask) << 16 |
                  ppu->brightnessMult[color & clip_color_mask] << 16 |
                  ppu->brightnessMult[(color >> 5) & clip_color_mask] << 8 |
                  ppu->brightnessMult[(color >> 10) & clip_color_mask];
@@ -1297,7 +1432,7 @@ static void ppu_handlePixel(Ppu* ppu, int x, int y) {
       }
       if (ppu->halfColor && (secondLayer != 5 || !ppu->addSubscreen)) {
         if (ppu->gbaBlend) {
-          int k = ppu->gbaBlend > 16 ? 16 : ppu->gbaBlend;
+          int k = PpuGbaBlendWeight(ppu);
           r = r * k >> 4, g = g * k >> 4, b = b * k >> 4;
         } else {
           r >>= 1;
@@ -1573,13 +1708,13 @@ static bool ppu_evaluateSprites(Ppu* ppu, int line) {
 
   do {
     int yy = ppu->oam[index] >> 8;
-    if (yy == 0xf0 && !(ppu->objYValid && ppu->objShowF0[(index >> 1) & 127]))
+    if (PpuObj_Hidden(ppu, index, yy))
       continue;  // this works for zelda because sprites are always 8 or 16.
     int highOam = ppu->oam[0x100 + (index >> 4)] >> (index & 15);
     int spriteSize = spriteSizes[(highOam >> 1) & 1];
     // sprite scalato: quanto sporge per lato oltre la sua dimensione
     int scale = ppu->objScale[(index >> 1) & 127];
-    int ext = scale ? IntMax(((spriteSize * scale >> 8) - spriteSize + 1) >> 1, 0) : 0;
+    int ext = PpuObj_ScaleExt(scale, spriteSize);
     // check if the sprite is on this line and get the sprite size
     int row;
     // (anche senza spostamento, se la posizione vera e' stata ricostruita:
@@ -1592,9 +1727,7 @@ static bool ppu_evaluateSprites(Ppu* ppu, int line) {
       // Con lo spostamento della telecamera (fluida o libera) la posizione non
       // deve "fare il giro": uno sprite appena sopra lo schermo (y vicino a
       // 255) resta sopra invece di ricomparire in basso.
-      int bottom = (ppu->renderFlags & kPpuRenderFlags_Height240) ? 240 : 224;
-      int sy = ppu->objYValid ? ppu->objY[(index >> 1) & 127] : yy >= bottom ? yy - 256 : yy;
-      row = line - (sy - ppu->objBiasY);
+      row = line - (PpuObj_ScreenY(ppu, index, yy) - ppu->objBiasY);
       if (row < -ext || row >= 256)
         continue;
     }

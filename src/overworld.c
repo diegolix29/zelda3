@@ -20,6 +20,7 @@
 #include "nmi.h"
 #include "hd_trans.h"
 #include "hd_cheats.h"
+#include "tile_detect.h"
 
 const uint16 kOverworld_OffsetBaseX[64] = {
   0,     0, 0x400, 0x600, 0x600, 0xa00, 0xa00, 0xe00,
@@ -282,18 +283,21 @@ const uint16 *GetMap16toMap8Table() {
 // Rampino, la GBA aggiunge un piccolo ponte in rovina sul bordo est del fiume.
 // Con live le caselle si ridisegnano anche sullo schermo: serve quando l'area
 // e' gia' in memoria (salvataggio rapido caricato, opzione accesa dal menu)
+// Puts map16 tile t at pos: in the area map, and with live also on screen
+static void PutMap16(uint16 pos, uint16 t, bool live) {
+  if (live)
+    Overworld_DrawMap16_Persist(pos, t);
+  else
+    dung_bg2[pos >> 1] = t;
+}
+
 static void Overworld_GbaAddTiles(bool live) {
   if (!(enhanced_features0 & kFeatures0_GbaMinorFixes))
     return;
   if (overworld_screen_index == 0x5d && dung_bg2[XY(21, 2)] != kMap16_GbaBridge) {
     static const uint8 kPos[4][2] = { {21, 2}, {22, 2}, {21, 3}, {22, 3} };
-    for (int i = 0; i < 4; i++) {
-      uint16 pos = XY(kPos[i][0], kPos[i][1]) * 2;
-      if (live)
-        Overworld_DrawMap16_Persist(pos, kMap16_GbaBridge + i);
-      else
-        dung_bg2[pos >> 1] = kMap16_GbaBridge + i;
-    }
+    for (int i = 0; i < 4; i++)
+      PutMap16(XY(kPos[i][0], kPos[i][1]) * 2, kMap16_GbaBridge + i, live);
     if (live)
       nmi_load_bg_from_vram = 1;
   }
@@ -359,13 +363,8 @@ static void Overworld_LakeClearing(bool live) {
   for (int pass = 0; pass < 2; pass++) {
     const LakeTile *q = pass ? p : grass;
     int m = pass ? n : ng;
-    for (int i = 0; i < m; i++) {
-      uint16 pos = XY(q[i].x, q[i].y) * 2;
-      if (live)
-        Overworld_DrawMap16_Persist(pos, q[i].t);
-      else
-        dung_bg2[pos >> 1] = q[i].t;
-    }
+    for (int i = 0; i < m; i++)
+      PutMap16(XY(q[i].x, q[i].y) * 2, q[i].t, live);
   }
   if (live)
     nmi_load_bg_from_vram = 1;
@@ -893,12 +892,12 @@ void OverworldOverlay_HandleRain() {  // 82a4cd
   else
   // Con la pioggia migliorata i lampi li disegna hd_fx.c, piu' morbidi
   if (frame_counter == 3 || frame_counter == 88) {
-    CGADSUB_copy = g_fx_rain ? 0x72 : 0x32;
+    CGADSUB_copy = g_config.fx_rain ? 0x72 : 0x32;
   } else if (frame_counter == 5 || frame_counter == 44 || frame_counter == 90) {
     CGADSUB_copy = 0x72;
   } else if (frame_counter == 36) {
     sound_effect_1 = 54;
-    CGADSUB_copy = g_fx_rain ? 0x72 : 0x32;
+    CGADSUB_copy = g_config.fx_rain ? 0x72 : 0x32;
   }
   if (frame_counter & 3)
     return;
@@ -917,13 +916,17 @@ static const uint16 kGbaBridgeDst[2] = { 0x12a, 0x195 };
 static uint16 g_gba_bridge_saved[2][16];
 static bool g_gba_bridge_chars;
 
+// 8x8 tile chr of BG2 in the PPU's VRAM
+static uint16 *BridgeChar(Ppu *ppu, uint16 chr) {
+  return &ppu->vram[(ppu->bgLayer[1].tileAdr + chr * 16) & 0x7fff];
+}
+
 void Overworld_GbaBridgeChars(Ppu *ppu, int head) {
   if (!(enhanced_features0 & kFeatures0_GbaMinorFixes) || head != 0x5d)
     return;
   static const uint16 kSrc[2] = { 0x122, 0x123 };
-  uint16 base = ppu->bgLayer[1].tileAdr;
   for (int i = 0; i < 2; i++)
-    memcpy(&ppu->vram[(base + kGbaBridgeDst[i] * 16) & 0x7fff], &ppu->vram[(base + kSrc[i] * 16) & 0x7fff], 32);
+    memcpy(BridgeChar(ppu, kGbaBridgeDst[i]), BridgeChar(ppu, kSrc[i]), 32);
 }
 
 void Overworld_GbaCharsBeforeRender(Ppu *ppu) {
@@ -934,9 +937,8 @@ void Overworld_GbaCharsBeforeRender(Ppu *ppu) {
   uint8 m = main_module_index == 14 ? saved_module_for_menu : main_module_index;
   if (m != 9 && m != 11)
     return;
-  uint16 base = ppu->bgLayer[1].tileAdr;
   for (int i = 0; i < 2; i++)
-    memcpy(g_gba_bridge_saved[i], &ppu->vram[(base + kGbaBridgeDst[i] * 16) & 0x7fff], 32);
+    memcpy(g_gba_bridge_saved[i], BridgeChar(ppu, kGbaBridgeDst[i]), 32);
   Overworld_GbaBridgeChars(ppu, 0x5d);
   g_gba_bridge_chars = true;
 }
@@ -945,9 +947,8 @@ void Overworld_GbaCharsAfterRender(Ppu *ppu) {
   if (!g_gba_bridge_chars)
     return;
   g_gba_bridge_chars = false;
-  uint16 base = ppu->bgLayer[1].tileAdr;
   for (int i = 0; i < 2; i++)
-    memcpy(&ppu->vram[(base + kGbaBridgeDst[i] * 16) & 0x7fff], g_gba_bridge_saved[i], 32);
+    memcpy(BridgeChar(ppu, kGbaBridgeDst[i]), g_gba_bridge_saved[i], 32);
 }
 
 // Soldato del prologo che chiude il passaggio nuovo dell'area 0x1b (lista in
@@ -1193,28 +1194,17 @@ static bool SmoothWorldTransition(void) {
   return (enhanced_features0 & kFeatures0_FastTransitions) && !InstantWorldTransition();
 }
 
-// Oggetti di Link che restano al cambio d'area col mondo unico: bombe e
-// tutto cio' che vola (con i loro colpi a segno)
-static bool IsThrownAncilla(uint8 t) {
-  switch (t) {
-  case 0x01: case 0x02: case 0x04: case 0x05: case 0x06: case 0x07:  // Somaria, fuoco, boomerang, bomba
-  case 0x09: case 0x0a: case 0x0b: case 0x0c: case 0x11: case 0x13:  // frecce, ghiaccio, raggio della spada
-  case 0x1f: case 0x2d: case 0x2e:  // rampino, blocco di Somaria che si rompe
-    return true;                    // (il blocco 0x2c sparisce, come nel gioco normale)
-  }
-  return false;
-}
-
 // Al cambio d'area il gioco toglie tutti gli oggetti di Link
-// (Ancilla_TerminateSelectInteractives). Col mondo unico le bombe e gli
-// oggetti lanciati restano dove sono e finiscono il loro volo; con il rampino
+// (Ancilla_TerminateSelectInteractives). Col mondo unico quelli segnati
+// kAncWorld_Keep nell'elenco unico (Ancilla_WorldRules, ancilla.c: bombe,
+// oggetti lanciati, Byrna...) restano e finiscono il loro lavoro; con il rampino
 // resta anche lo stato di Link che lo usa, con il boomerang il segno che e'
 // in volo
 static void ResetAncillaKeepThrown(void) {
   bool keep = InstantWorldTransition(), hook = false, boom = false;
   uint8 kept[kAncilla_LinkSlots + 1];
   for (int i = 0; i <= kAncilla_LinkSlots; i++) {
-    kept[i] = keep && IsThrownAncilla(ancilla_type[i]) ? ancilla_type[i] : 0;
+    kept[i] = keep && (Ancilla_WorldRules(ancilla_type[i]) & kAncWorld_Keep) ? ancilla_type[i] : 0;
     hook |= kept[i] == 0x1f;
     boom |= kept[i] == 0x05;
   }
@@ -1250,10 +1240,19 @@ void Module09_LoadAuxGFX() {  // 82ab88
   // (fase 6), che resta visibile.
   if ((InstantWorldTransition() || SmoothWorldTransition()) && submodule_index == 2) {
     int last = InstantWorldTransition() ? 8 : 5;
+    // The phases share one frame, so one ambient sound command reaches the
+    // APU: a later phase writing 0 ("no command", the arrival in phase 8)
+    // erased the stop sent on leaving the area, and the flute boy's flute
+    // played on in the next areas. The last real command is kept
+    uint8 ambient = sound_effect_ambient;
     for (int guard = 0; guard < 24 && submodule_index >= 2 && submodule_index <= last; guard++) {
       NMI_DoUpdates();
       kOverworldSubmodules[submodule_index]();
+      if (sound_effect_ambient)
+        ambient = sound_effect_ambient;
     }
+    if (!sound_effect_ambient)
+      sound_effect_ambient = ambient;
   }
 }
 
@@ -1280,6 +1279,16 @@ static void ActivateSpritesInView(void) {
       Sprite_Overworld_ProximityMotivatedLoad((uint16)x, (uint16)y);
 }
 
+// One scroll step of Overworld_RunScrollTransition (the original body)
+static void ScrollTransitionStep(void) {
+  uint8 rv = OverworldScrollTransition();
+  if (!(rv & 0xf)) {
+    BYTE(overworld_screen_trans_dir_bits2) = BYTE(overworld_screen_trans_dir_bits);
+    OverworldTransitionScrollAndLoadMap();
+    BYTE(overworld_screen_trans_dir_bits2) = 0;
+  }
+}
+
 void Overworld_RunScrollTransition() {  // 82abda
   Link_HandleMovingAnimation_FullLongEntry();
   if (InstantWorldTransition()) {
@@ -1291,12 +1300,7 @@ void Overworld_RunScrollTransition() {  // 82abda
       if (guard)
         NMI_DoUpdates();
       Graphics_IncrementalVRAMUploadImmediate();
-      uint8 rv = OverworldScrollTransition();
-      if (!(rv & 0xf)) {
-        BYTE(overworld_screen_trans_dir_bits2) = BYTE(overworld_screen_trans_dir_bits);
-        OverworldTransitionScrollAndLoadMap();
-        BYTE(overworld_screen_trans_dir_bits2) = 0;
-      }
+      ScrollTransitionStep();
     }
     g_instant_transition = false;
     ActivateSpritesInView();
@@ -1316,12 +1320,7 @@ void Overworld_RunScrollTransition() {  // 82abda
     uint8 old_submodule = submodule_index;
     if (i != 0)
       Graphics_IncrementalVRAMUploadImmediate();
-    uint8 rv = OverworldScrollTransition();
-    if (!(rv & 0xf)) {
-      BYTE(overworld_screen_trans_dir_bits2) = BYTE(overworld_screen_trans_dir_bits);
-      OverworldTransitionScrollAndLoadMap();
-      BYTE(overworld_screen_trans_dir_bits2) = 0;
-    }
+    ScrollTransitionStep();
     if (submodule_index != old_submodule)
       break;
   }
@@ -1700,6 +1699,12 @@ void Module09_MirrorWarp() {  // 82b1fa
       return;
     }
     music_control = 8;
+    // Bug in the original: leaving the Haunted Grove (0x2a) through the mirror
+    // or a portal did not stop the flute boy's looping flute, as leaving it by
+    // an edge does (0x80, see the area transition): it played on forever in
+    // the Dark World. Stopped here, together with the music
+    if ((enhanced_features0 & kFeatures0_MiscBugFixes) && BYTE(overworld_screen_index) == 0x2a)
+      sound_effect_ambient = 0x80;
     flag_overworld_area_did_change = 8;
     countdown_for_blink = 0x90;
     InitializeMirrorHDMA();
@@ -2140,6 +2145,35 @@ void Overworld_SetCameraBoundaries(int big, int area) {  // 82c0c3
   left_right_scroll_target_end = left_right_scroll_target + kOverworld_LeftRightScrollSize[big];
 }
 
+// Continuous world: the instant area change skips the frames in which Link
+// walks into the new area, and with them the camera scroll that brings the
+// game camera inside the new area's bounds. Coming from a big area into a
+// small one near its edge the camera stayed outside, and the game stops the
+// camera only when it is exactly on a bound (OverworldCameraBoundaryCheck):
+// it then followed Link past the edge and the next area change scrolled
+// forever. Here the camera is moved inside one pixel at a time with the
+// game's own step, loading the map strips as the original scroll does
+static void Overworld_CameraIntoArea(void) {
+  for (int guard = 0; guard < 1024; guard++) {
+    if (BG2VOFS_copy2 < ow_scroll_vars0.ystart)
+      OverworldCameraBoundaryCheck(6, 0, 1, 0);
+    else if (BG2VOFS_copy2 > ow_scroll_vars0.yend)
+      OverworldCameraBoundaryCheck(6, 2, -1, 0);
+    else if (BG2HOFS_copy2 < ow_scroll_vars0.xstart)
+      OverworldCameraBoundaryCheck(0, 4, 1, 4);
+    else if (BG2HOFS_copy2 > ow_scroll_vars0.xend)
+      OverworldCameraBoundaryCheck(0, 6, -1, 4);
+    else
+      break;
+    if (BYTE(overworld_screen_index) != 0x1b && BYTE(overworld_screen_index) != 0x5b)
+      BG1VOFS_copy2 = BG2VOFS_copy2, BG1HOFS_copy2 = BG2HOFS_copy2;
+    if (BYTE(overworld_screen_trans_dir_bits2)) {
+      OverworldHandleMapScroll();
+      NMI_DoUpdates();
+    }
+  }
+}
+
 void Overworld_FinalizeEntryOntoScreen() {  // 82c242
   Link_HandleMovingAnimation_FullLongEntry();
   // Link entra nell'area da solo, 2 pixel per frame. Con il mondo unico non
@@ -2148,6 +2182,7 @@ void Overworld_FinalizeEntryOntoScreen() {  // 82c242
   bool arrived;
   if (InstantWorldTransition()) {
     arrived = true;
+    Overworld_CameraIntoArea();
   } else {
     int d = (byte_7E069C & 1) ? 2 : -2;
     if (byte_7E069C & 2)
@@ -2470,6 +2505,8 @@ void LoadOverworldFromSpecialOverworld() {  // 82e9bc
   overworld_area_is_big &= 0xff;
 }
 
+static void Overworld_LoadBirdTravel9();
+
 void FluteMenu_LoadTransport() {  // 82ec39
   num_memorized_tiles = 0;
   int k = birdtravel_var1[0];
@@ -2501,7 +2538,7 @@ void Overworld_LoadBirdTravelPos(int k) {  // 82ec47
 // piattaforma dei pioli, sopra la scala. Valori ricavati come quelli delle
 // tabelle originali: scroll = Link - (0x78, 0x5e), telecamera = Link + (7, 0xf),
 // unk = -(scroll & 0xf), map16 dalla posizione dello scroll nell'area.
-void Overworld_LoadBirdTravel9() {
+static void Overworld_LoadBirdTravel9() {
   static const BirdTravelPos kPos = {
     0x07, 0x590, 0xe88, 0xb2, 0xf00, 0x110, 0xf07, 0x11f, -2, -8,
   };
@@ -3213,9 +3250,7 @@ uint8 Overworld_ReadTileAttribute(uint16 x, uint16 y) {  // 85faa2
   int w = HdWorld_WorldTile(x << 3, y);  // mondo unico: fuori dall'area corrente
   uint8 rv = kSomeTileAttr[w >= 0 ? w : dung_bg2[t >> 1]];
   // acqua congelata (hd_burn.c): ghiaccio, come in Overworld_GetTileAttributeAtLocation
-  if ((rv == 0x08 || rv == 0x09) && HdBurn_IsFrozenAt(x << 3, y))
-    rv = 0x0f;
-  return rv;
+  return TileDetect_FrozenWaterAttr(rv, x, y);
 }
 
 void Overworld_SetFixedColAndScroll() {  // 8bfe70
@@ -3905,25 +3940,85 @@ static int Overworld_SmashSmallObj(uint16 x, uint16 y, uint16 pos, uint16 attr, 
   return rv;
 }
 
+// Mondo continuo, regola unica per i cespugli e l'erba alta delle aree
+// vicine: spada, Lanterna, martello, boomerang e bombe li tagliano anche oltre
+// il bordo dell'area, come il fuoco (hd_burn.c). La casella cambia nel mondo
+// persistente (HdWorld_SetWorldTile: mappa del mondo, copia dal vivo e
+// immagine dell'area); il segreto sotto si scopre quando Link entra
+// nell'area, come col fuoco. Falso se il punto (in pixel) e' nell'area
+// corrente (ci pensa il gioco); altrimenti *cut dice se ha tagliato e *attr
+// (se c'e') e' l'attributo della casella di prima, 0 oltre la fine del mondo
+enum { kCut_Bush = 1, kCut_Grass = 2, kCut_Bomb = 4 };
+
+// Map16 tile that the kinds allowed can cut: its replacement and the kind of
+// debris (Sprite_SpawnImmediatelySmashedTerrain)
+static bool CutTileKind(int tile, uint8 kinds, uint16 *repl, uint8 *what) {
+  if (tile == 0x36 && (kinds & kCut_Bush))
+    *repl = 0xdc7, *what = 2;  // cespuglio
+  else if (tile == 0x72a && (kinds & kCut_Bush))
+    *repl = 0xdc8, *what = 4;  // cespuglio del Mondo delle Tenebre
+  else if (tile == 0x37e && (kinds & kCut_Grass))
+    *repl = 0xdc5, *what = 3;  // erba alta
+  else
+    return false;
+  return true;
+}
+
+// Debris and dust of a bush or tall grass cut at pixel (px, py)
+static void CutDebris(uint16 px, uint16 py, uint8 what) {
+  uint16 tx = px & ~0xf, ty = py & ~0xf;
+  if (what == 3)  // l'erba alta si taglia a quadretti di 8
+    tx = (px & ~7) - 8, ty = (py - 8) & ~7;
+  Sprite_SpawnImmediatelySmashedTerrain(what, tx, ty);
+  AncillaAdd_BushPoof(tx, ty);
+}
+
+// Map16 position (pos, as the game's) of pixel (px, py) in the current area;
+// false if the pixel is outside it
+static bool AreaPosOfPixel(uint16 px, uint16 py, uint16 *pos) {
+  uint16 dx = px - overworld_offset_base_x * 8, dy = py - overworld_offset_base_y;
+  if (dx > (overworld_offset_mask_x * 8 | 0xf) || dy > (overworld_offset_mask_y | 0xf))
+    return false;
+  uint16 x = px >> 3, y = py;
+  *pos = ((y - overworld_offset_base_y) & overworld_offset_mask_y) * 8 +
+    ((x - overworld_offset_base_x) & overworld_offset_mask_x);
+  return true;
+}
+
+static bool Overworld_OtherAreaCut(uint16 px, uint16 py, uint8 kinds, bool *cut, uint16 *attr) {
+  if (!HdWorld_OutsideArea(px, py))
+    return false;
+  *cut = false;
+  int w = HdWorld_WorldTile(px, py);
+  if (attr)
+    *attr = w < 0 ? 0 : kMap8DataToTileAttr[GetMap16toMap8Table()[w * 4 + ((py & 8) >> 2) + ((px >> 3) & 1)] & 0x1ff];
+  uint16 repl;
+  uint8 what;
+  if (!CutTileKind(w, kinds, &repl, &what))
+    return true;
+  if (!HdWorld_SetWorldTile(px, py, repl))
+    return true;
+  BYTE(dung_secrets_unk1) = 0;
+  if (kinds & kCut_Bomb)
+    Sprite_SpawnImmediatelySmashedTerrain(what, px & ~7, py & ~7);
+  else
+    CutDebris(px, py, what);
+  *cut = true;
+  return true;
+}
+
 // Boomerang Magico: taglia il cespuglio (e l'erba alta, con grass) nel punto px, py (in pixel), come la spada, con resti, segreti e oggetti nascosti.
 // -1 se non c'e' niente da tagliare, 1 se sotto c'era qualcosa (un oggetto o
 // un segreto: il boomerang torna indietro), altrimenti 0.
-static int CutBushOrGrass(uint16 px, uint16 py, bool grass) {
-  uint16 dx = px - overworld_offset_base_x * 8, dy = py - overworld_offset_base_y;
-  if (player_is_indoors || dx > (overworld_offset_mask_x * 8 | 0xf) || dy > (overworld_offset_mask_y | 0xf))
-    return -1;
-  uint16 x = px >> 3, y = py;
-  uint16 pos = ((y - overworld_offset_base_y) & overworld_offset_mask_y) * 8 +
-    ((x - overworld_offset_base_x) & overworld_offset_mask_x);
-  uint16 attr = overworld_tileattr[pos >> 1], repl;
+// (bushes and tall grass, always both)
+static int CutBushOrGrass(uint16 px, uint16 py) {
+  bool other_cut;
+  if (!player_is_indoors && Overworld_OtherAreaCut(px, py, kCut_Bush | kCut_Grass, &other_cut, NULL))
+    return other_cut ? 0 : -1;
+  uint16 pos, repl;
   uint8 what;
-  if (attr == 0x36)
-    repl = 0xdc7, what = 2;  // cespuglio
-  else if (attr == 0x72a)
-    repl = 0xdc8, what = 4;  // cespuglio del Mondo delle Tenebre
-  else if (attr == 0x37e && grass)
-    repl = 0xdc5, what = 3;  // erba alta
-  else
+  if (player_is_indoors || !AreaPosOfPixel(px, py, &pos) ||
+      !CutTileKind(overworld_tileattr[pos >> 1], kCut_Bush | kCut_Grass, &repl, &what))
     return -1;
   uint16 secret = Overworld_RevealSecret(pos);
   bool found = secret != 0 || (BYTE(dung_secrets_unk1) != 0 && BYTE(dung_secrets_unk1) != 0xff);
@@ -3933,34 +4028,32 @@ static int CutBushOrGrass(uint16 px, uint16 py, bool grass) {
   Overworld_Memorize_Map16_Change(pos, repl);
   Overworld_DrawMap16(pos, repl);
   nmi_load_bg_from_vram = 1;
-  uint16 tx = px & ~0xf, ty = py & ~0xf;
-  if (what == 3)  // l'erba alta si taglia a quadretti di 8 (come la spada)
-    tx = (px & ~7) - 8, ty = (py - 8) & ~7;
-  Sprite_SpawnImmediatelySmashedTerrain(what, tx, ty);
-  AncillaAdd_BushPoof(tx, ty);
+  CutDebris(px, py, what);  // (like the sword)
   return found;
 }
 
 int Overworld_BoomerangCut(uint16 px, uint16 py) {
-  int r = CutBushOrGrass(px, py, true);
-  uint16 dx = px - overworld_offset_base_x * 8, dy = py - overworld_offset_base_y;
-  if (r >= 0 || dx > (overworld_offset_mask_x * 8 | 0xf) || dy > (overworld_offset_mask_y | 0xf))
+  int r = CutBushOrGrass(px, py);
+  uint16 pos;
+  if (r >= 0 || !AreaPosOfPixel(px, py, &pos))
     return r;
   // cartelli: come la spada a mano vuota (Overworld_ToolAndTileInteraction)
   if (link_item_in_hand != 0 || link_position_mode == 1 || link_sword_type < 2 || link_sword_type > 4)
     return -1;
-  uint16 x = px >> 3, y = py;
-  uint16 pos = ((y - overworld_offset_base_y) & overworld_offset_mask_y) * 8 +
-    ((x - overworld_offset_base_x) & overworld_offset_mask_x);
-  return Overworld_SmashSmallObj(x, y, pos, overworld_tileattr[pos >> 1], kSmash_Sign) >= 0 ? 0 : -1;
+  return Overworld_SmashSmallObj(px >> 3, py, pos, overworld_tileattr[pos >> 1], kSmash_Sign) >= 0 ? 0 : -1;
 }
 
 uint16 Overworld_ToolAndTileInteraction(uint16 x, uint16 y) {  // 9bbd82
   word_7E04B2 = 0;
   index_of_interacting_tile = 0;
-  // mondo unico: fuori dall'area corrente niente da tagliare o scavare
-  if (HdWorld_OutsideArea(x << 3, y))
-    return 0;
+  // mondo unico: fuori dall'area corrente si tagliano cespugli ed erba
+  // (Overworld_OtherAreaCut); niente pala, pioli e cartelli
+  bool other_cut;
+  uint16 other_attr;
+  uint8 kinds = (link_item_in_hand & 2) ? ((enhanced_features0 & kFeatures0_SwordAndItems) ? kCut_Bush : 0) :
+      link_position_mode == 1 ? 0 : kCut_Bush | (!(link_item_in_hand & 0x60) ? kCut_Grass : 0);
+  if (Overworld_OtherAreaCut(x << 3, y, kinds, &other_cut, &other_attr))
+    return other_attr;
   uint16 pos = ((y - overworld_offset_base_y) & overworld_offset_mask_y) * 8 +
     ((x - overworld_offset_base_x) & overworld_offset_mask_x);
   uint16 attr = overworld_tileattr[pos >> 1], yv;
@@ -4162,8 +4255,11 @@ void Overworld_BombTiles32x32(uint16 x, uint16 y) {  // 9bc0f8
 
 void Overworld_BombTile(int x, int y) {  // 9bc155
   int a, j, k;
-  if (HdWorld_OutsideArea(x, y))
-    return;  // mondo unico: le bombe cambiano solo l'area corrente
+  // mondo unico: fuori dall'area corrente le bombe tagliano cespugli ed erba
+  // (Overworld_OtherAreaCut), niente muri da aprire
+  bool other_cut;
+  if (Overworld_OtherAreaCut(x, y, follower_indicator == 13 ? 0 : kCut_Bush | kCut_Grass | kCut_Bomb, &other_cut, NULL))
+    return;
 
   int pos = ((y - overworld_offset_base_y & overworld_offset_mask_y) << 3) +
     ((x >> 3) - overworld_offset_base_x & overworld_offset_mask_x);

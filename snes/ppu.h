@@ -27,6 +27,13 @@ enum {
   kPpuXPixels = 256 + kPpuExtraLeftRight * 2,
 };
 
+// Output layer (bits 24-27 of a pixel of the buffer) of the sprites drawn as
+// background (Ppu.objAsBg: blocks and gravestones while they move). The
+// shader paints it like the background (above 7 it is not HUD, sprite or
+// water), while the HD effects do not take it for the floor: the water of
+// the cell under a sliding block covered it
+enum { kPpuLayerObjAsBg = 9 };
+
 typedef uint16_t PpuZbufType;
 
 typedef struct PpuPixelPrioBufs {
@@ -64,6 +71,10 @@ struct Ppu {
   uint8_t objShowF0[128];
   // Sprite sempre davanti agli strati (mentre il fondale arriva da altrove)
   bool objOnTop;
+  // Sprite-only copies (hd_world.c): each pixel also carries its priority
+  // level in bits 28-31 (bits 12-15 of the z-buffer: 2, 6, 10 or 14), to put
+  // it behind the high-priority tiles of the backgrounds drawn elsewhere
+  bool objPrioOut;
   // Cifre al massimo dell'HUD (BG3, palette 5, caselle 0x90-0x99): il colore 2
   // diventa il colore cgram[0x10], che nessuno strato mostra (vedi zelda_rtl.c)
   bool bg3MaxDigits;
@@ -71,11 +82,18 @@ struct Ppu {
   // altrimenti la larghezza di ogni fascia laterale (vedi PpuHudSplitSrc)
   uint8_t hudSplitExt;
   // distanza dell'HUD diviso dai due bordi (quella dell'HUD moderno)
-  uint8_t hudSplitMargin;
+  // empty pixels left and right of the split HUD (those of the original HUD)
+  uint8_t hudSplitMargin, hudSplitMarginR;
   // tasti con un riquadro per gli oggetti oltre a Y: 1 = X, 2 = L e R
   uint8_t hudSplitButtons;
   // senza HUD diviso (4:3): riquadri di X/L/R in fila sotto i contatori
   bool hudBoxRow;
+  // classic HUD laid out as on GBA (PpuHudGbaSrc); hudSplitExt = side bands
+  bool hudGba;
+  // width of the counters in the map from x 64 (up to the last used tile)
+  uint8_t hudGbaCountersW;
+  // rows the GBA HUD pieces go down beyond the scroll of BG3 (START menu)
+  uint8_t hudGbaDrop;
   int16_t objY[128], objX[128];
   // Ombre morbide (hd_fx.c): per ogni voce OAM se fa ombra e, per ogni pixel
   // del fotogramma (objShadowStride per riga), se lo sprite disegnato li'
@@ -93,8 +111,8 @@ struct Ppu {
   // (l'acqua), come su GBA; nel buffer i loro pixel hanno il bit 0x800
   uint8_t objUnderWater[128];
   // Oggetti spinti che da fermi sono caselle del fondale (blocchi, lapidi;
-  // hd_fx.c): le voci OAM con objAsBg escono con il layer 1, cosi' lo shader
-  // le dipinge anche mentre si muovono. Nel buffer i pixel hanno 0x900
+  // hd_fx.c): le voci OAM con objAsBg escono con il layer kPpuLayerObjAsBg,
+  // cosi' lo shader le dipinge anche mentre si muovono. Nel buffer i pixel hanno 0x900
   uint8_t objAsBg[128];
   // Scala delle voci OAM in 1/256 (0 = normale): lo sprite si disegna
   // ingrandito o rimpicciolito attorno al suo centro (super bomba, hd_fx.c)
@@ -206,6 +224,9 @@ void ppu_free(Ppu* ppu);
 void ppu_reset(Ppu* ppu);
 void ppu_handleVblank(Ppu* ppu);
 void ppu_runLine(Ppu* ppu, int line);
+// Output rows [*y0, *y1) that the visible sprites can touch (same tests as
+// ppu_evaluateSprites); *y0 >= *y1 when there are none
+void PpuObjRows(Ppu *ppu, int height, int *y0, int *y1);
 uint8_t ppu_read(Ppu* ppu, uint8_t adr);
 void ppu_write(Ppu* ppu, uint8_t adr, uint8_t val);
 void ppu_saveload(Ppu *ppu, SaveLoadFunc *func, void *ctx);

@@ -95,9 +95,13 @@ typedef struct Config {
   bool gba_damage, flipper_dive, stuck_arrows;
   // Giravolta Tornado come su GBA, sbloccata dal Retino per Farfalle
   bool hurricane_spin;
+  // Boomerang as in Four Swords Adventures: holding the button keeps it in mid-air
+  bool fsa_boomerang;
   // Oggetti assegnabili al tasto X e ai tasti L e R nel menu degli oggetti
   // (divise da ItemSwitchLR, che ora e' solo il cambio rapido con L e R)
   bool item_on_x, item_on_lr;
+  // GBA HUD: the classic HUD laid out as in the GBA version (not with ModernHud)
+  bool gba_hud;
   uint8 text_speed;         // 0 = originale, 1 = veloce, 2 = istantaneo
   uint8 rumble;             // vibrazione del controller: 0 spenta, 1 leggera, 2 media, 3 forte
   // Trucchi (sezione [Cheats], hd_cheats.c): tutti spenti in partenza; quelli

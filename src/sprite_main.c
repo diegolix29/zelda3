@@ -1133,6 +1133,12 @@ void Garnish_SetY(int k, uint16 y) {
   garnish_y_hi[k] = y >> 8;
 }
 
+// The fairy's harp music (0x1b) starts again: with the GBA minor fixes only
+// if it is not already playing
+static bool FairyMusic_ShouldStart(void) {
+  return !(enhanced_features0 & kFeatures0_GbaMinorFixes) || music_unk1 != 0x1b;
+}
+
 void Sprite_WishPond3(int k) {
   int j;
 
@@ -1182,7 +1188,7 @@ void Sprite_WishPond3(int k) {
       Sprite_SetY(j, info.r2_y - 80);
       // Correzioni minori GBA: gli accordi d'arpa ripartono solo se la musica
       // della fata non e' gia' in corso (0x812b08c ignora la stessa canzone)
-      if (!(enhanced_features0 & kFeatures0_GbaMinorFixes) || music_unk1 != 0x1b) {
+      if (FairyMusic_ShouldStart()) {
         music_control = 0x1b;
         last_music_control = 0;
       }
@@ -6731,6 +6737,10 @@ void ElderWife_Draw(int k) {  // 85f505
   Sprite_DrawMultiplePlayerDeferred(k, &kElderWife_Dmd[sprite_graphics[k] * 2], 2, NULL);
 }
 
+static void MagicShopAssistant_SpawnGoldCauldron(int k);
+static void GoldPotionItem_Draw(int k);
+static void GoldPotion_SetPalette(bool bottle);
+
 void SpritePrep_PotionShop(int k) {  // 85f529
   MagicShopAssistant_SpawnPowder(k);
   MagicShopAssistant_SpawnGreenCauldron(k);
@@ -6802,7 +6812,7 @@ static uint32 GoldPotion_Today(void) {
 // Pietra (1f996e): come la' i calderoni stanno a 32 pixel l'uno dall'altro
 // invece di 48. Una al giorno: comprata oggi, il calderone non c'e' fino a
 // mezzanotte (in BS una per puntata)
-void MagicShopAssistant_SpawnGoldCauldron(int k) {
+static void MagicShopAssistant_SpawnGoldCauldron(int k) {
   if (gold_potion_day == GoldPotion_Today())
     return;
   SpriteSpawnInfo info;
@@ -7003,7 +7013,7 @@ void Sprite_GoldCauldron(int k) {
 // 0x20, tavolozza 1 (bianco, giallo 133f, arancio 19df, bordo 14a5), con il
 // giallo anche sul bastone. Bottiglia (bottle = true): disegno 0x2b con la
 // tavolozza 4, liquido oro scuro 1237 e oro 1f5f
-void GoldPotion_SetPalette(bool bottle) {
+static void GoldPotion_SetPalette(bool bottle) {
   static const uint16 kGoldPotion_Colors[2][6] = {
     {0x7fff, 0x19df, 0x19df, 0x133f, 0x14a5, 0x133f},
     {0x7fff, 0x1237, 0x1237, 0x1f5f, 0x14a5, 0x7fff},
@@ -7018,7 +7028,7 @@ void GoldPotion_SetPalette(bool bottle) {
   flag_update_cgram_in_nmi++;
 }
 
-void GoldPotionItem_Draw(int k) {
+static void GoldPotionItem_Draw(int k) {
   GoldPotion_SetPalette(false);
   static const DrawMultipleData kGoldPotionItem_Dmd[3] = {
     { 0,  0, 0x00c0 | kGoldPotion_SprPal << 9, 2},
@@ -9557,7 +9567,10 @@ uint8 Cucco_DoMovement_XY(int k) {  // 86a7bb
 
 void Cucco_SummonAvenger(int k) {  // 86a7d3
   static const uint8 kChicken_Avenger[2] = {0, 0xff};
-  if ((k ^ frame_counter) & 0xf | player_is_indoors)
+  // Continuous world: an angry cucco in a neighbour area's copy calls no
+  // avengers. In the original it is gone once Link leaves its area; here the
+  // copy kept calling harmless cuccos around Link's screen
+  if ((k ^ frame_counter) & 0xf | player_is_indoors || g_hd_neighbor_tick)
     return;
   SpriteSpawnInfo info;
   int j = Sprite_SpawnDynamicallyEx(k, 0xB, &info, 10);
@@ -9575,7 +9588,6 @@ void Cucco_SummonAvenger(int k) {  // 86a7d3
     x = sx + t * sw / 256, y = sy + (kChicken_Avenger[t & 1] ? sh + 31 : 0);
   else
     y = sy + t * sh / 224, x = sx + (kChicken_Avenger[t & 1] ? sw - 1 : 0);
-  (void)kChicken_Avenger;
   Sprite_SetX(j, x);
   Sprite_SetY(j, y);
   Sprite_ApplySpeedTowardsLink(j, 32);
@@ -11597,7 +11609,7 @@ show_later_msg:
       Sprite_SetY(j, info.r2_y - 80);
       // Correzioni minori GBA: gli accordi d'arpa ripartono solo se la musica
       // della fata non e' gia' in corso (0x812b08c ignora la stessa canzone)
-      if (!(enhanced_features0 & kFeatures0_GbaMinorFixes) || music_unk1 != 0x1b) {
+      if (FairyMusic_ShouldStart()) {
         music_control = 0x1b;
         last_music_control = 0;
       }
@@ -17851,6 +17863,12 @@ void Sprite_C1_CutsceneAgahnim(int k) {  // 9dd234
 
 }
 
+// GBA telewarp of Agahnim's cutscene: the screen darkens instead of flashing
+static void CutsceneAgahnim_TelewarpDim(void) {
+  GbaFlash_DimStep(3, 0xb0);
+  GbaFlash_DimHold(0x10);
+}
+
 void CutsceneAgahnim_Agahnim(int k) {  // 9dd23f
   static const uint8 kChattyAgahnim_LevitateGfx[4] = {2, 0, 3, 0};
   int j;
@@ -17899,10 +17917,8 @@ void CutsceneAgahnim_Agahnim(int k) {  // 9dd23f
     }
     break;
   case 2:  // do telewarp
-    if (enhanced_features0 & kFeatures0_DimFlashesGba) {  // GBA 0x80db070: scurisce, niente lampi
-      GbaFlash_DimStep(3, 0xb0);
-      GbaFlash_DimHold(0x10);
-    }
+    if (enhanced_features0 & kFeatures0_DimFlashesGba)  // GBA 0x80db070: scurisce, niente lampi
+      CutsceneAgahnim_TelewarpDim();
     if (!sprite_delay_main[k]) {
       sprite_ai_state[k]++;
       sprite_delay_main[k] = 80;
@@ -17917,8 +17933,7 @@ void CutsceneAgahnim_Agahnim(int k) {  // 9dd23f
     break;
   case 3:  // complete telewarp
     if (enhanced_features0 & kFeatures0_DimFlashesGba) {  // GBA 0x80db0f8
-      GbaFlash_DimStep(3, 0xb0);
-      GbaFlash_DimHold(0x10);
+      CutsceneAgahnim_TelewarpDim();
       if (!sprite_delay_main[k]) {
         g_gba_dim_timer = 0;
         Palette_Restore_BG_And_HUD();

@@ -218,11 +218,12 @@ static const char *ItemName(int item, int btn_index) {
     "FUNGO", "AMPOLLA", "POZIONE\nVITA", "POZIONE\nMAGICA", "POZIONE\nCURATUTTO",
     "FATA", "APE", "APE\nDORATA", "POZIONE\nD'ORO",
   };
+  // items 1, 5, 13, 16 and 20 are named by the switch below
   static const char *const kItems[20] = {
-    "ARCO", "BOOMERANG", "ARPIONE", "BOMBA", "FUNGO",
+    "", "BOOMERANG", "ARPIONE", "BOMBA", "",
     "BACCHETTA DEL\nFUOCO", "BACCHETTA DEL\nGHIACCIO", "FIAMMA", "ETERE", "SISMA",
-    "LANTERNA", "MARTELLO\nMAGICO", "PALA", "RETINO PER\nFARFALLE", "LIBRO DI\nMUDORA",
-    "FUNGO", "BASTONE DI\nSOMARIA", "BASTONE DI\nBYRNA", "MANTELLO\nMAGICO", "",
+    "LANTERNA", "MARTELLO\nMAGICO", "", "RETINO PER\nFARFALLE", "LIBRO DI\nMUDORA",
+    "", "BASTONE DI\nSOMARIA", "BASTONE DI\nBYRNA", "MANTELLO\nMAGICO", "",
   };
   // inventario esteso: quattro bottiglie, la 16 e' la pala; in quello
   // originale la 16 e' la bottiglia scelta
@@ -333,13 +334,14 @@ void HudIt_DrawAbility(uint16 *dst, int ability, int level, bool wide) {
   static const char *const kAbilities[6] = { "ALZA", "LEGGI", "PARLA", "TIRA", "CORRI", "NUOTA" };
   char buf[8];
   const char *s = kAbilities[ability];
+  int lv = level < 1 ? 1 : level > 3 ? 3 : level;
   // Lettere larghe solo se le colonne sono staccate (riquadro a 6 colonne):
   // le parole di 5 lettere riempiono le 5 caselle. ALZA.N usa la casella ".N"
   // di LIFT.N (0x127-0x129)
   if (wide) {
     DrawWide(dst, 5, s, 0x2c00, false);
     if (ability == 0)
-      dst[4] = 0x2c00 | (0x127 + (level < 1 ? 1 : level > 3 ? 3 : level) - 1);
+      dst[4] = 0x2c00 | (0x127 + lv - 1);
     return;
   }
   // con le colonne attaccate restano strette: le parole di 5 lettere
@@ -347,7 +349,7 @@ void HudIt_DrawAbility(uint16 *dst, int ability, int level, bool wide) {
   if (ability == 0) {
     // ALZA.1, ALZA.2, ALZA.3 come LIFT.1-3: il livello dei guanti
     memcpy(buf, "ALZA.1", 7);
-    buf[5] = '0' + (level < 1 ? 1 : level > 3 ? 3 : level);
+    buf[5] = '0' + lv;
     s = buf;
   }
   // nel mezzo delle 5 caselle: le parole di 5 lettere restano staccate
@@ -460,13 +462,13 @@ static int Bg3Pixel(Ppu *ppu, uint16 entry, int x, int y) {
 }
 
 // Prima casella della mappa dello strato 3 con le caselle top[0..n-1] e
-// sotto bottom[0..n-1], o -1
-static int FindBg3Words(Ppu *ppu, const uint16 *top, const uint16 *bottom, int n) {
+// sotto bottom[0..n-1], o -1 (map entries compared under mask)
+static int FindBg3Words(Ppu *ppu, const uint16 *top, const uint16 *bottom, int n, uint16 mask) {
   for (int a = 32; a < 32 * 31; a++) {
     if (a % 32 < 1 || a % 32 + n > 31)
       continue;
     int i = 0;
-    while (i < n && (*Bg3Map(ppu, a + i) & 0x3ff) == top[i] && (*Bg3Map(ppu, a + 32 + i) & 0x3ff) == bottom[i])
+    while (i < n && (*Bg3Map(ppu, a + i) & mask) == top[i] && (*Bg3Map(ppu, a + 32 + i) & mask) == bottom[i])
       i++;
     if (i == n)
       return a;
@@ -508,14 +510,10 @@ static void PutBg3Tiles(Ppu *ppu, int a, uint16 attr, uint8 img[16][64], int col
     SetMap(ppu, (ppu->bgLayer[2].tilemapAdr + a + (k / cols) * 32 + k % cols) & 0x7fff, attr | tiles[k]);
 }
 
-static void PutBg3Image(Ppu *ppu, int a, uint16 attr, uint8 img[16][64]) {
-  PutBg3Tiles(ppu, a, attr, img, 8);
-}
-
 static void BannerToMappa(Ppu *ppu) {
   static const uint16 kTop[6] = { 0x102, 0x103, 0x104, 0x105, 0x106, 0x107 };
   static const uint16 kBottom[6] = { 0x112, 0x113, 0x114, 0x115, 0x116, 0x117 };
-  int a = FindBg3Words(ppu, kTop, kBottom, 6);
+  int a = FindBg3Words(ppu, kTop, kBottom, 6, 0x3ff);
   if (a < 0)
     return;
   uint8 img[16][64];
@@ -525,13 +523,13 @@ static void BannerToMappa(Ppu *ppu) {
       img[y][x] = Bg3Pixel(ppu, *Bg3Map(ppu, a + (y >> 3) * 32 + (sx >> 3)), sx & 7, y & 7);
     }
   // una casella piu' a sinistra: 8 caselle dove ce n'erano 6
-  PutBg3Image(ppu, a - 1, *Bg3Map(ppu, a) & ~0x3ff, img);
+  PutBg3Tiles(ppu, a - 1, *Bg3Map(ppu, a) & ~0x3ff, img, 8);
 }
 
 static void LevelToLivello(Ppu *ppu) {
   static const uint16 kTop[4] = { 0x132, 0x133, 0x138, 0x13a };
   static const uint16 kBottom[4] = { 0x142, 0x143, 0x149, 0x14a };
-  int a = FindBg3Words(ppu, kTop, kBottom, 4);
+  int a = FindBg3Words(ppu, kTop, kBottom, 4, 0x3ff);
   if (a < 0)
     return;
   // "LIVELLO" (righe 5-14 come "LEVEL"), 4 pixel e il numero (la casella
@@ -565,7 +563,7 @@ static void LevelToLivello(Ppu *ppu) {
   for (int y = 0; y < 16; y++)
     for (int c = 0; c < 8; c++)
       img[y][num_x + c] = Bg3Pixel(ppu, *Bg3Map(ppu, a + 5 + (y >> 3) * 32), c, y & 7);
-  PutBg3Image(ppu, a - 1, *Bg3Map(ppu, a) & ~0x3ff, img);
+  PutBg3Tiles(ppu, a - 1, *Bg3Map(ppu, a) & ~0x3ff, img, 8);
 }
 
 // Indicatore del piano sotto i cuori (Hud_FloorIndicator): "1F" e "B1"
@@ -602,17 +600,6 @@ static void PutFloorGlyph(uint8 fill[16][64], char c, int x0) {
             fill[1 + r][x0 + x] = 1;
 }
 
-static int FindBg3Exact(Ppu *ppu, const uint16 *top, const uint16 *bottom) {
-  for (int a = 32; a < 32 * 31; a++) {
-    if (a % 32 < 1 || a % 32 + 2 > 31)
-      continue;
-    if (*Bg3Map(ppu, a) == top[0] && *Bg3Map(ppu, a + 1) == top[1] &&
-        *Bg3Map(ppu, a + 32) == bottom[0] && *Bg3Map(ppu, a + 33) == bottom[1])
-      return a;
-  }
-  return -1;
-}
-
 static void FloorIndicatorToItalian(Ppu *ppu) {
   // Niente controllo del timer: quando arriva a 0 le caselle restano ancora
   // nella VRAM (Hud_RemoveSuperBombIndicator non chiede di aggiornarle) e
@@ -626,7 +613,7 @@ static void FloorIndicatorToItalian(Ppu *ppu) {
   } else {
     top[0] = 0x251e, top[1] = kFloorGfx0[n - 1], bottom[0] = 0x2520, bottom[1] = kFloorGfx1[n - 1];
   }
-  int a = FindBg3Exact(ppu, top, bottom);
+  int a = FindBg3Words(ppu, top, bottom, 2, 0xffff);
   if (a < 0)
     return;
   static uint8 fill[16][64], img[16][64];

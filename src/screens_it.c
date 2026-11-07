@@ -285,6 +285,8 @@ const uint8 *ScreensIt_CreditsRow(int row) {
 enum { kEndW = 64, kEndH = 16, kEndTheEndHash = 0x60223b15 };
 
 static uint16 g_end_saved[16][16];
+static uint8 g_end_moved;  // logo sprites moved right (bit i: OAM entry i)
+enum { kEndShift = (kDigitsColumn - 0x19) * 8 };  // as far as the deaths digits
 static uint16 g_end_adr;
 static bool g_end_changed;
 
@@ -292,14 +294,25 @@ static int ObjTileAdr(Ppu *ppu, int tile) {
   return (ppu->objTileAdr2 + (tile >> 4) * 256 + (tile & 15) * 16) & 0x7fff;
 }
 
+// Pixel (x, y) of a 4bpp 8x8 tile
+static int ObjTilePixel(const uint16 *t, int x, int y) {
+  int b = 7 - x;
+  return (t[y] >> b & 1) | (t[y] >> (b + 8) & 1) << 1 |
+         (t[8 + y] >> b & 1) << 2 | (t[8 + y] >> (b + 8) & 1) << 3;
+}
+
+// FNV-1a hash of n bytes
+static uint32 Fnv1a(const uint8 *p, int n) {
+  uint32 h = 2166136261u;
+  for (int i = 0; i < n; i++)
+    h = (h ^ p[i]) * 16777619u;
+  return h;
+}
+
 static void ReadEnd(Ppu *ppu, uint8 img[kEndH][kEndW]) {
   for (int y = 0; y < kEndH; y++)
-    for (int x = 0; x < kEndW; x++) {
-      const uint16 *t = &ppu->vram[ObjTileAdr(ppu, (y >> 3) * 16 + (x >> 3))];
-      int b = 7 - (x & 7), r = y & 7;
-      img[y][x] = (t[r] >> b & 1) | (t[r] >> (b + 8) & 1) << 1 |
-                  (t[8 + r] >> b & 1) << 2 | (t[8 + r] >> (b + 8) & 1) << 3;
-    }
+    for (int x = 0; x < kEndW; x++)
+      img[y][x] = ObjTilePixel(&ppu->vram[ObjTileAdr(ppu, (y >> 3) * 16 + (x >> 3))], x & 7, y & 7);
 }
 
 static void WriteEnd(Ppu *ppu, uint8 img[kEndH][kEndW]) {
@@ -323,7 +336,7 @@ static void PutRows(uint8 img[kEndH][kEndW], const char *const *rows, int n, int
 }
 
 static void MakeFine(uint8 src[kEndH][kEndW], uint8 out[kEndH][kEndW]) {
-  enum { kX = 15 };  // "Fine" e' largo 34 pixel: centrato nei 64
+  enum { kX = 0 };  // built from the left edge, then moved right (FineAlignRight)
   memset(out, 0, kEndH * kEndW);
   // F: barra della T (righe 0-3) e asta con il ricciolo, tagliate prima della h
   for (int y = 0; y < kEndH; y++) {
@@ -353,6 +366,28 @@ static void MakeFine(uint8 src[kEndH][kEndW], uint8 out[kEndH][kEndW]) {
   }
 }
 
+// Rightmost column with a pixel, -1 if none
+static int EndRight(uint8 img[kEndH][kEndW]) {
+  for (int x = kEndW - 1; x >= 0; x--)
+    for (int y = 0; y < kEndH; y++)
+      if (img[y][x])
+        return x;
+  return -1;
+}
+
+// "Fine" ends where "The End" ends: the game puts the logo so that its last
+// letter lines up with the last digit of the deaths counter above. The digits
+// are moved right here (kDigitsColumn), the logo with them in ScreensIt_BeforeRender
+static void FineAlignRight(uint8 src[kEndH][kEndW], uint8 out[kEndH][kEndW]) {
+  int d = EndRight(src) - EndRight(out);
+  if (d <= 0)
+    return;
+  for (int y = 0; y < kEndH; y++) {
+    memmove(&out[y][d], &out[y][0], kEndW - d);
+    memset(&out[y][0], 0, d);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // "Nintendo presenta" al posto di "Nintendo presents" all'inizio del gioco
 // (Intro_DisplayLogo: quattro sprite 16x16 della prima tavola, caselle 0x69,
@@ -370,12 +405,6 @@ static int Obj1TileAdr(Ppu *ppu, int tile) {
   return (ppu->objTileAdr1 + (tile & 0xff) * 16) & 0x7fff;
 }
 
-static int ObjTilePixel(const uint16 *t, int x, int y) {
-  int b = 7 - x;
-  return (t[y] >> b & 1) | (t[y] >> (b + 8) & 1) << 1 |
-         (t[8 + y] >> b & 1) << 2 | (t[8 + y] >> (b + 8) & 1) << 3;
-}
-
 static void LogoToPresenta(Ppu *ppu) {
   static const uint8 kLogoX[4] = { 0, 16, 32, 40 };
   static const uint8 kLogoTile[4] = { 0x69, 0x6b, 0x6d, 0x6e };
@@ -389,11 +418,7 @@ static void LogoToPresenta(Ppu *ppu) {
         if (p)
           img[y][kLogoX[i] + x] = p;
       }
-  uint32 h = 2166136261u;
-  for (int y = 0; y < kLogoH; y++)
-    for (int x = 0; x < kLogoW; x++)
-      h = (h ^ img[y][x]) * 16777619u;
-  if (h != kLogoHash)
+  if (Fnv1a(&img[0][0], kLogoH * kLogoW) != kLogoHash)
     return;
   int adr = Obj1TileAdr(ppu, kLogoLastTile);
   uint16 *t = &ppu->vram[adr];
@@ -598,11 +623,7 @@ static void SubtitleBeforeRender(Ppu *ppu) {
   for (int y = 0; y < kSubH; y++)
     for (int x = 0; x < kSubW; x++)
       g_sub_src[y][x] = (uint8)ObjTilePixel(SubTile(ppu, kSubTiles + (y >> 3) * 16 + (x >> 3)), x & 7, y & 7);
-  uint32 h = 2166136261u;
-  for (int y = 0; y < kSubH; y++)
-    for (int x = 0; x < kSubW; x++)
-      h = (h ^ g_sub_src[y][x]) * 16777619u;
-  if (h != kSubHash || SubLabel() != (int)strlen(kSubOldLetters))
+  if (Fnv1a(&g_sub_src[0][0], kSubH * kSubW) != kSubHash || SubLabel() != (int)strlen(kSubOldLetters))
     return;
   // colore del riempimento di ogni riga (il piu' usato)
   for (int y = 0; y < kSubH; y++) {
@@ -690,18 +711,26 @@ void ScreensIt_BeforeRender(Ppu *ppu) {
     return;
   static uint8 src[kEndH][kEndW], out[kEndH][kEndW];
   ReadEnd(ppu, src);
-  uint32 h = 2166136261u;
-  for (int y = 0; y < kEndH; y++)
-    for (int x = 0; x < kEndW; x++)
-      h = (h ^ src[y][x]) * 16777619u;
-  if (h != kEndTheEndHash)
+  if (Fnv1a(&src[0][0], kEndH * kEndW) != kEndTheEndHash)
     return;
   for (int k = 0; k < 16; k++)
     memcpy(g_end_saved[k], &ppu->vram[ObjTileAdr(ppu, (k >> 3) * 16 + (k & 7))], 16 * sizeof(uint16));
   g_end_adr = ppu->objTileAdr2;
   MakeFine(src, out);
+  FineAlignRight(src, out);
   WriteEnd(ppu, out);
   g_end_changed = true;
+  // the four sprites of the logo (Credits_HangForever: tiles 0x00-0x06 of the
+  // second table) move right as much as the deaths digits, for this frame
+  g_end_moved = 0;
+  for (int i = 0; i < 4; i++)
+    if ((ppu->oam[i * 2 + 1] & 0x1ff) == 0x100 + i * 2) {
+      if (ppu->objXValid)
+        ppu->objX[i] += kEndShift;
+      else
+        ppu->oam[i * 2] = (ppu->oam[i * 2] & 0xff00) | (uint8)(ppu->oam[i * 2] + kEndShift);
+      g_end_moved |= 1 << i;
+    }
 }
 
 void ScreensIt_AfterRender(Ppu *ppu) {
@@ -710,6 +739,10 @@ void ScreensIt_AfterRender(Ppu *ppu) {
     memcpy(&ppu->vram[g_logo_adr], g_logo_saved, sizeof(g_logo_saved));
     g_logo_changed = false;
   }
+  for (int i = 0; i < 4; i++)
+    if (g_end_moved >> i & 1 && !ppu->objXValid)
+      ppu->oam[i * 2] = (ppu->oam[i * 2] & 0xff00) | (uint8)(ppu->oam[i * 2] - kEndShift);
+  g_end_moved = 0;
   if (!g_end_changed || ppu->objTileAdr2 != g_end_adr)
     return;
   for (int k = 0; k < 16; k++)

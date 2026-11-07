@@ -36,6 +36,14 @@ enum {
 static bool g_hud_was_active;
 static uint8 g_talk_frame = 0xff;  // ultimo frame in cui si poteva parlare
 
+// Distances of the HUD from the edges of the picture (empty pixels before
+// its first visible pixel). The classic HUD keeps those of the original in
+// 4:3 also when split on a wide screen (magic meter at x 20, last heart 16 px
+// from the right edge, top at row 15): the original experience. The modern
+// HUD uses 5 px on every side, like the GBA HUD (kGbaHud* in ppu.c).
+enum { kClassicEdgeLeft = 20, kClassicEdgeRight = 16 };
+enum { kModernEdge = 5 };
+
 static bool ModernHudOn(void) {
   return (enhanced_features0 & kFeatures0_ModernHud) != 0;
 }
@@ -86,6 +94,17 @@ static int ItemMenuPush(void) {
   return d > 0 ? d : 0;
 }
 
+// Rows a HUD whose top is `top` px from the edge goes down with the START menu
+// on a screen `height` rows high: the push of the menu (232 at most), a
+// little more when the HUD would still show at the bottom with the menu fully
+// down (5 px from the top with extend_y: 5 + 232 < 240). On GBA the menu is a
+// screen of its own; here the HUD slides out with it as in the original
+enum { kMenuPushMax = 232 };
+static int ItemMenuPushHud(int top, int height) {
+  int push = ItemMenuPush(), extra = height - kMenuPushMax - top;
+  return push + (extra > 0 ? IntMin(push, kMenuPushMax) * extra / kMenuPushMax : 0);
+}
+
 // L'HUD originale e' nella mappa di BG3 (caselle uguali a
 // hud_tile_indices_buffer, alla riga 2): vale ogni volta che il gioco lo
 // mostra (pozioni, cadute, vittorie, menu...), non nelle mappe e nei titoli
@@ -116,13 +135,29 @@ void HdHud_BeforeRender(Ppu *ppu) {
   // destra (PpuHudSplitSrc); anche quando scende con il menu START
   bool classic = !ModernHudOn() && ClassicHudInVram(ppu);
   ppu->hudSplitExt = classic && ppu->extraLeftRight >= 32 ? ppu->extraLeftRight : 0;
-  // stessa distanza dai bordi dell'HUD moderno (HdHud_Draw: 8 + primo pixel del cuore)
-  int heart_row, heart_col;
-  TileFirstPixel(0x24A0, &heart_row, &heart_col);
-  ppu->hudSplitMargin = 8 + heart_col;
+  // same distances from the edges as the original HUD in 4:3
+  ppu->hudSplitMargin = kClassicEdgeLeft;
+  ppu->hudSplitMarginR = kClassicEdgeRight;
   ppu->hudSplitButtons = (Hud_ItemOnX() ? 1 : 0) | (Hud_ItemOnLR() ? 2 : 0);
+  // GBA HUD (PpuHudGbaSrc): on the edges of the whole picture, in any format
+  ppu->hudGba = classic && g_config.gba_hud;
+  if (ppu->hudGba) {
+    ppu->hudSplitExt = ppu->extraLeftRight;
+    // counters up to their last tile (with 4 rupee digits they move right)
+    int w = 0;
+    for (int c = 8; c < 20; c++)
+      if ((hud_tile_indices_buffer[c] & 0x3ff) != 0x7f || (hud_tile_indices_buffer[c + 32] & 0x3ff) != 0x7f)
+        w = (c - 7) * 8;
+    ppu->hudGbaCountersW = w;
+  }
+  ppu->hudGbaDrop = 0;
   // 4:3: riquadri di X/L/R in fila sotto i contatori (PpuHudBoxRowSrc)
-  ppu->hudBoxRow = classic && !ppu->hudSplitExt && ppu->hudSplitButtons;
+  // GBA HUD: the same row in 4:3 and 3:2 (picture narrower than 16:10)
+  int height = g_config.extend_y ? 240 : 224;
+  bool narrow = (256 + 2 * ppu->extraLeftRight) * 100 < 155 * height;
+  if (ppu->hudGba && InItemMenu())
+    ppu->hudGbaDrop = ItemMenuPushHud(kModernEdge, height) - ItemMenuPush();
+  ppu->hudBoxRow = classic && ppu->hudSplitButtons && (ppu->hudGba ? narrow : !ppu->hudSplitExt);
 }
 
 void HdHud_CanTalk(void) {
@@ -203,8 +238,7 @@ static int StableAction(void) {
 static const char *ActionLabel(int a) {
   static const char *const kIt[] = { "", "PARLA", "LEGGI", "APRI", "SOLLEVA", "AFFERRA", "TIRA", "LANCIA", "CORRI", "NUOTA" };
   static const char *const kEn[] = { "", "TALK", "READ", "OPEN", "LIFT", "GRAB", "PULL", "THROW", "DASH", "SWIM" };
-  bool it = g_config.language && (g_config.language[0] == 'i' || g_config.language[0] == 'I');
-  return (it ? kIt : kEn)[a];
+  return (HudIt_Active() ? kIt : kEn)[a];
 }
 
 // ---------------------------------------------------------------------------
@@ -234,39 +268,40 @@ static void Px(Canvas *cv, int x, int y, uint32 color) {
   }
 }
 
-// Una casella 8x8 dello strato 3 (2 bit per pixel) come la disegnerebbe la PPU
-static void DrawTile(Canvas *cv, int x, int y, uint16 entry) {
+// Il giallo delle cifre al massimo come nella versione GBA (anche per i
+// numeri piccoli di bombe e frecce nei tasti)
+enum { kYellowDigitColor = 0xffde52 };
+
+// Una casella 8x8 decodificata nei colori (0 = trasparente). With max_yellow
+// the digits at their maximum (0x3490 + digit) get the GBA yellow
+static void DecodeTileEx(uint16 entry, uint32 *out, int stride, bool max_yellow) {
   Ppu *ppu = g_zenv.ppu;
   int tile = entry & 0x3ff, pal = entry >> 10 & 7;
   bool hf = entry & 0x4000, vf = entry & 0x8000;
-  // cifra al massimo (0x3490 + cifra): il giallo della versione GBA
-  bool max_digit = pal == 5 && (uint16)(tile - 0x90) < 10;
+  bool max_digit = max_yellow && pal == 5 && (uint16)(tile - 0x90) < 10;
   uint16 base = ppu->bgLayer[2].tileAdr + tile * 8;
   for (int r = 0; r < 8; r++) {
     uint16 w = ppu->vram[(base + (vf ? 7 - r : r)) & 0x7fff];
     for (int c = 0; c < 8; c++) {
       int bit = hf ? c : 7 - c;
       int v = (w >> bit & 1) | (w >> (8 + bit) & 1) << 1;
-      if (v)
-        Px(cv, x + c, y + r, (max_digit && v == 2) ? 0xffde52 : HdFx_Bgr15ToRgb(ppu->cgram[pal * 4 + v]));
+      uint32 col = (max_digit && v == 2) ? kYellowDigitColor : HdFx_Bgr15ToRgb(ppu->cgram[pal * 4 + v]);
+      out[r * stride + c] = v ? (col | 0xff000000) : 0;
     }
   }
 }
 
-// Una casella 8x8 decodificata nei colori (0 = trasparente)
 static void DecodeTile(uint16 entry, uint32 *out, int stride) {
-  Ppu *ppu = g_zenv.ppu;
-  int tile = entry & 0x3ff, pal = entry >> 10 & 7;
-  bool hf = entry & 0x4000, vf = entry & 0x8000;
-  uint16 base = ppu->bgLayer[2].tileAdr + tile * 8;
-  for (int r = 0; r < 8; r++) {
-    uint16 w = ppu->vram[(base + (vf ? 7 - r : r)) & 0x7fff];
-    for (int c = 0; c < 8; c++) {
-      int bit = hf ? c : 7 - c;
-      int v = (w >> bit & 1) | (w >> (8 + bit) & 1) << 1;
-      out[r * stride + c] = v ? (HdFx_Bgr15ToRgb(ppu->cgram[pal * 4 + v]) | 0xff000000) : 0;
-    }
-  }
+  DecodeTileEx(entry, out, stride, false);
+}
+
+// Una casella 8x8 dello strato 3 (2 bit per pixel) come la disegnerebbe la PPU
+static void DrawTile(Canvas *cv, int x, int y, uint16 entry) {
+  uint32 img[64];
+  DecodeTileEx(entry, img, 8, true);
+  for (int i = 0; i < 64; i++)
+    if (img[i])
+      Px(cv, x + (i & 7), y + (i >> 3), img[i] & 0xffffff);
 }
 
 // Icona 16x16 di un oggetto (caselle: su-sx, su-dx, giu'-sx, giu'-dx). Il nero
@@ -407,12 +442,6 @@ static bool ShowMaxInYellow(int value, int max) {
   return (enhanced_features0 & kFeatures0_ShowMaxItemsInYellow) && value == max;
 }
 
-// Il giallo delle cifre al massimo come nella versione GBA (anche per i
-// numeri piccoli di bombe e frecce nei tasti)
-static uint32 YellowDigitColor(void) {
-  return 0xffde52;
-}
-
 // Oggetto dentro un tasto 18x18, con il numero se e' un consumabile; gli
 // oggetti di X, L e R solo se Link li ha ancora (come Hud_DrawXLRItems)
 static void DrawButtonItem(Canvas *cv, int x, int y, int item) {
@@ -430,7 +459,7 @@ static void DrawButtonItem(Canvas *cv, int x, int y, int item) {
     int n = count > 99 ? 99 : count;
     buf[0] = '0' + n / 10, buf[1] = '0' + n % 10, buf[2] = 0;
     const char *t = n < 10 ? buf + 1 : buf;
-    DrawSmallText(cv, x + S - SmallTextWidth(t), y + S - 5, t, ShowMaxInYellow(count, max) ? YellowDigitColor() : 0xf8f8f8);
+    DrawSmallText(cv, x + S - SmallTextWidth(t), y + S - 5, t, ShowMaxInYellow(count, max) ? kYellowDigitColor : 0xf8f8f8);
   }
 }
 
@@ -467,7 +496,9 @@ static const uint8 kBandB[7] = { 0x1e, 0x1b, 0x1b, 0x1e, 0x1b, 0x1b, 0x1e };
 static const uint8 kBandF[7] = { 0x1f, 0x18, 0x18, 0x1e, 0x18, 0x18, 0x18 };
 // piani in italiano come sulla GBA: PT, 1oP, PS1
 static const uint8 kBandP[7] = { 0x1e, 0x1b, 0x1b, 0x1e, 0x18, 0x18, 0x18 };
-static const uint8 kBandT[7] = { 0x1f, 0x0e, 0x0e, 0x0e, 0x0e, 0x0e, 0x0e };
+// T larga 6: barra di 2 righe e asta di 2 al centro (con l'asta di 3 sotto una
+// riga sola sembrava una I)
+static const uint8 kBandT[7] = { 0x3f, 0x3f, 0x0c, 0x0c, 0x0c, 0x0c, 0x0c };
 static const uint8 kBandS[7] = { 0x0f, 0x18, 0x18, 0x0e, 0x03, 0x03, 0x1e };
 // o in alto (o): 4 colonne
 static const uint8 kBandOrd[7] = { 0x6, 0x9, 0x9, 0x6, 0, 0, 0 };
@@ -476,7 +507,7 @@ static const uint8 kTimerColon[7] = { 0, 3, 3, 0, 3, 3, 0 };
 static const uint8 kTimerDot[7] = { 0, 0, 0, 0, 0, 3, 3 };
 // Triforza 7x4 ai due lati
 static const uint8 kBandTriforce[4] = { 0x08, 0x1c, 0x22, 0x77 };
-enum { kTimerH = 7, kTimerBandH = 13, kBandTriW = 7, kBandTriH = 4, kTimerPad = 13 };
+enum { kTimerH = 7, kTimerBandH = 13, kBandTriW = 7, kBandTriH = 4 };
 
 // Mescola un colore al pixel che c'e' gia' (a = 0..256)
 static void PxBlend(Canvas *cv, int x, int y, uint32 color, int a) {
@@ -495,15 +526,16 @@ static void PxBlend(Canvas *cv, int x, int y, uint32 color, int a) {
   g_hud_bri = bri;
 }
 
-// Carattere largo 5 (cifre e lettere), 4 (o) o 2 (due punti e punto)
+// Carattere largo 5 (cifre e lettere), 6 (T), 4 (o) o 2 (due punti e punto)
 static const uint8 *BandGlyph(char c, int *w) {
   *w = 5;
   if (c >= '0' && c <= '9') return kTimerDigits[c - '0'];
   if (c == 'B') return kBandB;
   if (c == 'F') return kBandF;
   if (c == 'P') return kBandP;
-  if (c == 'T') return kBandT;
   if (c == 'S') return kBandS;
+  *w = 6;
+  if (c == 'T') return kBandT;
   *w = 4;
   if (c == 'o') return kBandOrd;
   *w = 2;
@@ -565,13 +597,20 @@ static void BandPx(Canvas *cv, int x, int y, uint32 col, int a) {
     PxBlend(cv, x, y, col, a);
 }
 
-// Fascia centrata in cx con il testo t
-static void DrawBand(Canvas *cv, int cx, int y, const char *t) {
+// Fascia centrata in cx con il testo t, grandezza h2 in mezzi: 2 = normale
+// (contatore), 3 = una volta e mezza (piano: a grandezza 1 al cambio di piano
+// quasi non si notava, al doppio era troppo). Ogni pixel dello schermo prende
+// il pixel del disegno piu' vicino
+static void DrawBand(Canvas *cv, int cx, int y, const char *t, int h2) {
+#define BAND_S(n) ((n) * h2 / 2)
   int tw = 0, gw;
   for (int i = 0; t[i]; i++)
     BandGlyph(t[i], &gw), tw += gw + (gw == 5 ? 2 : 1);
   tw--;  // niente spazio dopo l'ultimo carattere
-  int w = tw + 2 * kTimerPad, h = kTimerBandH, x = cx - w / 2;
+  // margine: Triforza (da 4 a 4 + 7) e uno spazio prima del testo
+  int pad = BAND_S(4 + kBandTriW + 2);
+  int w = BAND_S(tw) + 2 * pad, h = BAND_S(kTimerBandH), x = cx - w / 2;
+  const int sh = 1;  // ombra
   // fascia: lati a semicerchio, interno scuro trasparente, bordo chiaro sottile
   float rad = h * 0.5f;
   for (int yy = 0; yy < h; yy++) {
@@ -586,35 +625,41 @@ static void DrawBand(Canvas *cv, int cx, int y, const char *t) {
     }
   }
   // Triforze ai lati, bianche come i caratteri e con la stessa ombra
-  int ty = (h - kBandTriH) / 2;
+  int ty = (h - BAND_S(kBandTriH)) / 2, tx1 = BAND_S(4), tx2 = w - BAND_S(4 + kBandTriW);
   for (int pass = 0; pass < 2; pass++)
-    for (int r = 0; r < kBandTriH; r++)
-      for (int c = 0; c < kBandTriW; c++)
-        if (kBandTriforce[r] >> (kBandTriW - 1 - c) & 1) {
-          int d = pass == 0;
-          uint32 col = pass == 0 ? 0x000000 : r == 0 ? 0xffffff : 0xeef2e4;
-          int a = pass == 0 ? 150 : -1;
-          BandPx(cv, x + 4 + c + d, y + ty + r + d, col, a);
-          BandPx(cv, x + w - 4 - kBandTriW + c + d, y + ty + r + d, col, a);
-        }
+    for (int oy = 0; oy < BAND_S(kBandTriH); oy++)
+      for (int ox = 0; ox < BAND_S(kBandTriW); ox++) {
+        int r = oy * 2 / h2, c = ox * 2 / h2;
+        if (!(kBandTriforce[r] >> (kBandTriW - 1 - c) & 1))
+          continue;
+        int d = pass == 0 ? sh : 0;
+        uint32 col = pass == 0 ? 0x000000 : r == 0 ? 0xffffff : 0xeef2e4;
+        int al = pass == 0 ? 150 : -1;
+        BandPx(cv, x + tx1 + ox + d, y + ty + oy + d, col, al);
+        BandPx(cv, x + tx2 + ox + d, y + ty + oy + d, col, al);
+      }
   // testo: ombra scura e poi caratteri chiari
-  int py = (h - kTimerH) / 2;
+  int py = (h - BAND_S(kTimerH)) / 2;
   for (int pass = 0; pass < 2; pass++) {
-    int px = kTimerPad;
+    int px = pad, adv = 0;
     for (int i = 0; t[i]; i++) {
       const uint8 *g = BandGlyph(t[i], &gw);
-      for (int r = 0; r < kTimerH; r++)
-        for (int c = 0; c < gw; c++) {
+      int x0 = BAND_S(adv);
+      for (int oy = 0; oy < BAND_S(kTimerH); oy++)
+        for (int ox = 0; ox < BAND_S(gw); ox++) {
+          int r = oy * 2 / h2, c = ox * 2 / h2;
           if (!(g[r] >> (gw - 1 - c) & 1))
             continue;
+          int bx = x + px + x0 + ox, by = y + py + oy;
           if (pass == 0)
-            BandPx(cv, x + px + c + 1, y + py + r + 1, 0x000000, 150);
+            BandPx(cv, bx + sh, by + sh, 0x000000, 150);
           else
-            BandPx(cv, x + px + c, y + py + r, r <= 1 ? 0xffffff : 0xeef2e4, -1);
+            BandPx(cv, bx, by, r <= 1 ? 0xffffff : 0xeef2e4, -1);
         }
-      px += gw + (gw == 5 ? 2 : 1);
+      adv += gw + (gw == 5 ? 2 : 1);
     }
   }
+#undef BAND_S
 }
 
 void HdHud_Draw(uint8 *pixels, int pitch, int width, int height, int scale) {
@@ -629,14 +674,19 @@ void HdHud_Draw(uint8 *pixels, int pitch, int width, int height, int scale) {
     return;
   // Come l'HUD originale resta anche nei dialoghi (prima scivolava fuori) e
   // il menu START lo spinge giu' mentre scende
-  int push = in_menu ? ItemMenuPush() : 0;
+  int push = in_menu ? ItemMenuPushHud(kModernEdge, height / scale) : 0;
   Canvas cv = { pixels, pitch, width / scale, height / scale, scale, push };
   int W = cv.width, H = cv.height;
   if (push >= H)
     return;
 
   // --- Cuori (caselle originali 8x8, 10 per riga) ------------------------
-  const int x0 = 8, y0 = 8;
+  // kModernEdge from every edge, counted
+  // from the outermost visible pixels: on the left the frame of the magic bar
+  // (2 px left of the hearts), at the top the first heart pixel
+  int heart_row, heart_col;
+  TileFirstPixel(0x24A0, &heart_row, &heart_col);
+  const int x0 = kModernEdge + 2 - heart_col, y0 = kModernEdge - heart_row;
   int hearts = link_health_capacity >> 3;
   int hp = (link_health_current + 3) & ~3;
   // Cuori che si riempiono (fata, pozione, cuore preso): come nell'HUD
@@ -659,9 +709,10 @@ void HdHud_Draw(uint8 *pixels, int pitch, int width, int height, int scale) {
   }
   int rows = hearts > 10 ? 2 : 1;
   // margine vero dei cuori: primo pixel visibile della casella
-  int heart_row, heart_col;
-  TileFirstPixel(0x24A0, &heart_row, &heart_col);
   int top = y0 + heart_row, margin = x0 + heart_col;
+  int edge = kModernEdge;  // empty pixels right of the buttons
+  // the button and R shoulder images end with 1 transparent column
+  int bedge = edge - 1, sedge = edge - 1;
 
   // --- Magia: barra alta 8, larga quanto 10 cuori con la magia potenziata
   // e la meta' con quella normale
@@ -702,16 +753,20 @@ void HdHud_Draw(uint8 *pixels, int pitch, int width, int height, int scale) {
   int yx, yy, ax, ay, bx, by;
   bool show_x = Hud_ItemOnX(), show_lr = Hud_ItemOnLR();
   int gy = top;
+  // the items on L and R stick out above the shoulders: the whole interface
+  // starts at the top of their icons (drawn 1 px inside the item square),
+  // always, so it does not move when an item is given or removed
+  int sy = top - HD_SHOULDER_ITEM_Y - 1;
   if (show_lr) {
-    int lx = W - margin - HD_BUTTONS4_W, rx = W - margin - HD_SHOULDER_W;
-    DrawImage(&cv, lx, top, kHdShoulderL, HD_SHOULDER_W, HD_SHOULDER_H);
-    DrawImage(&cv, rx, top, kHdShoulderR, HD_SHOULDER_W, HD_SHOULDER_H);
-    DrawButtonItem(&cv, lx + HD_SHOULDER_L_ITEM_X, top + HD_SHOULDER_ITEM_Y, hud_cur_item_l);
-    DrawButtonItem(&cv, rx + HD_SHOULDER_R_ITEM_X, top + HD_SHOULDER_ITEM_Y, hud_cur_item_r);
-    gy = top + HD_SHOULDER_H + 2;
+    int lx = W - bedge - HD_BUTTONS4_W, rx = W - sedge - HD_SHOULDER_W;
+    DrawImage(&cv, lx, sy, kHdShoulderL, HD_SHOULDER_W, HD_SHOULDER_H);
+    DrawImage(&cv, rx, sy, kHdShoulderR, HD_SHOULDER_W, HD_SHOULDER_H);
+    DrawButtonItem(&cv, lx + HD_SHOULDER_L_ITEM_X, sy + HD_SHOULDER_ITEM_Y, hud_cur_item_l);
+    DrawButtonItem(&cv, rx + HD_SHOULDER_R_ITEM_X, sy + HD_SHOULDER_ITEM_Y, hud_cur_item_r);
+    gy = sy + 1 + HD_SHOULDER_H + 2;
   }
   if (show_x) {
-    int gx = W - margin - HD_BUTTONS4_W;
+    int gx = W - bedge - HD_BUTTONS4_W;
     DrawImage(&cv, gx, gy, kHdButtons4, HD_BUTTONS4_W, HD_BUTTONS4_H);
     DrawButtonLetter(&cv, gx, gy, kHdButtons4, HD_BUTTONS4_W, HD_BUTTON4_X_X, HD_BUTTON4_X_Y, 'X');
     DrawButtonLetter(&cv, gx, gy, kHdButtons4, HD_BUTTONS4_W, HD_BUTTON4_Y_X, HD_BUTTON4_Y_Y, 'Y');
@@ -722,7 +777,7 @@ void HdHud_Draw(uint8 *pixels, int pitch, int width, int height, int scale) {
     bx = gx + HD_BUTTON4_B_X, by = gy + HD_BUTTON4_B_Y;
     DrawButtonItem(&cv, gx + HD_BUTTON4_X_X, gy + HD_BUTTON4_X_Y, hud_cur_item_x);
   } else {
-    int gx = W - margin - HD_BUTTONS_W;
+    int gx = W - bedge - HD_BUTTONS_W;
     DrawImage(&cv, gx, gy, kHdButtons, HD_BUTTONS_W, HD_BUTTONS_H);
     DrawButtonLetter(&cv, gx, gy, kHdButtons, HD_BUTTONS_W, HD_BUTTON_Y_X, HD_BUTTON_Y_Y, 'Y');
     DrawButtonLetter(&cv, gx, gy, kHdButtons, HD_BUTTONS_W, HD_BUTTON_A_X, HD_BUTTON_A_Y, 'A');
@@ -741,19 +796,25 @@ void HdHud_Draw(uint8 *pixels, int pitch, int width, int height, int scale) {
   // A: scritta dell'azione dentro il tasto rosso
   if (!in_dialog) {
     const char *label = ActionLabel(StableAction());
-    if (*label)
-      DrawSmallText(&cv, ax + (S - SmallTextWidth(label)) / 2, ay + (S - 5) / 2, label, 0xe8e8e8);
+    if (*label) {
+      // centred on the A button, but never closer to the edge than the buttons
+      // (the outline of the text ends 1 px after it)
+      int lw = SmallTextWidth(label), lx = IntMin(ax + (S - lw) / 2, W - edge - lw - 1);
+      DrawSmallText(&cv, lx, ay + (S - 5) / 2, label, 0xe8e8e8);
+    }
   }
 
   // --- Rupie in basso a sinistra, chiavi del labirinto sopra ---------------
   {
-    int ry = H - margin - 8;
-    DrawTile(&cv, x0, ry, 0x3ca8);
+    // kModernEdge from the side and from the bottom
+    // (the rupee tile is drawn from its first column to its last row)
+    int ry = H - kModernEdge - 8, rx = kModernEdge;
+    DrawTile(&cv, rx, ry, 0x3ca8);
     int max_rupees = (enhanced_features0 & kFeatures0_CarryMoreRupees) ? 9999 : 999;  // come MaxRupees (hud.c)
-    DrawNumberTiles(&cv, x0 + 10, ry, link_rupees_actual, 3, ShowMaxInYellow(link_rupees_goal, max_rupees));
+    DrawNumberTiles(&cv, rx + 10, ry, link_rupees_actual, 3, ShowMaxInYellow(link_rupees_goal, max_rupees));
     if (link_num_keys != 0xff) {
-      DrawTile(&cv, x0, ry - 10, 0x2871);
-      DrawNumberTiles(&cv, x0 + 10, ry - 10, link_num_keys, 1, false);
+      DrawTile(&cv, rx, ry - 10, 0x2871);
+      DrawNumberTiles(&cv, rx + 10, ry - 10, link_num_keys, 1, false);
     }
   }
 
@@ -762,9 +823,9 @@ void HdHud_Draw(uint8 *pixels, int pitch, int width, int height, int scale) {
   char band[9];
   int frames = TimerFrames();
   if (frames >= 0)
-    TimerText(frames, band), DrawBand(&cv, W / 2, top, band);
+    TimerText(frames, band), DrawBand(&cv, W / 2, top, band, 2);
   else if (FloorText(band))
-    DrawBand(&cv, W / 2, top, band);
+    DrawBand(&cv, W / 2, top, band, 3);
 }
 
 // ---------------------------------------------------------------------------
@@ -813,13 +874,10 @@ static bool ModernTextAlphabet(void) {
          StringEqualsNoCase(l, "redux");
 }
 
-// Racconto dell'intro (modulo 0x14): attivo finche' il testo originale e'
-// davvero sullo schermo (caselle del testo 0x180+ nel riquadro di BG3), non
-// secondo la scena: nelle dissolvenze prima del cambio scena il gioco e' gia'
-// in un altro stato e il testo originale si vedeva ancora. Non nella mappa
-// del mondo (modo 7, niente BG3)
-static bool MtIntroText(void) {
-  if (main_module_index != 20 || !(TM_copy & 4) || (BGMODE_copy & 7) == 7)
+// The original text is on the screen: BG3 shown (not the mode 7 world map)
+// with text tiles (0x180+) in the box
+static bool MtBoxText(void) {
+  if (!(TM_copy & 4) || (BGMODE_copy & 7) == 7)
     return false;
   const uint16 *vram = g_zenv.ppu->vram;
   for (int r = 0; r < kMtBoxH; r++)
@@ -831,12 +889,27 @@ static bool MtIntroText(void) {
   return false;
 }
 
-// dialoghi (14/2), menu Continua / Salva ed esci aperto con SELECT (14/11) e
-// testo dell'intro
+// Racconto dell'intro (modulo 0x14): attivo finche' il testo originale e'
+// davvero sullo schermo (caselle del testo 0x180+ nel riquadro di BG3), non
+// secondo la scena: nelle dissolvenze prima del cambio scena il gioco e' gia'
+// in un altro stato e il testo originale si vedeva ancora. Non nella mappa
+// del mondo (modo 7, niente BG3)
+static bool MtIntroText(void) {
+  return main_module_index == 20 && MtBoxText();
+}
+
+// Dialogues the game shows from its own scene, calling RenderText itself
+// after Main_ShowTextMessage: the Triforce (module 25) and Agahnim beaten
+// (21). As for the intro, while the original text is on the screen
+static bool MtSceneDialogue(void) {
+  return (main_module_index == 25 || main_module_index == 21) && MtBoxText();
+}
+
+// Dialogues (14/2) and the intro text. The Continue / Save and quit menu
+// opened with SELECT (14/11) keeps the original text, by user choice
 bool HdText_ModernActive(void) {
   return g_config.modern_text && ModernTextAlphabet() &&
-         (main_module_index == 14 && (submodule_index == 2 || submodule_index == 11) ||
-          MtIntroText());
+         (main_module_index == 14 && submodule_index == 2 || MtSceneDialogue() || MtIntroText());
 }
 
 static void MtClearLine(int line) {
@@ -939,10 +1012,6 @@ void HdText_KeepLines(void) {
 void HdText_Tick(void) {
   MtRebuild();
   g_mt_reveal = fminf(g_mt_reveal + kMtRevealStep, (float)g_mt_written + kMtRevealStep * kMtFadeFrames);
-  // menu di SELECT: compare tutto insieme come l'originale, senza far
-  // aspettare la scelta
-  if (submodule_index == 11)
-    HdText_RevealAll();
 }
 
 bool HdText_Revealing(void) {
@@ -1124,7 +1193,7 @@ void HdText_Draw(uint8 *pixels, int pitch, int width, int height, int scale) {
   // seconda riga) non contano, cosi' il testo resta centrato come nel gioco;
   // nelle scelte le righe della domanda restano dove sono
   int lines, first;
-  Text_MeasureMessage(MtAdvance, &lines, &first);
+  Text_MeasureMessage(&lines, &first);
   if (mt_base_len[0] | mt_base_len[1] | mt_base_len[2])
     first = 0;
   // intro: righe alte come quelle originali (16 pixel), il testo occupa lo

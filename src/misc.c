@@ -427,7 +427,7 @@ void NMI_PrepareSprites() {  // 8085fc
     // Con l'effetto calore e fiamme, al chiuso (fiamme di torce e bracieri)
     // a meta' velocita': 18 frame invece di 9
     bg_tile_animation_countdown = (BYTE(overlay_index) == 0xb5 || BYTE(overlay_index) == 0xbc) ? 0x17 :
-                                  (player_is_indoors && g_fx_heat) ? 18 : 9;
+                                  (player_is_indoors && g_config.fx_heat) ? 18 : 9;
 
     uint16 t = word_7EC00F + 0x400;
     if (t == 0xc00)

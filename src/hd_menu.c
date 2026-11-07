@@ -57,7 +57,6 @@ typedef struct MenuItem {
 
 // Testi del menu: scritti in italiano, in inglese con le altre lingue
 static const char *Tr(const char *it);
-static bool IsItalian();
 static void UpdateDungeonName(void);
 
 static bool g_menu_open;
@@ -206,9 +205,16 @@ typedef struct Canvas {
   int pitch, width, height, scale;
 } Canvas;
 
+// Brightness (0-15) of what is drawn over the game: the overlays that belong
+// to a game screen (hints, dungeon names, letter outlines) fade with it, the
+// options menu and the messages stay at 15 (see HdMenu_Draw)
+static int g_draw_bri = 15;
+
 static void Canvas_Pixel(Canvas *cv, int x, int y, uint32 color) {
   if ((unsigned)x >= (unsigned)cv->width || (unsigned)y >= (unsigned)cv->height)
     return;
+  if (g_draw_bri < 15)
+    color = HdFx_DimRgb(color, g_draw_bri) & 0xffffff;
   int s = cv->scale;
   for (int yy = 0; yy < s; yy++) {
     uint32 *row = (uint32 *)(cv->pixels + (y * s + yy) * cv->pitch);
@@ -227,7 +233,7 @@ static void Canvas_Rect(Canvas *cv, int x, int y, int w, int h, uint32 color) {
 static int DrawChar(Canvas *cv, int x, int y, uint32 c, uint32 color) {
   int g = Font_GlyphFor(c);
   // con il testo moderno lo stesso font dei dialoghi (ombra in basso a destra)
-  const uint16 *bits;
+  const uint16 *bits = NULL;
   int mw = g_menu_modern && g >= 0 ? HdText_ModernGlyph(g, &bits) : 0;
   if (mw) {
     for (int pass = 0; pass < 2; pass++)
@@ -263,7 +269,7 @@ static int TextWidth(const char *s) {
   while (*s) {
     uint32 c = Utf8Next(&s);
     int g = Font_GlyphFor(c);
-    const uint16 *bits;
+    const uint16 *bits = NULL;
     int mw = g_menu_modern && g >= 0 ? HdText_ModernGlyph(g, &bits) : 0;
     w += mw ? mw + 1 : (g >= 0 && g < g_font_count && g_font_data) ? g_font_width[g] : 7;
   }
@@ -311,19 +317,15 @@ static void FormatFileTime(const char *name, char *buf, size_t size) {
     return;
   }
   struct tm *tm = localtime(&t);
-  if (IsItalian())
+  if (HudIt_Active())
     snprintf(buf, size, "%02d.%02d  ore %02d.%02d", tm->tm_mday, tm->tm_mon + 1, tm->tm_hour, tm->tm_min);
   else
     snprintf(buf, size, "%02d/%02d  %02d:%02d", tm->tm_mday, tm->tm_mon + 1, tm->tm_hour, tm->tm_min);
 }
 
-static void ShowMessage(const char *msg) {
+void HdMenu_ShowMessage(const char *msg) {
   snprintf(g_message, sizeof(g_message), "%s", Tr(msg));
   g_message_timer = 150;
-}
-
-void HdMenu_ShowMessage(const char *msg) {
-  ShowMessage(msg);
 }
 
 void HdMenu_AfterFrame(void) {
@@ -337,7 +339,7 @@ static void QuickSlotAction(int slot) {
   time_t t;
   QuickSlotName(slot, name, sizeof(name));
   if (!g_slot_action_save && !FileTime(name, &t)) {
-    ShowMessage("Lo slot e' vuoto");
+    HdMenu_ShowMessage("Lo slot \xc3\xa8 vuoto");
     return;
   }
   ZeldaApuLock();
@@ -345,7 +347,7 @@ static void QuickSlotAction(int slot) {
   ZeldaApuUnlock();
   char msg[64];
   snprintf(msg, sizeof(msg), Tr(g_slot_action_save ? "Salvato nello slot %d" : "Slot %d caricato"), slot + 1);
-  ShowMessage(msg);
+  HdMenu_ShowMessage(msg);
   if (!g_slot_action_save) {
     HdMenu_Close();
   }
@@ -354,25 +356,13 @@ static void QuickSlotAction(int slot) {
 // ---------------------------------------------------------------------------
 // Impostazioni
 
+// At start-up: text speed and MSU state from the ini. The effects read
+// g_config directly, so the menu changes them without copies
 void HdMenu_ApplyConfig() {
   g_text_speed = g_config.text_speed;
   g_msu_on = g_config.enable_msu != 0;
   if (g_msu_on)
     g_msu_mode = g_config.enable_msu;
-  g_dynamic_light = g_config.dynamic_light;
-  g_fx_heat = g_config.fx_heat, g_fx_window_rays = g_config.fx_window_rays;
-  g_fx_item_glow = g_config.fx_item_glow;
-  g_fx_rain = g_config.fx_rain;
-  g_fx_menu_blur = g_config.fx_menu_blur, g_fx_sprite_shadows = g_config.fx_sprite_shadows;
-  g_fx_soft_iris = g_config.fx_soft_iris;
-  g_fx_whirlpool = g_config.fx_whirlpool;
-  g_fx_pit = g_config.fx_pit;
-  g_fx_fog = g_config.fx_fog;
-  g_fx_water = g_config.fx_water;
-}
-
-static bool IsItalian() {
-  return g_config.language && StringEqualsNoCase(g_config.language, "it");
 }
 
 static const char *Tr(const char *it) {
@@ -380,14 +370,13 @@ static const char *Tr(const char *it) {
     { "Transizioni veloci", "Fast transitions" },
     { "Mondo continuo", "Continuous world" },
     { "HUD moderno", "Modern HUD" },
-    { "Richiede Cambio oggetti con L e R", "Requires Switch items with L and R" },
-    { "Richiede la PPU ottimizzata (NewRenderer)", "Requires the optimized PPU (NewRenderer)" },
     { "Nomi dei labirinti", "Dungeon names" },
     { "Tasto X per gli oggetti", "X button for items" },
     { "Cambio oggetti con L e R", "Switch items with L and R" },
     { "Tasti L e R per gli oggetti", "L and R buttons for items" },
     { "Spada e oggetti interazione ambiente", "Sword and items interaction" },
     { "Oggetti riempiono le risorse", "Items refill resources" },
+    { "Pozione d'oro", "Gold potion" },
     { "Interazione bruciatura e congelamento", "Burn and freeze interaction" },
     { "Inventario esteso", "Extended inventory" },
     { "Mappa migliorata", "Improved map" },
@@ -450,13 +439,9 @@ static const char *Tr(const char *it) {
     { "Immersione con le pinne", "Dive with the flippers" },
     { "Frecce piantate nei muri", "Arrows stuck in walls" },
     { "Giravolta Tornado", "Hurricane Spin" },
+    { "Boomerang come FSA", "Boomerang as in FSA" },
     { "Rocce incantate", "Enchanted rocks" },
     { "Danni dei nemici come su GBA", "Enemy damage as on GBA" },
-    { "Solo schermo largo", "Only widescreen" },
-    { "Link personalizzato", "Custom Link" },
-    { "Non con un Link personalizzato", "Not with a custom Link" },
-    { "Richiede lo schermo largo", "Requires a widescreen aspect ratio" },
-    { "Non con meno flash", "Not with fewer flashes" },
     { "Velocit\xc3\xa0 dei dialoghi", "Dialogue speed" },
     { "Generale", "General" },
     { "Immagine", "Image" },
@@ -483,7 +468,7 @@ static const char *Tr(const char *it) {
     { "Carica", "Load" },
     { "vuoto", "empty" },
     { "S\xc3\xac", "Yes" },
-    { "Lo slot e' vuoto", "The slot is empty" },
+    { "Lo slot \xc3\xa8 vuoto", "The slot is empty" },
     { "Salvato nello slot %d", "Saved to slot %d" },
     { "Slot %d caricato", "Slot %d loaded" },
     { "Tasti predefiniti ripristinati", "Default keys restored" },
@@ -515,12 +500,13 @@ static const char *Tr(const char *it) {
     { "Rocca Tartaruga", "Turtle Rock" },
     { "Torre di Ganon", "Ganon's Tower" },
     { "Premi il nuovo tasto o pulsante  (Esc o Back annulla)", "Press the new key or button  (Esc or Back cancels)" },
-    { "A conferma   B indietro   Sinistra e Destra cambiano", "A confirm   B back   Left and Right change" },
     { "Segnalino tolto", "Marker removed" },
     { "Troppi segnalini, togline qualcuno", "Too many markers, remove some" },
     { "Segnalino aggiunto", "Marker added" },
+    { "Mondo continuo acceso dal salvataggio", "Continuous world turned on by the save" },
+    { "Mondo continuo spento dal salvataggio", "Continuous world turned off by the save" },
   };
-  if (IsItalian())
+  if (HudIt_Active())
     return it;
   for (int i = 0; i < countof(kTr); i++)
     if (!strcmp(it, kTr[i][0]))
@@ -538,6 +524,30 @@ static void AddIni(IniValue *v, int *n, const char *section, const char *key, co
   v[*n].key = key;
   snprintf(v[*n].value, sizeof(v[*n].value), fmt, value);
   (*n)++;
+}
+
+static void AddIniStr(IniValue *v, int *n, const char *section, const char *key, const char *value) {
+  v[*n].section = section;
+  v[*n].key = key;
+  snprintf(v[*n].value, sizeof(v[*n].value), "%s", value);
+  (*n)++;
+}
+
+// Comma separated names of the 12 game controls (keys or pad buttons)
+static void ControlsList(char *buf, size_t size, bool pad) {
+  char name[48];
+  buf[0] = 0;
+  for (int i = 0; i < 12; i++) {
+    const char *s;
+    if (pad) {
+      int b = Config_GetPadButtonForCmd(kKeys_Controls + i);
+      s = b >= 0 ? Config_PadButtonName(b) : "";
+    } else {
+      Config_KeyName(Config_GetKeyForCmd(kKeys_Controls + i), name, sizeof(name));
+      s = strcmp(name, "-") ? name : "";
+    }
+    snprintf(buf + strlen(buf), size - strlen(buf), "%s%s", i ? ", " : "", s);
+  }
 }
 
 static void SaveSettings() {
@@ -574,15 +584,15 @@ static void SaveSettings() {
   AddIni(v, &n, "[Features]", "FlipperDive", "%d", g_config.flipper_dive);
   AddIni(v, &n, "[Features]", "StuckArrows", "%d", g_config.stuck_arrows);
   AddIni(v, &n, "[Features]", "HurricaneSpin", "%d", g_config.hurricane_spin);
+  AddIni(v, &n, "[Features]", "FsaBoomerang", "%d", g_config.fsa_boomerang);
   AddIni(v, &n, "[Features]", "EnchantedRocks", "%d", g_config.enchanted_rocks);
   AddIni(v, &n, "[Features]", "ItemOnX", "%d", g_config.item_on_x);
   AddIni(v, &n, "[Features]", "ItemOnLR", "%d", g_config.item_on_lr);
+  AddIni(v, &n, "[Features]", "GbaHud", "%d", g_config.gba_hud);
   // La lingua si scrive solo se cambiata dal menu (altrimenti resta quella
   // dell'ini, anche de, fr...)
-  if (g_lang_dirty) {
-    v[n].section = "[General]", v[n].key = "Language";
-    snprintf(v[n].value, sizeof(v[n].value), "%s", g_config.language ? g_config.language : "us"), n++;
-  }
+  if (g_lang_dirty)
+    AddIniStr(v, &n, "[General]", "Language", g_config.language ? g_config.language : "us");
   for (int i = 0; i < countof(kFeatureOptions); i++) {
     if (!ppu && (kFeatureOptions[i].bit & (kFeatures0_ContinuousWorld | kFeatures0_FastTransitions)))
       continue;
@@ -591,7 +601,6 @@ static void SaveSettings() {
   AddIni(v, &n, "[Features]", "TextSpeed", "%d", g_config.text_speed);
   AddIni(v, &n, "[Features]", "Rumble", "%d", g_config.rumble);
   if (g_msu_dirty) {
-    v[n].section = "[Sound]", v[n].key = "EnableMSU";
     const char *mode = "true";
     if ((g_msu_mode & (kMsuEnabled_MsuDeluxe | kMsuEnabled_Opuz)) == (kMsuEnabled_MsuDeluxe | kMsuEnabled_Opuz))
       mode = "deluxe-opuz";
@@ -599,30 +608,18 @@ static void SaveSettings() {
       mode = "deluxe";
     else if (g_msu_mode & kMsuEnabled_Opuz)
       mode = "opuz";
-    snprintf(v[n].value, sizeof(v[n].value), "%s", g_msu_on ? mode : "false"), n++;
+    AddIniStr(v, &n, "[Sound]", "EnableMSU", g_msu_on ? mode : "false");
   }
   if (g_controls_dirty) {
     char buf[160], name[48];
-    buf[0] = 0;
-    for (int i = 0; i < 12; i++) {
-      Config_KeyName(Config_GetKeyForCmd(kKeys_Controls + i), name, sizeof(name));
-      snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), "%s%s", i ? ", " : "", strcmp(name, "-") ? name : "");
-    }
-    v[n].section = "[KeyMap]", v[n].key = "Controls";
-    snprintf(v[n].value, sizeof(v[n].value), "%s", buf), n++;
+    ControlsList(buf, sizeof(buf), false);
+    AddIniStr(v, &n, "[KeyMap]", "Controls", buf);
     Config_KeyName(Config_GetKeyForCmd(kKeys_HdMenu), name, sizeof(name));
-    v[n].section = "[KeyMap]", v[n].key = "HdMenu";
-    snprintf(v[n].value, sizeof(v[n].value), "%s", name), n++;
-    buf[0] = 0;
-    for (int i = 0; i < 12; i++) {
-      int b = Config_GetPadButtonForCmd(kKeys_Controls + i);
-      snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), "%s%s", i ? ", " : "", b >= 0 ? Config_PadButtonName(b) : "");
-    }
-    v[n].section = "[GamepadMap]", v[n].key = "Controls";
-    snprintf(v[n].value, sizeof(v[n].value), "%s", buf), n++;
+    AddIniStr(v, &n, "[KeyMap]", "HdMenu", name);
+    ControlsList(buf, sizeof(buf), true);
+    AddIniStr(v, &n, "[GamepadMap]", "Controls", buf);
     int b = Config_GetPadButtonForCmd(kKeys_HdMenu);
-    v[n].section = "[GamepadMap]", v[n].key = "HdMenu";
-    snprintf(v[n].value, sizeof(v[n].value), "%s", b >= 0 ? Config_PadButtonName(b) : ""), n++;
+    AddIniStr(v, &n, "[GamepadMap]", "HdMenu", b >= 0 ? Config_PadButtonName(b) : "");
   }
   if (!Config_WriteIniValues(v, n))
     fprintf(stderr, "Impossibile salvare le impostazioni in %s\n", Config_GetFilename());
@@ -655,8 +652,8 @@ static const char *PageTitle() {
   return "Opzioni";
 }
 
-// Voci che ora non si possono cambiare: non si mostrano (stesse condizioni
-// dei messaggi di Activate, che restano per sicurezza)
+// Options that cannot be changed right now are not listed, so Activate
+// never receives them (DoAction rebuilds the list just before it)
 static bool GfxAvailable(int id) {
   if (!g_config.new_renderer && (id == 2 || id == 5 || id == 6 || (id >= 7 && id <= 17) || id == 23))
     return false;  // servono gli strati e lo spostamento della vista
@@ -732,11 +729,11 @@ static void AddGfx(int id, int off) {
   case 12: label = "Sfocatura dietro menu e dialoghi", value = YesNo(g_config.fx_menu_blur); break;
   case 13: label = "Ombre di personaggi e nemici", value = YesNo(g_config.fx_sprite_shadows); break;
   case 14: label = "Cerchio di transizione morbido", value = YesNo(g_config.fx_soft_iris); break;
-  case 15: label = "Suggerimenti dei tasti", value = g_zenv.ppu->extraLeftRight > 0 ? YesNo(g_config.fx_button_hints) : "Solo schermo largo"; break;
+  case 15: label = "Suggerimenti dei tasti", value = YesNo(g_config.fx_button_hints); break;
   case 16: label = "Acqua e cascate realistiche", value = YesNo(g_config.fx_water); break;
   case 17: label = "Distingui vortici da Zora", value = YesNo(g_config.fx_whirlpool); break;
   case 23: label = "Stanza sotto le buche", value = YesNo(g_config.fx_pit); break;
-  case 19: label = "Link biondo", value = g_config.link_graphics ? "Link personalizzato" : YesNo(g_config.blond_link); break;
+  case 19: label = "Link biondo", value = YesNo(g_config.blond_link); break;
   case 20: label = "Meno flash VC", value = YesNo((g_config.features0 & kFeatures0_DimFlashes) != 0); break;
   case 21: label = "Meno flash GBA", value = YesNo((g_config.features0 & kFeatures0_DimFlashesGba) != 0); break;
   default: return;
@@ -794,7 +791,7 @@ static void BuildItemsRaw(void) {
     AddItem(100, "Velocit\xc3\xa0 dei dialoghi", kTextSpeedNames[g_config.text_speed % 3]);
     AddGfx(4, kGfxInGame);
     AddGfx(22, kGfxInGame);
-    AddItem(101, "Lingua dei dialoghi", IsItalian() ? "Italiano" : "English");
+    AddItem(101, "Lingua dei dialoghi", HudIt_Active() ? "Italiano" : "English");
     AddHeader("Mappe");
     AddFeature(kFeatures0_ImprovedWorldMap);
     AddFeature(kFeatures0_ImprovedDungeonMap);
@@ -802,6 +799,7 @@ static void BuildItemsRaw(void) {
     AddGfx(23, kGfxInGame);
     AddHeader("Interfaccia");
     AddFeature(kFeatures0_ModernHud);
+    AddItem(110, "HUD GBA", YesNo(g_config.gba_hud));
     AddFeature(kFeatures0_DungeonNames);
     AddGfx(15, kGfxInGame);
     AddFeature(kFeatures0_ShowMaxItemsInYellow);
@@ -832,6 +830,7 @@ static void BuildItemsRaw(void) {
     AddFeature(kFeatures0_GoldPotion);
     AddItem(108, "Danni dei nemici come su GBA", YesNo(g_config.gba_damage));
     AddItem(104, "Giravolta Tornado", YesNo(g_config.hurricane_spin));
+    AddItem(109, "Boomerang come FSA", YesNo(g_config.fsa_boomerang));
     AddFeature(kFeatures0_MoreActiveBombs);
     AddFeature(kFeatures0_CarryMoreRupees);
     AddHeader("Correzioni");
@@ -899,13 +898,8 @@ static void Activate(int id, int dir) {
     else { g_page = id; g_scroll = 0; }
     break;
   case kPage_Graphics:
-    if (!g_config.new_renderer && (id == 5 || id == 6 || (id >= 7 && id <= 17) || id == 23)) {
-      // come nel launcher: servono gli strati e lo spostamento della vista
-      ShowMessage("Richiede la PPU ottimizzata (NewRenderer)");
-    } else if (id == 1) {
+    if (id == 1) {
       Host_ToggleFullscreen();
-    } else if (id == 2 && !g_config.new_renderer) {
-      ShowMessage("Richiede la PPU ottimizzata (NewRenderer)");
     } else if (id == 2) {
       g_config.enhanced_mode7 = !g_config.enhanced_mode7;
       if (Host_IsOpenGL())
@@ -922,12 +916,8 @@ static void Activate(int id, int dir) {
       g_config.high_refresh = !g_config.high_refresh;
     } else if (id == 6) {
       g_config.dynamic_light = !g_config.dynamic_light;
-      g_dynamic_light = g_config.dynamic_light;
     } else if (id == 23) {
       g_config.fx_pit = !g_config.fx_pit;
-      HdMenu_ApplyConfig();
-    } else if (id == 19 && g_config.link_graphics) {
-      ShowMessage("Non con un Link personalizzato");
     } else if (id == 19) {
       // Link e la sua palette subito
       g_config.blond_link = !g_config.blond_link;
@@ -940,21 +930,14 @@ static void Activate(int id, int dir) {
       SetFeature(bit, on);
       Palette_ApplyDimFlashFloor((g_config.features0 & kFeatures0_DimFlashes) != 0);
       // con meno flash niente pioggia e lampi migliorati
-      if (on) {
+      if (on)
         g_config.fx_rain = false;
-        HdMenu_ApplyConfig();
-      }
-    } else if (id == 11 && (g_config.features0 & (kFeatures0_DimFlashes | kFeatures0_DimFlashesGba))) {
-      ShowMessage("Non con meno flash");
-    } else if (id == 15 && g_zenv.ppu->extraLeftRight == 0) {
-      ShowMessage("Richiede lo schermo largo");
     } else if (id >= 7 && id <= 17) {
       bool *opt[11] = { &g_config.fx_heat, &g_config.fx_window_rays, &g_config.fx_item_glow,
                        &g_config.fx_fog, &g_config.fx_rain, &g_config.fx_menu_blur,
                        &g_config.fx_sprite_shadows, &g_config.fx_soft_iris, &g_config.fx_button_hints,
                        &g_config.fx_water, &g_config.fx_whirlpool };
       *opt[id - 7] = !*opt[id - 7];
-      HdMenu_ApplyConfig();
     }
     break;
   case kPage_Game:
@@ -962,7 +945,7 @@ static void Activate(int id, int dir) {
       g_config.text_speed = (g_config.text_speed + (dir < 0 ? 2 : 1)) % 3;
       g_text_speed = g_config.text_speed;
     } else if (id == 101) {
-      g_config.language = IsItalian() ? "us" : "it";
+      g_config.language = HudIt_Active() ? "us" : "it";
       g_lang_dirty = true;
       ZeldaSetLanguage(g_config.language);
       Font_Load();
@@ -972,6 +955,13 @@ static void Activate(int id, int dir) {
       g_config.stuck_arrows = !g_config.stuck_arrows;
     } else if (id == 104) {
       g_config.hurricane_spin = !g_config.hurricane_spin;
+    } else if (id == 110) {
+      // GBA HUD or modern HUD, not both
+      g_config.gba_hud = !g_config.gba_hud;
+      if (g_config.gba_hud)
+        SetFeature(kFeatures0_ModernHud, false);
+    } else if (id == 109) {
+      g_config.fsa_boomerang = !g_config.fsa_boomerang;
     } else if (id == 107) {
       // spenta: la roccia accesa si spegne subito (GbaRock_Frame); accesa:
       // la prossima roccia nasce entrando in un'area
@@ -988,20 +978,13 @@ static void Activate(int id, int dir) {
         SetFeature(kFeatures0_SwitchLR | kFeatures0_SwitchLRLimit, false);
     } else {
       uint32 bit = kFeatureOptions[id].bit;
-      if ((bit == kFeatures0_ContinuousWorld || bit == kFeatures0_FastTransitions) && !g_config.new_renderer) {
-        ShowMessage("Richiede la PPU ottimizzata (NewRenderer)");
-        break;
-      }
-      // L/R solo sui primi 4 oggetti solo con il cambio con L e R
-      if (bit == kFeatures0_SwitchLRLimit && !(g_config.features0 & kFeatures0_SwitchLR)) {
-        ShowMessage("Richiede Cambio oggetti con L e R");
-        break;
-      }
       SetFeature(bit, !(g_config.features0 & bit));
       if (bit == kFeatures0_SwitchLR && !(g_config.features0 & bit))
         SetFeature(kFeatures0_SwitchLRLimit, false);
       if (bit == kFeatures0_SwitchLR && (g_config.features0 & bit))
         g_config.item_on_lr = false;
+      if (bit == kFeatures0_ModernHud && (g_config.features0 & bit))
+        g_config.gba_hud = false;
     }
     break;
   case kPage_Audio:
@@ -1024,7 +1007,7 @@ static void Activate(int id, int dir) {
     if (id == 13) {
       Config_ResetControlsToDefault();
       g_controls_dirty = true;
-      ShowMessage("Tasti predefiniti ripristinati");
+      HdMenu_ShowMessage("Tasti predefiniti ripristinati");
     } else {
       g_capture = id;
     }
@@ -1101,6 +1084,16 @@ void HdMenu_Close() {
   SaveSettings();
   g_controls_dirty = g_msu_dirty = false;
   Host_ClearInputs();
+}
+
+// A quick save just loaded (SaveLoadSlot) brings its continuous world setting:
+// set in the game and in the ini, so the launcher shows it too
+void HdMenu_SetContinuousWorld(bool on) {
+  if (on == ((g_config.features0 & kFeatures0_ContinuousWorld) != 0) || (on && !g_config.new_renderer))
+    return;
+  SetFeature(kFeatures0_ContinuousWorld, on);
+  SaveSettings();
+  HdMenu_ShowMessage(on ? "Mondo continuo acceso dal salvataggio" : "Mondo continuo spento dal salvataggio");
 }
 
 bool HdMenu_HandleKey(int code, int mod, bool pressed) {
@@ -1200,19 +1193,27 @@ void HdMenu_HandleStick(uint8 dir_bits) {
 // ---------------------------------------------------------------------------
 // Disegno
 
+// Top row of the hint card row drawn in this frame (DrawHints), -1 = none
+static int g_hints_top = -1;
+static void DrawPanel(Canvas *cv, int x, int y, int w, int h, uint32 color, float a);
+
+// Short message: the same card as the hints, on their row or just above them
+// when they are shown (it does not cover them)
 static void DrawMessage(Canvas *cv) {
   if (!g_message_timer || !g_message[0])
     return;
   int w = TextWidth(g_message) + 16;
-  int x = (cv->width - w) / 2, y = cv->height - 28;
-  Canvas_Rect(cv, x, y, w, 20, 0x182848);
-  DrawText(cv, x + 8, y + 1, g_message, 0xf8f8f8);
+  int x = (cv->width - w) / 2, y = g_hints_top >= 0 ? g_hints_top - 3 - 20 : cv->height - 24;
+  DrawPanel(cv, x, y, w, 20, 0x101020, 0.70f);
+  DrawText(cv, x + 8, y + 1, g_message, 0xf8e070);
 }
 
 // Pixel mescolato con quello sotto (a = opacita')
 static void BlendPixel(Canvas *cv, int x, int y, uint32 c, float a) {
   if ((unsigned)x >= (unsigned)cv->width || (unsigned)y >= (unsigned)cv->height)
     return;
+  if (g_draw_bri < 15)
+    c = HdFx_DimRgb(c, g_draw_bri);
   for (int yy = 0; yy < cv->scale; yy++) {
     uint32 *row = (uint32 *)(cv->pixels + (y * cv->scale + yy) * cv->pitch) + x * cv->scale;
     for (int xx = 0; xx < cv->scale; xx++) {
@@ -1229,7 +1230,7 @@ static void BlendPixel(Canvas *cv, int x, int y, uint32 c, float a) {
 // Suggerimenti dei tasti in inventario e mappe: mostrano il tasto davvero
 // assegnato, della tastiera o del pad secondo l'ultimo dispositivo usato.
 
-enum { kBtn_Dpad = -1, kBtn_Select = 4, kBtn_Start = 5, kBtn_A = 6, kBtn_B = 7, kBtn_X = 8, kBtn_Y = 9, kBtn_L = 10, kBtn_R = 11 };
+enum { kBtn_Dpad = -1, kBtn_Select = 4, kBtn_Start = 5, kBtn_A = 6, kBtn_B = 7, kBtn_X = 8, kBtn_Y = 9, kBtn_L = 10 };
 
 static void ButtonName(int btn, char *buf, size_t size) {
   if (btn == kBtn_Dpad) {
@@ -1256,7 +1257,7 @@ static void ButtonName(int btn, char *buf, size_t size) {
     { "Return", "Invio" }, { "Right Shift", "Maiusc dx" }, { "Left Shift", "Maiusc sx" },
     { "Space", "Spazio" }, { "Backspace", "Canc" }, { "Right Ctrl", "Ctrl dx" }, { "Left Ctrl", "Ctrl sx" },
   };
-  for (int i = 0; i < countof(kNames) && IsItalian(); i++)
+  for (int i = 0; i < countof(kNames) && HudIt_Active(); i++)
     if (!strcmp(k, kNames[i][0])) {
       snprintf(buf, size, "%s", kNames[i][1]);
       return;
@@ -1281,6 +1282,13 @@ static void DrawPanel(Canvas *cv, int x, int y, int w, int h, uint32 color, floa
     }
 }
 
+// Key cap kw pixels wide with its top edge at y, with the key name inside
+static void DrawKeyCap(Canvas *cv, int x, int y, int kw, const char *name) {
+  DrawPanel(cv, x, y, kw, 14, 0xe0e0e8, 1.0f);
+  DrawPanel(cv, x + 1, y + 1, kw - 2, 12, 0x383848, 1.0f);
+  DrawText(cv, x + 4, y - 2, name, 0xf8f8f8);
+}
+
 static void DrawHints(Canvas *cv, const Hint *h, int n, int bottom) {
   char names[8][48];
   int total = 0;
@@ -1296,13 +1304,12 @@ static void DrawHints(Canvas *cv, const Hint *h, int n, int bottom) {
   total += (n - 1) * gap;
   int x = (cv->width - total) / 2, y = cv->height - bottom;
   DrawPanel(cv, x - 8, y - 2, total + 16, 20, 0x101020, 0.70f);
+  g_hints_top = y - 2;
   for (int i = 0; i < n; i++) {
     if (i)
       x += gap;
     int kw = TextWidth(names[i]) + 8;
-    DrawPanel(cv, x, y + 1, kw, 14, 0xe0e0e8, 1.0f);
-    DrawPanel(cv, x + 1, y + 2, kw - 2, 12, 0x383848, 1.0f);
-    DrawText(cv, x + 4, y - 1, names[i], 0xf8f8f8);
+    DrawKeyCap(cv, x, y + 1, kw, names[i]);
     x += kw + 4;
     x = DrawText(cv, x, y - 1, Tr(h[i].label), 0xf8e070);
   }
@@ -1323,18 +1330,20 @@ static int HintColumnWidth(const Hint *h, int n, int pad) {
 
 // Suggerimenti in colonna ai lati dello schermo: per ognuno il tasto e sotto
 // la sua azione, centrati nella fascia laterale
+// Two cards: the second ends on the bottom red line of the Action box of the
+// START menu (row 213 with the menu fully down, the same with and without
+// extend_y); a column with one card starts at the same height
+enum { kHintColumnBottom = 213, kHintCardGap = 3, kHintCardH = 37,
+       kHintColumnTop = kHintColumnBottom + 1 - 2 * kHintCardH - kHintCardGap };
 static void DrawHintColumn(Canvas *cv, const Hint *h, int n, int cx, int pad) {
-  int y = cv->height - 12 - n * 40;
-  for (int i = 0; i < n; i++, y += 40) {
+  int y = kHintColumnTop + 3;  // the card starts 3 px above the key cap
+  for (int i = 0; i < n; i++, y += kHintCardH + kHintCardGap) {
     char name[48];
     ButtonName(h[i].btn, name, sizeof(name));
     int kw = TextWidth(name) + 8, lw = TextWidth(Tr(h[i].label));
     int pw = (kw > lw ? kw : lw) + pad;
-    DrawPanel(cv, cx - pw / 2, y - 3, pw, 37, 0x101020, 0.70f);
-    int kx = cx - kw / 2;
-    DrawPanel(cv, kx, y, kw, 14, 0xe0e0e8, 1.0f);
-    DrawPanel(cv, kx + 1, y + 1, kw - 2, 12, 0x383848, 1.0f);
-    DrawText(cv, kx + 4, y - 2, name, 0xf8f8f8);
+    DrawPanel(cv, cx - pw / 2, y - 3, pw, kHintCardH, 0x101020, 0.70f);
+    DrawKeyCap(cv, cx - kw / 2, y, kw, name);
     DrawText(cv, cx - lw / 2, y + 15, Tr(h[i].label), 0xf8e070);
   }
 }
@@ -1411,7 +1420,8 @@ static void DrawButtonHints(Canvas *cv) {
   // inventario: ai lati, due e due, per non coprire i riquadri. Solo col menu
   // fermo in basso (Hud_BringMenuDown finito, 0xff18): mentre scende o risale
   // gli passerebbe sopra; spariscono appena si preme START per chiuderlo (5)
-  if (sub == 1 && (uint16)BG3VOFS_copy2 == 0xff18 && overworld_map_state != 5) {
+  // and stay hidden while it closes (6: its first frame is still at 0xff18)
+  if (sub == 1 && (uint16)BG3VOFS_copy2 == 0xff18 && overworld_map_state != 5 && overworld_map_state != 6) {
     Hint left[2] = { { kBtn_Dpad, "Scegli" }, { kBtn_Start, "Chiudi" } };
     Hint right[2];
     int nr = 0;
@@ -1441,7 +1451,7 @@ static void DrawButtonHints(Canvas *cv) {
       Hint h[2] = { { kBtn_L, "Ingrandisci" }, { map_btn, "Chiudi" } };
       DrawHints(cv, h, 2, 22);
     }
-  } else if (sub == 3 && overworld_map_state >= 2 && overworld_map_state <= 4) {  // mappa del labirinto
+  } else if (sub == 3 && overworld_map_state >= 2 && overworld_map_state <= 5) {  // mappa del labirinto (fades with it)
     Hint h[2] = { { kBtn_Dpad, "Cambia piano" }, { map_btn, "Chiudi" } };
     DrawHints(cv, h, 2, 22);  // in basso al centro (il nome del labirinto sta in alto)
   }
@@ -1480,7 +1490,7 @@ static const DungeonEntry kDungeons[14] = {
 static void DrawDungeonMapStatus(Canvas *cv) {
   if (!(enhanced_features0 & kFeatures0_ImprovedDungeonMap))
     return;
-  if (main_module_index != 14 || submodule_index != 3 || overworld_map_state < 2 || overworld_map_state > 4)
+  if (main_module_index != 14 || submodule_index != 3 || overworld_map_state < 2 || overworld_map_state > 5)
     return;
   int dung = cur_palace_index_x2 >> 1;
   if (dung < 0 || dung >= 14)
@@ -1488,8 +1498,10 @@ static void DrawDungeonMapStatus(Canvas *cv) {
   const char *name = Tr(kDungeons[dung].name);
   int w = TextWidth(name);
   int x = (cv->width - w) / 2;
-  Canvas_Rect(cv, x - 8, 4, w + 16, 18, 0x101830);
-  DrawText(cv, x, 4, name, 0xf8f8f8);
+  // same card as the button hints (DrawHints), in the 16 rows above the
+  // wooden frame of the map (rows 16-21): panel rows 0-14, 1 px from the frame
+  DrawPanel(cv, x - 8, 0, w + 16, 15, 0x101020, 0.70f);
+  DrawText(cv, x, 0, name, 0xf8e070);
 }
 
 // Nome del dungeon al centro dello schermo appena Link ci entra dal mondo
@@ -1738,11 +1750,12 @@ static void DrawDungeonEntryName(Canvas *cv) {
   if (!HdMenu_FreezeEnemies() || submodule_index != 0 || (INIDISP_copy & 0x8f) != 0x0f)
     return;  // ancora in dissolvenza o in un passaggio
   // Come su GBA: il nome poco sopra il centro, il livello una riga sopra
-  int y = cv->height / 2 - 1;
+  // (on the 224 game rows: with extend_y the 16 extra rows are below them)
+  int y = 224 / 2 - 1;
   GbaTextCentered(cv, y, Tr(g_dungeon_name->name));
   if (g_dungeon_name->level) {
     char buf[16];
-    snprintf(buf, sizeof(buf), "%s %d", IsItalian() ? "Livello" : "Level", g_dungeon_name->level);
+    snprintf(buf, sizeof(buf), "%s %d", HudIt_Active() ? "Livello" : "Level", g_dungeon_name->level);
     GbaTextCentered(cv, y - 16, buf);
   }
 }
@@ -1800,20 +1813,14 @@ static void DrawHudFrame(Canvas *cv, int x, int y, int cols, int rows) {
     for (int c = 0; c < cols; c++) {
       int px = x + c * 8, py = y + r * 8;
       bool l = c == 0, rt = c == cols - 1, tp = r == 0, bt = r == rows - 1;
-      int t;
-      if ((l || rt) && (tp || bt))
-        t = 0xfb | (rt ? 0x4000 : 0) | (bt ? 0x8000 : 0);
-      else if (l || rt)
-        t = 0xfc | (rt ? 0x4000 : 0);
-      else if (tp || bt)
-        t = 0xf9 | (bt ? 0x8000 : 0);
-      else {
-        DrawHudTile(cv, px, py, 0xf5, kFillPal);
-        continue;
-      }
       // sotto il bordo il fondo, come nel gioco (BG3 con caselle trasparenti)
       DrawHudTile(cv, px, py, 0xf5, kFillPal);
-      DrawHudTile(cv, px, py, t, kFramePal);
+      if ((l || rt) && (tp || bt))
+        DrawHudTile(cv, px, py, 0xfb | (rt ? 0x4000 : 0) | (bt ? 0x8000 : 0), kFramePal);
+      else if (l || rt)
+        DrawHudTile(cv, px, py, 0xfc | (rt ? 0x4000 : 0), kFramePal);
+      else if (tp || bt)
+        DrawHudTile(cv, px, py, 0xf9 | (bt ? 0x8000 : 0), kFramePal);
     }
 }
 
@@ -1830,16 +1837,6 @@ static bool IsChoiceItem(int id) {
 // Intestazioni col carattere piccolo dei riquadri dell'inventario
 // ("STRUMENTO"), in maiuscolo, con l'ombra: righe basse kHeaderH
 enum { kHeaderH = 10 };
-
-static int SmallTextWidth(const char *s) {
-  int w = 0;
-  for (; *s; s++) {
-    char c = *s >= 'a' && *s <= 'z' ? *s - 32 : *s;
-    const char *const *g = HudIt_SmallGlyph(c);
-    w += (g ? (int)strlen(g[0]) : 3) + 1;
-  }
-  return w;
-}
 
 static int DrawSmallText(Canvas *cv, int x, int y, const char *s, uint32 color) {
   for (; *s; s++) {
@@ -1867,27 +1864,42 @@ static int RowH(int i) {
 void HdMenu_Draw(uint8 *pixels, int pitch, int width, int height, int scale) {
   Canvas cv = { pixels, pitch, width / scale, height / scale, scale };
   HdText_Draw(pixels, pitch, width, height, scale);
-  if (!g_menu_open) {
-    if (!g_font_data)
-      Font_Load();
-    HdHud_Draw(pixels, pitch, width, height, scale);
-    DrawDungeonMapStatus(&cv);
-    DrawDungeonEntryName(&cv);
-    DrawInventoryLetterOutlines(&cv);
-    DrawButtonHints(&cv);
-    DrawMessage(&cv);
-    return;
-  }
+  // under the options menu too, darkened with the game like the classic HUD
+  HdHud_Draw(pixels, pitch, width, height, scale);
   if (!g_font_data)
     Font_Load();
+  // the same font everywhere, also before the options menu is first opened
   g_menu_modern = g_config.modern_text;
-  // Scurisce il gioco sotto il menu (meno se c'e' gia' la sfocatura)
-  bool blur = g_config.fx_menu_blur;
-  for (int y = 0; y < height; y++) {
-    uint32 *row = (uint32 *)(pixels + y * pitch);
-    for (int x = 0; x < width; x++)
-      row[x] = blur ? (row[x] >> 1 & 0x7f7f7f) | (row[x] & 0xff000000)
-                    : (row[x] >> 2 & 0x3f3f3f) | (row[x] & 0xff000000);
+  g_hints_top = -1;
+  // Darkening of the game under the options menu (less with the blur): it
+  // fades in and out in 8 draws like the blur, not at once
+  static int menu_dim;  // 0-8
+  menu_dim = g_menu_open ? IntMin(menu_dim + 1, 8) : IntMax(menu_dim - 1, 0);
+  if (menu_dim) {
+    // keep 1/2 of the colour with the blur, 1/4 without, at full darkening
+    int keep = 256 - menu_dim * (g_config.fx_menu_blur ? 128 : 192) / 8;
+    for (int y = 0; y < height; y++) {
+      uint32 *row = (uint32 *)(pixels + y * pitch);
+      for (int x = 0; x < width; x++) {
+        uint32 c = row[x];
+        row[x] = (c & 0xff000000) | ((c >> 16 & 0xff) * keep >> 8) << 16 |
+                 ((c >> 8 & 0xff) * keep >> 8) << 8 | ((c & 0xff) * keep >> 8);
+      }
+    }
+  }
+  if (!g_menu_open) {
+    // what belongs to the game screen fades in and out with it
+    Ppu *ppu = g_zenv.ppu;
+    g_draw_bri = ppu->forcedBlank ? 0 : ppu->brightness;
+    if (g_draw_bri > 0) {
+      DrawDungeonMapStatus(&cv);
+      DrawDungeonEntryName(&cv);
+      DrawInventoryLetterOutlines(&cv);
+      DrawButtonHints(&cv);
+    }
+    g_draw_bri = 15;
+    DrawMessage(&cv);
+    return;
   }
   BuildItems();
   int *cur = &g_cursor[g_page];
@@ -2048,14 +2060,18 @@ static void Scale2x(const uint32 *src, int w, int h, uint32 *dst) {
   }
 }
 
-void HdText_Scale4x(const uint8 *src, int src_pitch, int x, int y, int w, int h, uint32 *dst) {
-  static uint32 *tmp0, *tmp1;
+// Returns the (w*4) x (h*4) result in a buffer kept here, or NULL if out of memory
+const uint32 *HdText_Scale4x(const uint8 *src, int src_pitch, int x, int y, int w, int h) {
+  static uint32 *tmp0, *tmp1, *dst;
   static int cap;
-  if (w * h > cap) {
+  if (w * h > cap || !tmp0 || !tmp1 || !dst) {
     cap = w * h;
-    free(tmp0), free(tmp1);
+    free(tmp0), free(tmp1), free(dst);
     tmp0 = malloc(cap * 4);
     tmp1 = malloc(cap * 4 * 4);
+    dst = malloc(cap * 4 * 16);
+    if (!tmp0 || !tmp1 || !dst)
+      return NULL;
   }
   // solo i pixel dell'interfaccia (strato 2: riquadro e testo) sono opachi:
   // i messaggi senza riquadro (la telepatia di Zelda) lasciano vedere il
@@ -2068,4 +2084,5 @@ void HdText_Scale4x(const uint8 *src, int src_pitch, int x, int y, int w, int h,
   }
   Scale2x(tmp0, w, h, tmp1);
   Scale2x(tmp1, w * 2, h * 2, dst);
+  return dst;
 }

@@ -375,6 +375,19 @@ enum { kAncilla_LinkSlots = 15, kAncilla_Slots = 20 };
 #define door_debris_x ((uint16*)(g_ram+0x1F4C8))
 #define door_debris_y ((uint16*)(g_ram+0x1F4F0))
 #define door_debris_direction ((uint8*)(g_ram+0x1F4B4))
+
+// State of our GBA/HD additions in free RAM (0x1F590-0x1F5EF), so that it
+// ends up in quick saves like the rest of the game (see also g_gba_rock)
+#define g_gold_potion_timer (*(uint16*)(g_ram+0x1F590))  // gold potion effect frames
+#define g_link_dive_timer (*(uint8*)(g_ram+0x1F592))     // flipper dive frames left
+#define g_link_dive_wait (*(uint8*)(g_ram+0x1F593))      // pause before the next dive
+#define g_hurricane_spin (*(uint8*)(g_ram+0x1F594))      // 0x80 long charge, 0x40 extra spin booked, 1 next spins
+#define g_hurricane_dir (*(uint8*)(g_ram+0x1F595))       // direction of the next spins
+#define g_link_on_frozen_water (*(uint8*)(g_ram+0x1F596))
+#define g_gba_dim_timer (*(uint8*)(g_ram+0x1F597))       // GbaFlash dimming
+#define g_gba_bolt_timer (*(uint8*)(g_ram+0x1F598))
+#define g_gba_bolt_len (*(uint8*)(g_ram+0x1F599))
+#define g_agah2_lightning (*(GbaLightning *)(g_ram+0x1F59A))  // 2 bytes
 #define ancilla_arr26 ((uint8*)(g_ram+0x1F298))
 #define ancilla_arr25 ((uint8*)(g_ram+0x1F2AC))
 #define ancilla_arr22 ((uint8*)(g_ram+0x1F2C0))

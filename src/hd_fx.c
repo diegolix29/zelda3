@@ -15,10 +15,7 @@
 #include "hd_burn.h"
 #include "hd_water.h"
 #include "tagalong.h"
-
-bool g_fx_heat, g_fx_window_rays, g_fx_item_glow, g_fx_rain;
-bool g_fx_menu_blur, g_fx_sprite_shadows, g_fx_soft_iris;
-bool g_fx_whirlpool;
+#include "ancilla.h"
 
 const uint16 *Dungeon_GetObjectTiles(int subtype, int idx);
 
@@ -58,6 +55,29 @@ static inline void MarkSharp(uint32 *p) {
     *p = (*p & 0x00ffffff) | 4u << 24;
 }
 
+// Ending scenes without the HUD, shown as a place of the game (0 = none).
+// Effects, wide screen and shader follow that scene; the HUD does not (it
+// uses HdFx_SceneModule), the continuous world only outdoors (hd_world.c)
+// - Triforce room (module 25): a special area (11), shown from step 5 on
+//   (steps 2-4 load it with the screen off);
+// - ending (26): steps 0-31 show the places of the world, outdoors or in a
+//   room (2-3 Sanctuary, 20-21 fairy fountain, 22-23 smithy).
+int HdFx_EndingScene(void) {
+  int sub = submodule_index;
+  if (main_module_index == 25)
+    return subsubmodule_index >= 5 ? 11 : 0;
+  if (main_module_index != 26 || sub >= 32)
+    return 0;
+  return sub == 2 || sub == 3 || (sub >= 20 && sub <= 23) ? 7 : 9;
+}
+
+// Agahnim beaten (module 21), steps 1-4: the mirror waves the screen and
+// whitens it. The PPU does it as in the original (the wide bands wave with
+// the rest); the HD additions start after the wave, when the text comes
+static bool InAgahnimWave(void) {
+  return main_module_index == 21 && submodule_index < 5;
+}
+
 // Si vede il gioco: dentro (7), fuori (9) o in un'area speciale (11: Dominio
 // di Zora, Piedistallo...), anche sotto inventario e dialoghi, nelle ricariche
 // e mentre il cerchio si apre o si chiude (HdFx_SceneModule), altrimenti gli
@@ -65,7 +85,11 @@ static inline void MarkSharp(uint32 *p) {
 // Prima acqua, luci ed effetti avevano ognuno il suo controllo, un po' diverso
 bool HdFx_InGameplay(int *mod_out) {
   int mod = HdFx_SceneModule();
+  if (HdFx_EndingScene())
+    mod = HdFx_EndingScene();
   *mod_out = mod;
+  if (InAgahnimWave())
+    return false;
   return mod == 7 || mod == 9 || mod == 11;
 }
 
@@ -91,13 +115,9 @@ static bool g_any_lava;
 // relativo alla parte centrale da 256 pixel), come la legge la PPU
 static uint16 BgTileAt(Ppu *ppu, int layer, int x, int y, int bias_x, int bias_y) {
   BgLayer *bg = &ppu->bgLayer[layer];
-  uint32 yy = y + bg->vScroll + bias_y, xx = x + bg->hScroll + bias_x;
-  int sc = bg->tilemapAdr + (((yy >> 3) & 0x1f) << 5);
-  if ((yy & 0x100) && bg->tilemapHigher)
-    sc += bg->tilemapWider ? 0x800 : 0x400;
-  if ((xx >> 8) & 1)
-    sc += bg->tilemapWider ? 0x400 : 0;
-  return ppu->vram[(sc + ((xx >> 3) & 0x1f)) & 0x7fff];
+  // (screen row 0 is background row 1, as in HdWorld_Composite)
+  uint32 yy = y + bg->vScroll + bias_y + 1, xx = x + bg->hScroll + bias_x;
+  return ppu->vram[HdFx_VramMapAdr(bg, (xx >> 3) & 63, (yy >> 3) & 63) & 0x7fff];
 }
 
 // Il fondale all'aperto e' largo 64x64 caselle (512 px) e il gioco ci scrive
@@ -138,10 +158,9 @@ static void ClassifyCells(const uint8 *pixels, int pitch, int width, int height,
         if (ch < first || ch >= first + 32)
           continue;
         uint32 c = ((const uint32 *)(pixels + sy * pitch))[sx];
-        if (IsHud(c) || IsSprite(c))
+        if (HdFx_IsHudOrSprite(c))
           continue;
-        int r = (c >> 16) & 0xff, g = (c >> 8) & 0xff, b = c & 0xff;
-        if (r > 120 && r > g + 30 && b < r / 2)
+        if (HdFx_IsLavaRgb((c >> 16) & 0xff, (c >> 8) & 0xff, c & 0xff))
           g_cells[cy][cx] = kCellLava, g_any_lava = true;
       }
     }
@@ -191,14 +210,14 @@ static void ApplyHeatHaze(uint8 *pixels, int pitch, int width, int height, int c
       float m10 = (cy1 < g_cells_h && cx0 >= 0) ? mask[cy1][cx0] : 0;
       float m11 = (cy1 < g_cells_h && cx1 < g_cells_w) ? mask[cy1][cx1] : 0;
       float m = (m00 * (1 - kx) + m01 * kx) * (1 - ky) + (m10 * (1 - kx) + m11 * kx) * ky;
-      if (m < 0.02f || IsHud(tmp[x]) || IsSprite(tmp[x]))
+      if (m < 0.02f || HdFx_IsHudOrSprite(tmp[x]))
         continue;  // Link e i nemici non si deformano
       // spostamento fino a poco piu' di un pixel, fra due pixel vicini
       float shift = wave * m;
       int s0 = (int)floorf(shift);
       float k = shift - s0;
       int xa = x + s0, xb = xa + 1;
-      if (xa < 0 || xb >= width || IsHud(tmp[xa]) || IsSprite(tmp[xa]) || IsHud(tmp[xb]) || IsSprite(tmp[xb]))
+      if (xa < 0 || xb >= width || HdFx_IsHudOrSprite(tmp[xa]) || HdFx_IsHudOrSprite(tmp[xb]))
         continue;
       row[x] = MixColor(tmp[xa], tmp[xb], k);
     }
@@ -207,8 +226,7 @@ static void ApplyHeatHaze(uint8 *pixels, int pitch, int width, int height, int c
 
 void HdFx_BeforeLight(uint8 *pixels, int pitch, int width, int height, int bias_x, int bias_y) {
   int mod;
-  g_any_lava = false;
-  if (!g_fx_heat || !HdFx_InGameplay(&mod))
+  if (!g_config.fx_heat || !HdFx_InGameplay(&mod))
     return;
   ClassifyCells(pixels, pitch, width, height, bias_x, bias_y);
   if (g_any_lava)
@@ -255,6 +273,23 @@ static void UpdateParticles() {
   g_num_particles = n;
 }
 
+// Fades in over the first 15% of the life k (0-1) and out over the rest
+static inline float FadeInOut(float k) {
+  return k < 0.15f ? k / 0.15f : (1.0f - k) / 0.85f;
+}
+
+// Bright core c (color r, g, b at a * 1.2) with a small cross halo (hr, hg,
+// hb at a * 0.55), all marked sharp for the shader
+static void DrawSpark(uint32 *c, int pitch, float a, float r, float g, float b, float hr, float hg, float hb) {
+  uint32 *up = (uint32 *)((uint8 *)c - pitch), *dn = (uint32 *)((uint8 *)c + pitch);
+  AddColor(c, r, g, b, a * 1.2f);
+  AddColor(c - 1, hr, hg, hb, a * 0.55f);
+  AddColor(c + 1, hr, hg, hb, a * 0.55f);
+  AddColor(up, hr, hg, hb, a * 0.55f);
+  AddColor(dn, hr, hg, hb, a * 0.55f);
+  MarkSharp(c), MarkSharp(c - 1), MarkSharp(c + 1), MarkSharp(up), MarkSharp(dn);
+}
+
 static void DrawParticles(uint8 *pixels, int pitch, int width, int height, int cam_x, int cam_y, int ext) {
   for (int i = 0; i < g_num_particles; i++) {
     Particle *p = &g_particles[i];
@@ -269,24 +304,10 @@ static void DrawParticles(uint8 *pixels, int pitch, int width, int height, int c
     if (p->kind == 0) {
       // brace: dal giallo al rosso mentre si spegne
       // nucleo luminoso con un piccolo alone a croce, ben visibile anche con lo shader
-      float a = k < 0.15f ? k / 0.15f : (1.0f - k) / 0.85f;
-      uint32 *up = (uint32 *)((uint8 *)c - pitch), *dn = (uint32 *)((uint8 *)c + pitch);
-      AddColor(c, 255, 225 - 140 * k, 120 - 100 * k, a * 1.2f);
-      AddColor(c - 1, 255, 140 - 60 * k, 40, a * 0.55f);
-      AddColor(c + 1, 255, 140 - 60 * k, 40, a * 0.55f);
-      AddColor(up, 255, 140 - 60 * k, 40, a * 0.55f);
-      AddColor(dn, 255, 140 - 60 * k, 40, a * 0.55f);
-      MarkSharp(c), MarkSharp(c - 1), MarkSharp(c + 1), MarkSharp(up), MarkSharp(dn);
+      DrawSpark(c, pitch, FadeInOut(k), 255, 225 - 140 * k, 120 - 100 * k, 255, 140 - 60 * k, 40);
     } else if (p->kind == 4) {
       // bagliore magico di un vortice: come una brace, ma bianco azzurrino
-      float a = k < 0.15f ? k / 0.15f : (1.0f - k) / 0.85f;
-      uint32 *up = (uint32 *)((uint8 *)c - pitch), *dn = (uint32 *)((uint8 *)c + pitch);
-      AddColor(c, 255, 255, 255, a * 1.2f);
-      AddColor(c - 1, 170 + 40 * k, 200 + 20 * k, 255, a * 0.55f);
-      AddColor(c + 1, 170 + 40 * k, 200 + 20 * k, 255, a * 0.55f);
-      AddColor(up, 170 + 40 * k, 200 + 20 * k, 255, a * 0.55f);
-      AddColor(dn, 170 + 40 * k, 200 + 20 * k, 255, a * 0.55f);
-      MarkSharp(c), MarkSharp(c - 1), MarkSharp(c + 1), MarkSharp(up), MarkSharp(dn);
+      DrawSpark(c, pitch, FadeInOut(k), 255, 255, 255, 170 + 40 * k, 200 + 20 * k, 255);
     } else if (p->kind == 1) {
       // pulviscolo nella luce: compare e scompare lentamente
       float a = sinf(k * 3.14159f) * 0.45f;
@@ -294,7 +315,7 @@ static void DrawParticles(uint8 *pixels, int pitch, int width, int height, int c
       MarkSharp(c);
     } else if (p->kind == 3) {
       // fumo dell'incendio: sbuffo grigio chiaro che sale, si allarga e svanisce
-      float a = (k < 0.15f ? k / 0.15f : (1.0f - k) / 0.85f) * 0.40f;
+      float a = FadeInOut(k) * 0.40f;
       float r = 1.5f + 3.5f * k;
       int ir = (int)ceilf(r);
       for (int dy = -ir; dy <= ir; dy++) {
@@ -437,58 +458,66 @@ enum { kMaxShafts = 8 };
 static WindowShaft g_shafts[kMaxShafts];
 static int g_num_shafts, g_shaft_room = -1, g_shaft_timer;
 
+// Zones of one layer (window light, or floor light with pal when floor):
+// each top-left corner without light on the left and above becomes a shaft
+static void ScanShafts(int layer, bool floor, const uint16 *light, int pal) {
+  const uint16 *tm = layer ? dung_bg1 : dung_bg2;
+#define IS_ZONE(r, c) ((r) >= 0 && (c) >= 0 && (r) < 64 && (c) < 64 && \
+    (floor ? IsFloorLightTile(tm[(r) * 64 + (c)], pal) : IsLightTile(light, tm[(r) * 64 + (c)])))
+  int max_w = floor ? 16 : 8, min_h = floor ? 2 : 3;
+  for (int row = 0; row < 64; row++) {
+    for (int col = 0; col < 64; col++) {
+      if ((floor && (tm[row * 64 + col] & 0x3ff) != 0x144) || !IS_ZONE(row, col) || IS_ZONE(row, col - 1) ||
+          IS_ZONE(row - 1, col))
+        continue;
+      int w = 1, h = 1;
+      while (w < max_w && IS_ZONE(row, col + w))
+        w++;
+      while (h < 16 && IS_ZONE(row + h, col))
+        h++;
+      if (w < 2 || h < min_h || g_num_shafts >= kMaxShafts)
+        continue;
+      WindowShaft *sh = &g_shafts[g_num_shafts++];
+      sh->x = col * 8, sh->y = row * 8, sh->w = w * 8, sh->h = h * 8, sh->layer = layer, sh->floor = floor;
+    }
+  }
+#undef IS_ZONE
+}
+
 // La luce di una finestra ("Window Light", oggetto 0x70 del terzo gruppo) e'
 // una zona rettangolare di tile di luce, spesso tutti uguali: ogni zona
 // (angolo in alto a sinistra senza luce a sinistra e sopra) diventa un fascio.
 static void ScanWindows() {
   g_num_shafts = 0;
-  g_shaft_room = dungeon_room_index;
+  g_shaft_room = HdFx_LoadedRoom();
   const uint16 *src = Dungeon_GetObjectTiles(3, 0x70);
   uint16 light[16];
   for (int i = 0; i < 16; i++)
     light[i] = src[i];
-  for (int layer = 0; layer < 2; layer++) {
-    const uint16 *tm = layer ? dung_bg1 : dung_bg2;
-#define IS_LIGHT(r, c) ((r) >= 0 && (c) >= 0 && (r) < 64 && (c) < 64 && IsLightTile(light, tm[(r) * 64 + (c)]))
-    for (int row = 0; row < 64; row++) {
-      for (int col = 0; col < 64; col++) {
-        if (!IS_LIGHT(row, col) || IS_LIGHT(row, col - 1) || IS_LIGHT(row - 1, col))
-          continue;
-        int w = 1, h = 1;
-        while (w < 8 && IS_LIGHT(row, col + w))
-          w++;
-        while (h < 16 && IS_LIGHT(row + h, col))
-          h++;
-        if (w < 2 || h < 3 || g_num_shafts >= kMaxShafts)
-          continue;
-        WindowShaft *sh = &g_shafts[g_num_shafts++];
-        sh->x = col * 8, sh->y = row * 8, sh->w = w * 8, sh->h = h * 8, sh->layer = layer, sh->floor = 0;
-      }
-    }
-#undef IS_LIGHT
-  }
+  for (int layer = 0; layer < 2; layer++)
+    ScanShafts(layer, false, light, 0);
   // Luce sul pavimento (oggetto 0x70 + 1, es. Villaggio dei Ladroni): un
   // riquadro con l'angolo 0x144 in alto a sinistra, illuminato da sopra
   int pal = (Dungeon_GetObjectTiles(3, 0x71)[0] >> 10) & 7;
-  for (int layer = 0; layer < 2; layer++) {
-    const uint16 *tm = layer ? dung_bg1 : dung_bg2;
-#define IS_FLOOR(r, c) ((r) >= 0 && (c) >= 0 && (r) < 64 && (c) < 64 && IsFloorLightTile(tm[(r) * 64 + (c)], pal))
-    for (int row = 0; row < 64; row++) {
-      for (int col = 0; col < 64; col++) {
-        if ((tm[row * 64 + col] & 0x3ff) != 0x144 || !IS_FLOOR(row, col) || IS_FLOOR(row, col - 1) || IS_FLOOR(row - 1, col))
-          continue;
-        int w = 1, h = 1;
-        while (w < 16 && IS_FLOOR(row, col + w))
-          w++;
-        while (h < 16 && IS_FLOOR(row + h, col))
-          h++;
-        if (w < 2 || h < 2 || g_num_shafts >= kMaxShafts)
-          continue;
-        WindowShaft *sh = &g_shafts[g_num_shafts++];
-        sh->x = col * 8, sh->y = row * 8, sh->w = w * 8, sh->h = h * 8, sh->layer = layer, sh->floor = 1;
-      }
-    }
-#undef IS_FLOOR
+  for (int layer = 0; layer < 2; layer++)
+    ScanShafts(layer, true, light, pal);
+}
+
+// Brighter streaks of a light shaft, slowly flickering (rx: column in the shaft)
+static inline float ShaftStreak(float rx, float t) {
+  return 0.75f + 0.25f * sinf(rx * 0.55f + t * 3.0f) * sinf(rx * 0.21f - t * 2.0f);
+}
+
+// Dust floating in a light shaft: x + 0-w, y + 0-h in world coordinates
+static void SpawnDust(float x, float y, int w, int h) {
+  Particle *p = NewParticle();
+  if (p) {
+    p->kind = 1;
+    p->x = x + Rand01() * w;
+    p->y = y + Rand01() * h;
+    p->vx = (Rand01() - 0.5f) * 0.08f;
+    p->vy = (Rand01() - 0.5f) * 0.06f;
+    p->life = 90 + (int)(Rand01() * 90);
   }
 }
 
@@ -513,25 +542,16 @@ static void ApplyFloorShaft(uint8 *pixels, int pitch, int width, int height, flo
       int x = (int)x0 + dx;
       if (x < 0 || x >= width || IsHud(row[x]))
         continue;
-      float streak = 0.75f + 0.25f * sinf(rx * 0.55f + t * 3.0f) * sinf(rx * 0.21f - t * 2.0f);
+      float streak = ShaftStreak(rx, t);
       AddColor(&row[x], 255, 240, 205, (dy < 0 ? 0.24f : 0.12f) * fall * edge * streak);
     }
   }
-  if (spawn && Rand01() < 0.10f) {
-    Particle *p = NewParticle();
-    if (p) {
-      p->kind = 1;
-      p->x = x0 - ext + cam_x + Rand01() * w;
-      p->y = y0 + cam_y - kTop + 8 + Rand01() * (kTop + h - 16);
-      p->vx = (Rand01() - 0.5f) * 0.08f;
-      p->vy = (Rand01() - 0.5f) * 0.06f;
-      p->life = 90 + (int)(Rand01() * 90);
-    }
-  }
+  if (spawn && Rand01() < 0.10f)
+    SpawnDust(x0 - ext + cam_x, y0 + cam_y - kTop + 8, w, kTop + h - 16);
 }
 
 static void ApplyWindowRays(uint8 *pixels, int pitch, int width, int height, int cam_x, int cam_y, int ext, bool spawn) {
-  int room = dungeon_room_index;
+  int room = HdFx_LoadedRoom();
   if (g_shaft_room != room || --g_shaft_timer <= 0) {
     ScanWindows();
     g_shaft_timer = 30;
@@ -570,22 +590,13 @@ static void ApplyWindowRays(uint8 *pixels, int pitch, int width, int height, int
         if (x < 0 || x >= width || IsHud(row[x]))
           continue;
         // strisce di luce piu' intense che tremolano lentamente
-        float streak = 0.75f + 0.25f * sinf(rx * 0.55f + t * 3.0f) * sinf(rx * 0.21f - t * 2.0f);
+        float streak = ShaftStreak(rx, t);
         AddColor(&row[x], 255, 240, 205, 0.26f * fall * edge * streak);
       }
     }
     // pulviscolo che fluttua nel fascio (in coordinate del mondo)
-    if (spawn && Rand01() < 0.10f) {
-      Particle *p = NewParticle();
-      if (p) {
-        p->kind = 1;
-        p->x = x0 - ext + cam_x + Rand01() * kW;
-        p->y = y0 + cam_y + 8 + Rand01() * (kLen - 16);
-        p->vx = (Rand01() - 0.5f) * 0.08f;
-        p->vy = (Rand01() - 0.5f) * 0.06f;
-        p->life = 90 + (int)(Rand01() * 90);
-      }
-    }
+    if (spawn && Rand01() < 0.10f)
+      SpawnDust(x0 - ext + cam_x, y0 + cam_y + 8, kW, kLen - 16);
   }
 }
 
@@ -593,12 +604,21 @@ static void ApplyWindowRays(uint8 *pixels, int pitch, int width, int height, int
 // 5. Bagliore a raggi quando Link solleva un oggetto ricevuto
 
 static void ApplyItemGlow(uint8 *pixels, int pitch, int width, int height, int cam_x, int cam_y, int ext) {
+  // Pulling the Master Sword: the ceremony (0x35) and the sword Link holds up
+  // (0x22, item 0x01) are there together for about 130 frames; one glow only,
+  // the held sword's, which stays after the ceremony ends (two overlapping
+  // glows, then a jump in place and size)
+  bool held = false;
+  for (int k = 0; k < kAncilla_Slots; k++)
+    held |= ancilla_type[k] == 0x22;
   for (int k = 0; k < kAncilla_Slots; k++) {
     int type = ancilla_type[k];
     // oggetto ricevuto (anche i medaglioni quando Link li solleva) e Spada
     // Suprema; non a terra (0x29: dopo il boss c'e' gia', invisibile, finche'
     // non si prende il portacuore) ne' il cristallo che sale (0x3e)
     if (type != 0x22 && type != 0x35)
+      continue;
+    if (type == 0x35 && held)
       continue;
     // Centro dell'oggetto come lo disegna il gioco (Ancilla_ReceiveItem_Draw):
     // largo 16 pixel, oppure 8 (spade, bacchette...) se kReceiveItem_Tab1 e' 0;
@@ -608,10 +628,11 @@ static void ApplyItemGlow(uint8 *pixels, int pitch, int width, int height, int c
     if (type == 0x22 && (item == 0x17 || item == 0x26 || item == 0x3e || item == 0x3f))
       continue;
     float half_w = (type == 0x35 || (item < 76 && kReceiveItem_Tab1[item])) ? 8.0f : 4.0f;
-    float cx = (ancilla_x_hi[k] << 8 | ancilla_x_lo[k]) + half_w - cam_x + ext;
-    float cy = (ancilla_y_hi[k] << 8 | ancilla_y_lo[k]) + 9 - cam_y;
+    float cx = Ancilla_GetX(k) + half_w - cam_x + ext;
+    float cy = Ancilla_GetY(k) + 9 - cam_y;
     bool milestone = type == 0x22 && (item == 0x20 || (item >= 0x37 && item <= 0x39));
-    float big = (type == 0x22 && !milestone) ? 1.0f : 1.5f;
+    bool master_sword = type == 0x22 && item == 0x01;  // as large as the ceremony's
+    float big = (type == 0x22 && !milestone && !master_sword) ? 1.0f : 1.5f;
     float radius = 52 * big;
     float rot = g_fx_frames * 0.03f;
     int x0 = IntMax((int)(cx - radius), 0), x1 = IntMin((int)(cx + radius), width - 1);
@@ -619,7 +640,7 @@ static void ApplyItemGlow(uint8 *pixels, int pitch, int width, int height, int c
     for (int y = y0; y <= y1; y++) {
       uint32 *row = (uint32 *)(pixels + y * pitch);
       for (int x = x0; x <= x1; x++) {
-        if (IsHud(row[x]) || IsSprite(row[x]))
+        if (HdFx_IsHudOrSprite(row[x]))
           continue;  // i raggi stanno dietro a Link e all'oggetto
         float dx = x - cx, dy = y - cy;
         float d = sqrtf(dx * dx + dy * dy) / radius;
@@ -674,8 +695,8 @@ static void KeepCrystalUnpainted(uint8 *pixels, int pitch, int width, int height
     if (type == 0x29 && (!(dung_savegame_state_bits & 0x8000) || byte_7E04C2 != 0))
       continue;
     int lift = type == 0x29 ? (int8)ancilla_z[k] : 0;
-    int sx = (ancilla_x_hi[k] << 8 | ancilla_x_lo[k]) - cam_x + ext;
-    int sy = (ancilla_y_hi[k] << 8 | ancilla_y_lo[k]) + 1 - lift - cam_y;
+    int sx = Ancilla_GetX(k) - cam_x + ext;
+    int sy = Ancilla_GetY(k) + 1 - lift - cam_y;
     for (int y = IntMax(sy, 0); y < IntMin(sy + 16, height); y++) {
       uint32 *row = (uint32 *)(pixels + y * pitch);
       for (int x = IntMax(sx, 0); x < IntMin(sx + 16, width); x++)
@@ -719,10 +740,6 @@ bool HdFx_IsRainingOutdoors(void) {
 // bassa 0x09) vengono marcati con il layer 7, cosi' lo shader sa dove non
 // mettere le pennellate (in Four Swords l'acqua non le ha).
 enum { kLayerWater = 7 };
-
-static bool IsWaterAttr(uint8 a) {
-  return a == 0x08 || a == 0x09;
-}
 
 // Aree in cui lo sfondo e' il cielo con il panorama sotto le nuvole: la
 // Montagna della Morte (chiara e oscura) e la Piramide
@@ -824,12 +841,32 @@ int HdFx_SceneModule(void) {
   // Salva ed esci (23): il gioco si scurisce fermo
   if (m == 23)
     return player_is_indoors ? 7 : 9;
+  // Agahnim beaten (21): the mirror takes Link to the Pyramid, where Agahnim
+  // speaks and Link spins with the HUD on screen (the wave: InAgahnimWave)
+  if (m == 21)
+    return player_is_indoors ? 7 : BYTE(overworld_screen_index) >= 0x80 ? 11 : 9;
+  // Ganon leaves Agahnim (24): his room until it has faded out (states 0-2;
+  // the game already sets player_is_indoors = 0 in state 1), then the
+  // Pyramid where the bat crashes (3-4 load it with the screen off)
+  if (m == 24)
+    return overworld_map_state <= 2 ? 7 : 9;
   // morte di Link (18): finche' si vede il mondo e' la scena di prima
   if (HdFx_DeathShowsWorld())
     return saved_module_for_menu;
   // (transizione dello specchio, 9/35 e 9/44: le aggiunte HD restano e
   // seguono onda e bianco del gioco, HdWorld_WarpPost in hd_world.c)
   return m;
+}
+
+// The game runs the dungeon room on the screen: module 7, or Ganon leaving
+// Agahnim (24) while his room is still shown (HdFx_SceneModule: states 0-2;
+// from state 1 the game already says player_is_indoors = 0). The room below
+// the pits and the sky under Ganon's Tower vanished as soon as Agahnim died.
+// Same for the mirror wave after the first Agahnim (21) while his room is
+// shown (indoors): the land under the tower turned flat blue
+bool HdFx_DungeonRoomRuns(void) {
+  int m = main_module_index;
+  return m == 7 || ((m == 24 || m == 21) && HdFx_SceneModule() == 7);
 }
 
 // Morte di Link (modulo 18): il mondo resta sullo schermo mentre Link cade e
@@ -852,6 +889,19 @@ bool HdFx_DungeonPassing(void) {
   return main_module_index == 7 && submodule_index != 0;
 }
 
+int g_hd_loaded_room = -1;
+int g_hd_screen_bri = 15;
+
+int HdFx_LoadedRoom(void) {
+  // a gioco fermo e' sempre la stanza attuale: si ricorda anche dopo aver
+  // caricato una partita (savestate), quando Dungeon_LoadRoom non e' ancora
+  // passato. Le scale (7/14) cambiano dungeon_room_index subito ma caricano la
+  // stanza nuova solo col nero, un centinaio di fotogrammi dopo
+  if (!HdFx_DungeonPassing() || g_hd_loaded_room < 0)
+    g_hd_loaded_room = dungeon_room_index;
+  return g_hd_loaded_room;
+}
+
 bool HdFx_RoomScroll(void) {
   return main_module_index == 7 && (submodule_index == 1 || submodule_index == 2);
 }
@@ -862,7 +912,7 @@ bool HdFx_RoomScroll(void) {
 // 225-239 (AdjustWaterHDMAWindow e FloodDam_PrepFloodHDMA la riempiono fino
 // a 240): leggendo solo fino alla 224 l'acqua della diga restava quella del
 // gioco nelle ultime righe, in basso
-bool HdFx_FloodWindowShows(int sx, int sy) {
+static bool HdFx_FloodWindowShows(int sx, int sy) {
   sy = sy < 0 ? 0 : sy > 239 ? 239 : sy;
   sx = sx < 0 ? 0 : sx > 255 ? 255 : sx;
   uint16 v = hdma_table_dynamic[sy];
@@ -873,8 +923,8 @@ void HdFx_MarkWater(uint8 *pixels, int pitch, int width, int height, int bias_x,
   // anche durante il cerchio di transizione e l'arrivo con l'Ocarina:
   // altrimenti lo shader dipingerebbe l'acqua per qualche fotogramma
   // 11: aree speciali all'aperto (Dominio di Zora, bosco della Spada Suprema...)
-  int mod = HdFx_SceneModule();
-  if (mod != 7 && mod != 9 && mod != 11)
+  int mod;
+  if (!HdFx_InGameplay(&mod))
     return;
   // sulla Montagna della Morte e alla Piramide il vuoto oltre i dirupi e'
   // "acqua profonda" per il gioco, ma sullo schermo e' il cielo: lo sfondo
@@ -905,7 +955,8 @@ void HdFx_MarkWater(uint8 *pixels, int pitch, int width, int height, int bias_x,
     if (layer == 0 && mod != 7)
       continue;
     int cam_x = (layer ? BG2HOFS_copy2 : BG1HOFS_copy2) + bias_x;
-    int cam_y = (layer ? BG2VOFS_copy2 : BG1VOFS_copy2) + bias_y;
+    // (screen row 0 is background row 1, as in HdWorld_Composite)
+    int cam_y = (layer ? BG2VOFS_copy2 : BG1VOFS_copy2) + bias_y + 1;
     int x0 = (cam_x - ext) & ~7, y0 = cam_y & ~7;
     for (int wy = y0; wy < cam_y + height; wy += 8) {
       for (int wx = x0; wx < cam_x - ext + width; wx += 8) {
@@ -914,7 +965,7 @@ void HdFx_MarkWater(uint8 *pixels, int pitch, int width, int height, int bias_x,
         bool flood = false;
         int shown;
         if (mod == 7) {
-          int pos = ((wy & 0x1f8) << 3) + ((wx & 0x1f8) >> 3);
+          int pos = HdWater_DungPos(wx, wy);
           // acqua della chiusa: per il gioco le caselle non cambiano
           flood = !layer && !gate_start && HdWater_IsFlood(pos);
           attr = flood ? 0x08 : HdWater_DungAttr(pos + (layer ? 0 : 0x1000), wx, wy);
@@ -931,9 +982,9 @@ void HdFx_MarkWater(uint8 *pixels, int pitch, int width, int height, int bias_x,
               cloud_e = e;
           }
         }
-        bool water = IsWaterAttr(attr);
+        bool water = HdWater_IsWaterAttr(attr);
         // vasche blu nelle case: solo i pixel blu dell'interno
-        bool tub = mod == 7 && layer && !water && HdWater_IsTubCell(((wy & 0x1f8) << 3) + ((wx & 0x1f8) >> 3));
+        bool tub = mod == 7 && layer && !water && HdWater_IsTubCell(HdWater_DungPos(wx, wy));
         water |= tub;
         // acqua congelata (hd_burn.c): per il gioco e' ghiaccio (0x0f), ma sotto
         // le lastre (HdFx_FrozenWater) si disegna l'acqua
@@ -1095,7 +1146,7 @@ static void DrawScorchTile(uint8 *pixels, int pitch, int width, int height, int 
     uint32 *row = (uint32 *)(pixels + py * pitch);
     for (int x = -2; x < 18; x++) {
       int px = sx + x;
-      if (px < 0 || px >= width || IsHud(row[px]) || IsSprite(row[px]))
+      if (px < 0 || px >= width || HdFx_IsHudOrSprite(row[px]))
         continue;
       float dx = x - 7.5f, dy = y - 7.5f;
       float d = sqrtf(dx * dx + dy * dy);
@@ -1110,8 +1161,10 @@ static void DrawScorchTile(uint8 *pixels, int pitch, int width, int height, int 
 
 // Casella 8x8 degli sprite (prima tabella della memoria video) con la palette
 // pal degli sprite, letta da VRAM e CGRAM come la disegnerebbe la PPU
+// (always sprite palette 1, the one of the flames)
 static void DrawObjTile(uint8 *pixels, int pitch, int width, int height, int sx, int sy,
-                        int chr, int pal, bool hflip, bool behind_link) {
+                        int chr, bool hflip, bool behind_link) {
+  enum { pal = 1 };
   Ppu *ppu = g_zenv.ppu;
   int adr = ppu->objTileAdr1 + chr * 16;
   for (int r = 0; r < 8; r++) {
@@ -1128,9 +1181,7 @@ static void DrawObjTile(uint8 *pixels, int pitch, int width, int height, int sx,
       // Link (e chi e' con lui) davanti al fuoco resta visibile
       if (behind_link && IsSprite(row[px]))
         continue;
-      uint16 col = ppu->cgram[0x80 + pal * 16 + v];
-      uint32 cr = col & 31, cg = col >> 5 & 31, cb = col >> 10 & 31;
-      row[px] = 4u << 24 | (cr << 3 | cr >> 2) << 16 | (cg << 3 | cg >> 2) << 8 | (cb << 3 | cb >> 2);
+      row[px] = 4u << 24 | HdFx_Bgr15ToRgb(ppu->cgram[0x80 + pal * 16 + v]);
     }
   }
 }
@@ -1148,8 +1199,8 @@ static void DrawFlamesTile(uint8 *pixels, int pitch, int width, int height, int 
   int gfx = kFlame_Gfx[j >> 3 > 8 ? 8 : j >> 3];
   sy -= 2;  // un poco sopra la tile, come la fiamma sopra i piedi del nemico
   if (gfx == 5) {
-    DrawObjTile(pixels, pitch, width, height, sx, sy - 6, 0xa4, 1, false, behind_link);
-    DrawObjTile(pixels, pitch, width, height, sx + 8, sy - 6, 0xa5, 1, false, behind_link);
+    DrawObjTile(pixels, pitch, width, height, sx, sy - 6, 0xa4, false, behind_link);
+    DrawObjTile(pixels, pitch, width, height, sx + 8, sy - 6, 0xa5, false, behind_link);
     return;
   }
   int chr = kFlame_Char[gfx];
@@ -1157,7 +1208,7 @@ static void DrawFlamesTile(uint8 *pixels, int pitch, int width, int height, int 
   for (int t = 0; t < 4; t++) {
     int tx = t & 1, ty = t >> 1;
     DrawObjTile(pixels, pitch, width, height, sx + (hflip ? 1 - tx : tx) * 8, sy + ty * 8,
-                chr + tx + ty * 16, 1, hflip, behind_link);
+                chr + tx + ty * 16, hflip, behind_link);
   }
 }
 
@@ -1165,27 +1216,60 @@ static void DrawFlamesTile(uint8 *pixels, int pitch, int width, int height, int 
 // gioco disegna i nemici congelati dalla Bacchetta del Ghiaccio
 // (Sprite_DrawMultiple; gli altri sono bianco, rosa e arancio), ordinati dal
 // piu' scuro al piu' chiaro
+// Numbers (1-7) of these colors from the darkest to the lightest, by
+// r * 3 + g * 6 + b on the 5-bit values (also HdFx_IceBeforeRender)
+static void IceOrder(const Ppu *ppu, int order[7]) {
+  int lum[7];
+  for (int i = 0; i < 7; i++) {
+    uint16 c = ppu->cgram[0x80 + 2 * 16 + 1 + i];
+    int l = (c & 31) * 3 + (c >> 5 & 31) * 6 + (c >> 10 & 31), j = i;
+    while (j > 0 && lum[j - 1] > l)
+      lum[j] = lum[j - 1], order[j] = order[j - 1], j--;
+    lum[j] = l, order[j] = 1 + i;
+  }
+}
+
 static int IceRamp(uint32 *ramp) {
   Ppu *ppu = g_zenv.ppu;
-  int lum[15], n = 0;
-  for (int i = 1; i < 8; i++) {
-    uint16 col = ppu->cgram[0x80 + 2 * 16 + i];
-    uint32 cr = col & 31, cg = col >> 5 & 31, cb = col >> 10 & 31;
-    uint32 c = (cr << 3 | cr >> 2) << 16 | (cg << 3 | cg >> 2) << 8 | (cb << 3 | cb >> 2);
-    int l = (int)(cr * 3 + cg * 6 + cb);
-    int j = n++;
-    while (j > 0 && lum[j - 1] > l)
-      lum[j] = lum[j - 1], ramp[j] = ramp[j - 1], j--;
-    lum[j] = l, ramp[j] = c;
+  int order[7];
+  IceOrder(ppu, order);
+  for (int j = 0; j < 7; j++)
+    ramp[j] = HdFx_Bgr15ToRgb(ppu->cgram[0x80 + 2 * 16 + order[j]]);
+  return 7;
+}
+
+// Frozen tile f just formed: grows in 8 frames (0-1)
+static inline float IceGrow(const HdBurnTile *f) {
+  return f->age < 8 ? (f->age + 1) / 8.0f : 1.0f;
+}
+
+// Tile of 16x16 pixels at sx, sy close enough to the screen to be drawn
+static inline bool TileNearScreen(int sx, int sy, int width, int height) {
+  return sx > -20 && sy > -20 && sx < width + 4 && sy < height + 4;
+}
+
+// White cross glint of a frozen tile at phase ph (0-11) of its flash, in a
+// place given by seed; core and halo: strength of the center and of the arms
+static void DrawGlint(uint8 *pixels, int pitch, int width, int height, int sx, int sy, uint8 seed, int ph,
+                      float core, float halo) {
+  float a = (ph < 6 ? ph : 12 - ph) / 6.0f;
+  int gx = sx + 3 + seed % 10, gy = sy + 3 + (seed >> 4) % 10;
+  static const int8 kCross[5][2] = { {0, 0}, {-1, 0}, {1, 0}, {0, -1}, {0, 1} };
+  for (int i = 0; i < 5; i++) {
+    int px = gx + kCross[i][0], py = gy + kCross[i][1];
+    if (px < 0 || py < 0 || px >= width || py >= height)
+      continue;
+    uint32 *p = (uint32 *)(pixels + py * pitch) + px;
+    if (!IsHud(*p) && !IsSprite(*p))
+      MixPixel(p, 255, 255, 255, a * (i == 0 ? core : halo));
   }
-  return n;
 }
 
 // Congela la tile: i colori diventano quelli del ghiaccio secondo la loro
 // luminosita' (piu' chiari), con un bordo morbido; ogni tanto un luccichio
 static void DrawFrozenTile(uint8 *pixels, int pitch, int width, int height, int sx, int sy,
                            const HdBurnTile *f, const uint32 *ramp, int nramp) {
-  float grow = f->age < 8 ? (f->age + 1) / 8.0f : 1.0f;
+  float grow = IceGrow(f);
   for (int y = -1; y < 17; y++) {
     int py = sy + y;
     if (py < 0 || py >= height)
@@ -1193,15 +1277,14 @@ static void DrawFrozenTile(uint8 *pixels, int pitch, int width, int height, int 
     uint32 *row = (uint32 *)(pixels + py * pitch);
     for (int x = -1; x < 17; x++) {
       int px = sx + x;
-      if (px < 0 || px >= width || IsHud(row[px]) || IsSprite(row[px]))
+      if (px < 0 || px >= width || HdFx_IsHudOrSprite(row[px]))
         continue;
       float dx = x - 7.5f, dy = y - 7.5f;
       float d = sqrtf(dx * dx + dy * dy);
       float e = d < 8.0f ? 1.0f : d > 10.5f ? 0.0f : (10.5f - d) * 0.4f;
       if (e <= 0)
         continue;
-      uint32 c = row[px];
-      int l = (int)(((c >> 16) & 0xff) * 3 + ((c >> 8) & 0xff) * 6 + (c & 0xff)) / 10;
+      int l = HdFx_Luma(row[px]) / 10;
       float t = 0.30f + 0.70f * l / 255.0f;
       int idx = (int)(t * (nramp - 1) + 0.5f);
       uint32 ic = ramp[idx < 0 ? 0 : idx >= nramp ? nramp - 1 : idx];
@@ -1210,19 +1293,8 @@ static void DrawFrozenTile(uint8 *pixels, int pitch, int width, int height, int 
   }
   // luccichio: un punto bianco a forma di croce che si accende e si spegne
   int ph = (int)((g_fx_frames + f->seed * 7) % 96);
-  if (ph < 12) {
-    float a = (ph < 6 ? ph : 12 - ph) / 6.0f;
-    int gx = sx + 3 + f->seed % 10, gy = sy + 3 + (f->seed >> 4) % 10;
-    static const int8 kCross[5][2] = { {0, 0}, {-1, 0}, {1, 0}, {0, -1}, {0, 1} };
-    for (int i = 0; i < 5; i++) {
-      int px = gx + kCross[i][0], py = gy + kCross[i][1];
-      if (px < 0 || py < 0 || px >= width || py >= height)
-        continue;
-      uint32 *p = (uint32 *)(pixels + py * pitch) + px;
-      if (!IsHud(*p) && !IsSprite(*p))
-        MixPixel(p, 255, 255, 255, a * (i == 0 ? 0.95f : 0.6f));
-    }
-  }
+  if (ph < 12)
+    DrawGlint(pixels, pitch, width, height, sx, sy, f->seed, ph, 0.95f, 0.6f);
 }
 
 // Rumore a valori morbido (0-1): cella gx, gy e posizione fx, fy (0-1) dentro
@@ -1250,7 +1322,7 @@ static void DrawIceWaterTile(uint8 *pixels, int pitch, int width, int height, in
                              const HdBurnTile *f) {
   static const float kDeep[3] = { 120, 168, 214 }, kLight[3] = { 222, 240, 252 };
   uint8 cells = HdBurn_WaterCells(f->x, f->y);
-  float grow = f->age < 8 ? (f->age + 1) / 8.0f : 1.0f;
+  float grow = IceGrow(f);
   int left = HdBurn_IceLeft(f);
   float rem = left <= 0 ? 0.0f : (float)left / HdBurn_ThawTime(f);
   for (int c = 0; c < 4; c++) {
@@ -1269,7 +1341,7 @@ static void DrawIceWaterTile(uint8 *pixels, int pitch, int width, int height, in
       uint32 *row = (uint32 *)(pixels + py * pitch);
       for (int x = 0; x < 8; x++) {
         int px = sx + cx + x;
-        if (px < 0 || px >= width || IsHud(row[px]) || IsSprite(row[px]))
+        if (px < 0 || px >= width || HdFx_IsHudOrSprite(row[px]))
           continue;
         int wx = wx0 + x, wy = wy0 + y;
         // distanza dal bordo verso l'acqua, mossa dal rumore: bordo irregolare
@@ -1291,8 +1363,7 @@ static void DrawIceWaterTile(uint8 *pixels, int pitch, int width, int height, in
         }
         if (a <= 0)
           continue;
-        uint32 col = row[px];
-        int l = (int)(((col >> 16) & 0xff) * 3 + ((col >> 8) & 0xff) * 6 + (col & 0xff)) / 10;
+        int l = HdFx_Luma(row[px]) / 10;
         float lit = (l + 50) / 150.0f;
         lit = lit < 0.3f ? 0.3f : lit > 1.05f ? 1.05f : lit;
         // velature: ghiaccio piu' trasparente (piu' blu) e piu' opaco (piu' bianco)
@@ -1314,19 +1385,8 @@ static void DrawIceWaterTile(uint8 *pixels, int pitch, int width, int height, in
   }
   // luccichio, come sui cespugli congelati
   int ph = (int)((g_fx_frames + f->seed * 7) % 128);
-  if (ph < 12 && rem >= 1.0f && (cells & 9) == 9) {
-    float a = (ph < 6 ? ph : 12 - ph) / 6.0f;
-    int gx = sx + 3 + f->seed % 10, gy = sy + 3 + (f->seed >> 4) % 10;
-    static const int8 kCross[5][2] = { {0, 0}, {-1, 0}, {1, 0}, {0, -1}, {0, 1} };
-    for (int i = 0; i < 5; i++) {
-      int px = gx + kCross[i][0], py = gy + kCross[i][1];
-      if (px < 0 || py < 0 || px >= width || py >= height)
-        continue;
-      uint32 *p = (uint32 *)(pixels + py * pitch) + px;
-      if (!IsHud(*p) && !IsSprite(*p))
-        MixPixel(p, 255, 255, 255, a * (i == 0 ? 0.9f : 0.5f));
-    }
-  }
+  if (ph < 12 && rem >= 1.0f && (cells & 9) == 9)
+    DrawGlint(pixels, pitch, width, height, sx, sy, f->seed, ph, 0.9f, 0.5f);
 }
 
 void HdFx_FrozenWater(uint8 *pixels, int pitch, int width, int height, int bias_x, int bias_y) {
@@ -1337,13 +1397,14 @@ void HdFx_FrozenWater(uint8 *pixels, int pitch, int width, int height, int bias_
   if (n == 0)
     return;
   int ext = (width - 256) / 2;
-  int cam_x = BG2HOFS_copy2 + bias_x, cam_y = BG2VOFS_copy2 + bias_y;
+  // (screen row 0 is background row 1, as in HdWorld_Composite)
+  int cam_x = BG2HOFS_copy2 + bias_x, cam_y = BG2VOFS_copy2 + bias_y + 1;
   for (int i = 0; i < n; i++) {
     const HdBurnTile *f = &tiles[i];
     if (!f->water || !HdBurn_TileShown(f))
       continue;
     int sx = f->x - cam_x + ext, sy = f->y - cam_y;
-    if (sx > -20 && sy > -20 && sx < width + 4 && sy < height + 4)
+    if (TileNearScreen(sx, sy, width, height))
       DrawIceWaterTile(pixels, pitch, width, height, sx, sy, f);
   }
 }
@@ -1352,14 +1413,14 @@ static void ApplyBurning(uint8 *pixels, int pitch, int width, int height, int ca
   const HdBurnTile *tiles;
   int n = HdBurn_GetFrozen(&tiles);
   if (n) {
-    uint32 ramp[15];
+    uint32 ramp[7];
     int nramp = IceRamp(ramp);
     for (int i = 0; i < n; i++) {
       const HdBurnTile *f = &tiles[i];
       if (f->water || !HdBurn_TileShown(f))
         continue;  // l'acqua ghiacciata la disegna HdFx_FrozenWater
       int sx = f->x - cam_x + ext, sy = f->y - cam_y;
-      if (sx > -20 && sy > -20 && sx < width + 4 && sy < height + 4)
+      if (TileNearScreen(sx, sy, width, height))
         DrawFrozenTile(pixels, pitch, width, height, sx, sy, f, ramp, nramp);
     }
   }
@@ -1371,7 +1432,7 @@ static void ApplyBurning(uint8 *pixels, int pitch, int width, int height, int ca
       continue;
     float k = (float)s->age / kHdScorchTime;
     int sx = s->x - cam_x + ext, sy = s->y - cam_y;
-    if (sx > -20 && sy > -20 && sx < width + 4 && sy < height + 4)
+    if (TileNearScreen(sx, sy, width, height))
       DrawScorchTile(pixels, pitch, width, height, sx, sy, s->seed, 0.62f - 0.10f * k);
     // fumo appena il fuoco si spegne
     if (step && live && s->age == 1) {
@@ -1431,20 +1492,22 @@ void HdFx_AfterLight(uint8 *pixels, int pitch, int width, int height, int bias_x
   if (step) {
     g_fx_frames++;
     UpdateParticles();
-    if (g_fx_heat)
+    if (g_config.fx_heat)
       SpawnEmbers(cam_x, cam_y, ext);
-    if (g_fx_whirlpool && mod == 9)
+    if (g_config.fx_whirlpool && mod == 9)
       SpawnWhirlpoolSparkles();
   }
-  if (g_fx_window_rays && mod == 7)
-    ApplyWindowRays(pixels, pitch, width, height, cam_x, cam_y, ext, step);
-  if (g_fx_item_glow)
+  // window light, ice and scorch sit on background tiles: screen row 0 is
+  // background row 1 (HdWorld_Composite); sprites and particles have no +1
+  if (g_config.fx_window_rays && mod == 7)
+    ApplyWindowRays(pixels, pitch, width, height, cam_x, cam_y + 1, ext, step);
+  if (g_config.fx_item_glow)
     ApplyItemGlow(pixels, pitch, width, height, cam_x, cam_y, ext);
   KeepCrystalUnpainted(pixels, pitch, width, height, cam_x, cam_y, ext);
   if (mod == 9)
-    ApplyBurning(pixels, pitch, width, height, cam_x, cam_y, ext, step);
+    ApplyBurning(pixels, pitch, width, height, cam_x, cam_y + 1, ext, step);
   DrawParticles(pixels, pitch, width, height, cam_x, cam_y, ext);
-  if (g_fx_rain && IsRaining(mod)) {
+  if (g_config.fx_rain && IsRaining(mod)) {
     ApplyRain(pixels, pitch, width, height, cam_x, cam_y, ext, step);
     StepLightning(step);
   } else {
@@ -1465,7 +1528,6 @@ void HdFx_AfterLight(uint8 *pixels, int pitch, int width, int height, int bias_x
 // Segue la luminosita' del gioco (dissolvenze) e passa dal mosaico dei
 // passaggi fra le aree come il resto.
 
-bool g_fx_fog;
 static bool g_fog_on, g_fog_scene;
 static uint8 g_fog_saved_sub, g_fog_saved_math, g_fog_last_frame;
 static uint32 g_fog_t;
@@ -1544,7 +1606,7 @@ static void FogSampleColors(Ppu *ppu) {
 
 void HdFx_FogBeforeRender(Ppu *ppu) {
   g_fog_scene = ForestFogScene(ppu);
-  g_fog_on = g_fx_fog && g_fog_scene;
+  g_fog_on = g_config.fx_fog && g_fog_scene;
   if (!g_fog_on)
     return;
   FogSampleColors(ppu);
@@ -1565,12 +1627,6 @@ bool HdFx_FogReplacesOverlay(void) {
 
 bool HdFx_ForestFogScene(void) {
   return g_fog_scene;
-}
-
-static inline float Smooth01(float a, float b, float v) {
-  float t = (v - a) / (b - a);
-  t = t < 0 ? 0 : t > 1 ? 1 : t;
-  return t * t * (3 - 2 * t);
 }
 
 // Rumore a valori morbido (0-1, ValueNoise), coordinate in celle
@@ -1610,14 +1666,14 @@ void HdFx_Fog(uint8 *pixels, int pitch, int width, int height, int bias_x, int b
       float px = cam_x * 1.35f + sx + t * 0.22f, py = cam_y * 1.35f + sy - t * 0.09f;
       float n2 = FogNoise(px / 40.0f, py / 40.0f, 0x53) * 0.7f + FogNoise(px / 18.0f, py / 18.0f, 0x54) * 0.3f;
       // nuvole piene (il chiaro dell'originale, al centro anche un po' di piu')
-      float d = 1.15f * Smooth01(0.54f, 0.68f, n1) + 0.50f * Smooth01(0.62f, 0.80f, n2);
+      float d = 1.15f * HdFx_Smooth(0.54f, 0.68f, n1) + 0.50f * HdFx_Smooth(0.62f, 0.80f, n2);
       // piu' rada attorno a Link
       float dx = sx - lx, dy = (sy - ly) * 1.25f;
-      d *= 0.45f + 0.55f * Smooth01(18.0f, 84.0f, sqrtf(dx * dx + dy * dy));
+      d *= 0.45f + 0.55f * HdFx_Smooth(18.0f, 84.0f, sqrtf(dx * dx + dy * dy));
       if (d > 1.15f) d = 1.15f;
       // chiazze scure a terra, fra una nuvola e l'altra (valori negativi)
       float n3 = FogNoise(wx / 72.0f, wy / 72.0f, 0x56) * 0.7f + FogNoise(wx / 28.0f, wy / 28.0f, 0x57) * 0.3f;
-      float e = Smooth01(0.58f, 0.70f, n3) * (1.0f - (d < 1.0f ? d : 1.0f));
+      float e = HdFx_Smooth(0.58f, 0.70f, n3) * (1.0f - (d < 1.0f ? d : 1.0f));
       g_fog_alpha[gy][gx] = d - e;
     }
   }
@@ -1674,7 +1730,9 @@ static int32 *g_blur_buf, *g_blur_tmp;
 static int g_blur_cap;
 
 // Media mobile di raggio r su una riga o colonna di n elementi (4 canali)
-static void BoxBlur1D(const int32 *src, int32 *dst, int n, int stride, int r) {
+// (r is always 3)
+static void BoxBlur1D(const int32 *src, int32 *dst, int n, int stride) {
+  enum { r = 3 };
   int32 sum[4] = { 0 };
   for (int i = -r; i <= r; i++) {
     int k = i < 0 ? 0 : i >= n ? n - 1 : i;
@@ -1690,14 +1748,45 @@ static void BoxBlur1D(const int32 *src, int32 *dst, int n, int stride, int r) {
   }
 }
 
+// Sums (r, g, b, how many) of the w x h rectangle at x0, y0 with two
+// horizontal and vertical passes of radius 3 (almost a gaussian), the HUD
+// left out of the average; laid out w * 4 per row. NULL without memory
+static const int32 *BlurRect(const uint8 *pixels, int pitch, int x0, int y0, int w, int h) {
+  int n = w * h;
+  if (n > g_blur_cap) {
+    free(g_blur_buf), free(g_blur_tmp);
+    g_blur_buf = malloc(n * 16);
+    g_blur_tmp = malloc(n * 16);
+    g_blur_cap = g_blur_buf && g_blur_tmp ? n : 0;
+    if (!g_blur_cap)
+      return NULL;
+  }
+  for (int y = 0; y < h; y++) {
+    const uint32 *row = (const uint32 *)(pixels + (y0 + y) * pitch) + x0;
+    int32 *b = g_blur_buf + y * w * 4;
+    for (int x = 0; x < w; x++, b += 4) {
+      uint32 c = row[x];
+      bool ui = IsHud(c);
+      b[0] = ui ? 0 : (c >> 16) & 0xff;
+      b[1] = ui ? 0 : (c >> 8) & 0xff;
+      b[2] = ui ? 0 : c & 0xff;
+      b[3] = ui ? 0 : 1;
+    }
+  }
+  for (int pass = 0; pass < 2; pass++) {
+    for (int y = 0; y < h; y++)
+      BoxBlur1D(g_blur_buf + y * w * 4, g_blur_tmp + y * w * 4, w, 1);
+    for (int x = 0; x < w; x++)
+      BoxBlur1D(g_blur_tmp + x * 4, g_blur_buf + x * 4, h, w);
+  }
+  return g_blur_buf;
+}
+
 // Dialoghi: dentro il riquadro (trasparente) il gioco si sfoca, testo e
 // cornice (interfaccia, strato 2) restano nitidi. Solo con la cornice: la
 // telepatia di Zelda non ha riquadro e resta com'e'.
-static int32 *g_dlg_acc, *g_dlg_tmp;
-static int g_dlg_cap;
-
 static void DialogGlass(uint8 *pixels, int pitch, int width, int height) {
-  if (!g_fx_menu_blur || main_module_index != 14 || submodule_index != 2)
+  if (!g_config.fx_menu_blur || main_module_index != 14 || submodule_index != 2)
     return;
   // riquadro del dialogo (come HdText_GetRect): 24 x 8 caselle di BG3
   int off = (text_msgbox_topleft - 0x6000) & 0x3ff;
@@ -1716,34 +1805,13 @@ static void DialogGlass(uint8 *pixels, int pitch, int width, int height) {
     frame += IsHud(fr[x]);
   if (frame * 10 < w * 7)
     return;
-  int n = w * h;
-  if (n > g_dlg_cap) {
-    free(g_dlg_acc), free(g_dlg_tmp);
-    g_dlg_acc = malloc(n * 16);
-    g_dlg_tmp = malloc(n * 16);
-    g_dlg_cap = g_dlg_acc && g_dlg_tmp ? n : 0;
-    if (!g_dlg_cap)
-      return;
-  }
   // come dietro i menu: l'interfaccia non entra nella media
-  for (int y = 0; y < h; y++) {
-    const uint32 *row = (const uint32 *)(pixels + (y0 + y) * pitch) + x0;
-    int32 *b = g_dlg_acc + y * w * 4;
-    for (int x = 0; x < w; x++, b += 4) {
-      uint32 c = row[x];
-      bool ui = IsHud(c);
-      b[0] = ui ? 0 : (c >> 16) & 0xff, b[1] = ui ? 0 : (c >> 8) & 0xff, b[2] = ui ? 0 : c & 0xff, b[3] = ui ? 0 : 1;
-    }
-  }
-  for (int pass = 0; pass < 2; pass++) {
-    for (int y = 0; y < h; y++)
-      BoxBlur1D(g_dlg_acc + y * w * 4, g_dlg_tmp + y * w * 4, w, 1, 3);
-    for (int x = 0; x < w; x++)
-      BoxBlur1D(g_dlg_tmp + x * 4, g_dlg_acc + x * 4, h, w, 3);
-  }
+  const int32 *acc = BlurRect(pixels, pitch, x0, y0, w, h);
+  if (!acc)
+    return;
   for (int y = 0; y < h; y++) {
     uint32 *row = (uint32 *)(pixels + (y0 + y) * pitch) + x0;
-    const int32 *b = g_dlg_acc + y * w * 4;
+    const int32 *b = acc + y * w * 4;
     for (int x = 0; x < w; x++, b += 4) {
       uint32 c = row[x];
       if (IsHud(c) || b[3] == 0)
@@ -1762,15 +1830,21 @@ bool HdFx_MenuBlurActive(void) {
   return g_blur_amount > 0 && g_zenv.ppu->mode != 7;
 }
 
+// How much of the menu blur is on screen (0-1): the GL shader fades with it
+float HdFx_MenuBlurAmount(void) {
+  return HdFx_MenuBlurActive() ? g_blur_amount : 0.0f;
+}
+
 void HdFx_MenuBlur(uint8 *pixels, int pitch, int width, int height) {
   DialogGlass(pixels, pitch, width, height);
   float amount = g_blur_amount;
   static uint8 last_frame;
   int mod = main_module_index, sub = submodule_index;
   // inventario (1), menu di salvataggio (11) e menu opzioni; non i dialoghi
-  bool want = g_fx_menu_blur &&
+  bool want = g_config.fx_menu_blur &&
       ((mod == 14 && (sub == 1 || sub == 11)) || HdMenu_IsOpen());
-  if (!want) {
+  // menu closed: the blur fades out as it faded in (at once if turned off)
+  if (!want && (!g_config.fx_menu_blur || amount <= 0)) {
     g_blur_amount = 0;
     return;
   }
@@ -1778,41 +1852,20 @@ void HdFx_MenuBlur(uint8 *pixels, int pitch, int width, int height) {
   // comunque, un passo per ogni disegno
   if (last_frame != frame_counter || HdMenu_IsOpen()) {
     last_frame = frame_counter;
-    amount = amount + 1.0f / 8 > 1 ? 1 : amount + 1.0f / 8;
+    float step = want ? 1.0f / 8 : -1.0f / 8;
+    amount = amount + step > 1 ? 1 : amount + step < 0 ? 0 : amount + step;
     g_blur_amount = amount;
   }
-  int n = width * height;
-  if (n > g_blur_cap) {
-    free(g_blur_buf), free(g_blur_tmp);
-    g_blur_buf = malloc(n * 16);
-    g_blur_tmp = malloc(n * 16);
-    g_blur_cap = g_blur_buf && g_blur_tmp ? n : 0;
-    if (!g_blur_cap)
-      return;
-  }
-  for (int y = 0; y < height; y++) {
-    const uint32 *row = (const uint32 *)(pixels + y * pitch);
-    int32 *b = g_blur_buf + y * width * 4;
-    for (int x = 0; x < width; x++, b += 4) {
-      uint32 c = row[x];
-      bool ui = IsHud(c);
-      b[0] = ui ? 0 : (c >> 16) & 0xff;
-      b[1] = ui ? 0 : (c >> 8) & 0xff;
-      b[2] = ui ? 0 : c & 0xff;
-      b[3] = ui ? 0 : 1;
-    }
-  }
+  if (amount <= 0)
+    return;
   // due passate orizzontali e verticali di raggio 3: quasi una gaussiana
-  for (int pass = 0; pass < 2; pass++) {
-    for (int y = 0; y < height; y++)
-      BoxBlur1D(g_blur_buf + y * width * 4, g_blur_tmp + y * width * 4, width, 1, 3);
-    for (int x = 0; x < width; x++)
-      BoxBlur1D(g_blur_tmp + x * 4, g_blur_buf + x * 4, height, width, 3);
-  }
+  const int32 *acc = BlurRect(pixels, pitch, 0, 0, width, height);
+  if (!acc)
+    return;
   float keep = 1.0f - amount, dark = 1.0f - 0.30f * amount;
   for (int y = 0; y < height; y++) {
     uint32 *row = (uint32 *)(pixels + y * pitch);
-    const int32 *b = g_blur_buf + y * width * 4;
+    const int32 *b = acc + y * width * 4;
     for (int x = 0; x < width; x++, b += 4) {
       uint32 c = row[x];
       if (IsHud(c) || b[3] == 0)
@@ -1856,7 +1909,7 @@ static bool PrayerIrisActive(Ppu *ppu) {
 }
 
 static bool IrisActive(void) {
-  if (!g_fx_soft_iris || !g_hd_iris_valid)
+  if (!g_config.fx_soft_iris || !g_hd_iris_valid)
     return false;
   if ((uint8)(frame_counter - g_hd_iris_frame) > 1) {
     g_hd_iris_valid = false;
@@ -1962,7 +2015,8 @@ void HdFx_FadeBeforeRender(Ppu *ppu) {
   // (lo specchio ha la sua regola, HdWorld_WarpBeforeRender)
   if (main_module_index == 9 && (submodule_index == 0x23 || submodule_index == 0x2c))
     return;
-  if ((!HdFx_InGameplay(&mod) && !HdFx_DeathShowsWorld()) || ppu->forcedBlank || ppu->brightness != 15)
+  // (the game's brightness: the PPU draws at 15 also in INIDISP fades)
+  if ((!HdFx_InGameplay(&mod) && !HdFx_DeathShowsWorld()) || g_hd_screen_bri != 15)
     return;
   if (!PrepareFadeMap(ppu))
     return;
@@ -1986,7 +2040,7 @@ bool HdFx_FadeActive(void) {
 // Colore i della palette pal (main_palette_buffer o la CGRAM) come lo vede
 // la PPU nel disegno: durante la dissolvenza quello vero per il fondale
 uint16 HdFx_RealBg(const uint16 *pal, int i) {
-  return g_fade_on && i < 0x80 && FadeEntry(i) ? g_fade_real[i] : pal[i];
+  return g_fade_on && FadeEntry(i) ? g_fade_real[i] : pal[i];
 }
 
 // Prima delle aggiunte HD: quali pixel sono fondale (alcuni effetti poi
@@ -2007,10 +2061,8 @@ void HdFx_FadeMask(uint8 *pixels, int pitch, int width, int height) {
   for (int y = 0; y < height; y++) {
     const uint32 *row = (const uint32 *)(pixels + y * pitch);
     uint8 *m = g_fade_mask + y * width;
-    for (int x = 0; x < width; x++) {
-      uint32 l = row[x] >> 24;
-      m[x] = !(l == 2 || l == 4 || l == 6);
-    }
+    for (int x = 0; x < width; x++)
+      m[x] = !HdFx_IsHudOrSprite(row[x]);
   }
 }
 
@@ -2047,16 +2099,15 @@ void HdFx_Mosaic(uint8 *pixels, int pitch, int width, int height) {
     uint32 *row = (uint32 *)(pixels + y * pitch);
     const uint32 *src = (const uint32 *)(pixels + sy * pitch);
     for (int x = 0; x < width; x++) {
-      uint32 l = row[x] >> 24;
-      if (l == 2 || l == 4 || l == 6)
+      if (HdFx_IsHudOrSprite(row[x]))
         continue;  // HUD e sprite restano
       int sx = x - (((x - ext) % m + m) % m);
       if (sx < 0)
         sx = 0;
       if (sx == x && sy == y)
         continue;
-      uint32 c = src[sx], lc = c >> 24;
-      if (lc == 2 || lc == 4 || lc == 6)
+      uint32 c = src[sx];
+      if (HdFx_IsHudOrSprite(c))
         continue;  // sotto uno sprite il colore del fondale non si sa
       row[x] = c;
     }
@@ -2112,9 +2163,7 @@ void HdFx_SoftIris(uint8 *pixels, int pitch, int width, int height) {
         continue;
       if (k < 0) k = 0;
       k = k * k * (3 - 2 * k);
-      uint32 c = row[x];
-      row[x] = (c & 0xff000000) | (int)(((c >> 16) & 0xff) * k) << 16 |
-               (int)(((c >> 8) & 0xff) * k) << 8 | (int)((c & 0xff) * k);
+      row[x] = HdFx_ScaleRgb(row[x], k);
     }
   }
 }
@@ -2132,6 +2181,9 @@ void HdFx_SoftIris(uint8 *pixels, int pitch, int width, int height) {
 
 static float *g_shadow, *g_shadow_tmp;
 static int g_shadow_cap;
+// rectangle written in the maps by the last frame (x0, y0, x1, y1) and the
+// width it refers to (HdFx_SpriteShadows)
+static int g_shadow_dirty[4], g_shadow_dirty_w;
 static uint8 *g_shadow_src;   // 1 = lo sprite di questo pixel fa ombra
 static int g_shadow_src_cap;
 static bool g_shadow_src_valid;
@@ -2140,7 +2192,6 @@ static uint8 g_hidden_idx[128];
 static int g_num_hidden;
 
 extern uint8 g_link_oam_mask[128], g_sprite_oam_owner[128];
-extern uint8 g_link_dive_timer;  // player.c
 
 // Ombra del gioco (SpriteDraw_Shadow): casella 0x6c (grande) o 0x38 (piccola)
 // della prima tabella, palette 4
@@ -2196,7 +2247,7 @@ void HdFx_ShadowsBeforeRender(Ppu *ppu, int width, int height) {
   ppu->objShadowOut = NULL;
   g_num_hidden = 0;
   g_shadow_src_valid = false;
-  if (!g_fx_sprite_shadows || !HdFx_InGameplay(&mod) || ppu->mode == 7)
+  if (!g_config.fx_sprite_shadows || !HdFx_InGameplay(&mod) || ppu->mode == 7)
     return;
   int n = width * height;
   if (n > g_shadow_src_cap) {
@@ -2269,15 +2320,8 @@ void HdFx_IceBeforeRender(Ppu *ppu) {
   // i blu 1-7 della palette 2 in ordine di luminosita', scelti con la stessa
   // formula di DrawFrozenTile: sollevato il cespuglio resta del colore che
   // aveva a terra
-  int8 order[7];
-  int lum[7];
-  for (int i = 0; i < 7; i++) {
-    uint16 c = ppu->cgram[0x80 + 2 * 16 + 1 + i];
-    int l = (c & 31) * 3 + (c >> 5 & 31) * 6 + (c >> 10 & 31), j = i;
-    while (j > 0 && lum[j - 1] > l)
-      lum[j] = lum[j - 1], order[j] = order[j - 1], j--;
-    lum[j] = l, order[j] = 1 + i;
-  }
+  int order[7];
+  IceOrder(ppu, order);
   ppu->iceRemap[0] = 0;
   for (int v = 1; v < 16; v++) {
     uint16 c = ppu->cgram[0x80 + 6 * 16 + v];
@@ -2353,9 +2397,11 @@ void HdFx_ShadowsAfterRender(Ppu *ppu) {
   ppu->objShadowOut = NULL;
 }
 
-static void BoxBlurF(const float *src, float *dst, int w, int h, int dx, int dy) {
-  for (int y = 0; y < h; y++)
-    for (int x = 0; x < w; x++) {
+// Blur of the rectangle [x0, x1) x [y0, y1) of a w x h map
+static void BoxBlurF(const float *src, float *dst, int w, int h, int dx, int dy,
+                     int x0, int y0, int x1, int y1) {
+  for (int y = y0; y < y1; y++)
+    for (int x = x0; x < x1; x++) {
       float s = 0;
       for (int k = -1; k <= 1; k++) {
         int xx = x + k * dx, yy = y + k * dy;
@@ -2368,7 +2414,7 @@ static void BoxBlurF(const float *src, float *dst, int w, int h, int dx, int dy)
 
 void HdFx_SpriteShadows(uint8 *pixels, int pitch, int width, int height) {
   int mod;
-  if (!g_fx_sprite_shadows || !HdFx_InGameplay(&mod) || !g_shadow_src_valid)
+  if (!g_config.fx_sprite_shadows || !HdFx_InGameplay(&mod) || !g_shadow_src_valid)
     return;
   int n = width * height;
   if (n > g_shadow_cap) {
@@ -2376,47 +2422,81 @@ void HdFx_SpriteShadows(uint8 *pixels, int pitch, int width, int height) {
     g_shadow = malloc(n * sizeof(float));
     g_shadow_tmp = malloc(n * sizeof(float));
     g_shadow_cap = g_shadow && g_shadow_tmp ? n : 0;
+    g_shadow_dirty_w = 0;  // new maps: cleared whole
     if (!g_shadow_cap)
       return;
   }
-  memset(g_shadow, 0, n * sizeof(float));
+  // Only the rectangle with shadows is worked on: the maps are cleared where
+  // the previous frame wrote (or entirely after a size change), the sources
+  // are looked for in their bounding box, and the blur and the darkening stay
+  // within the marks plus the blur reach (2 pixels). Same result as the whole
+  // screen, at a fraction of the cost.
+  int dx0 = g_shadow_dirty[0], dy0 = g_shadow_dirty[1], dx1 = g_shadow_dirty[2], dy1 = g_shadow_dirty[3];
+  if (g_shadow_dirty_w != width) {
+    memset(g_shadow, 0, n * sizeof(float));
+    memset(g_shadow_tmp, 0, n * sizeof(float));
+    g_shadow_dirty_w = width, dx0 = dy0 = dx1 = dy1 = 0;
+  }
+  for (int y = dy0; y < dy1; y++) {
+    memset(g_shadow + y * width + dx0, 0, (dx1 - dx0) * sizeof(float));
+    memset(g_shadow_tmp + y * width + dx0, 0, (dx1 - dx0) * sizeof(float));
+  }
+  memset(g_shadow_dirty, 0, sizeof(g_shadow_dirty));
+  int sx0 = width, sx1 = 0, sy0 = height, sy1 = 0;
+  for (int y = 0; y < height; y++) {
+    const uint8 *src = g_shadow_src + y * width;
+    for (int x = 0; x < width; x++)
+      if (src[x]) {
+        if (x < sx0) sx0 = x;
+        if (x >= sx1) sx1 = x + 1;
+        if (y < sy0) sy0 = y;
+        sy1 = y + 1;
+      }
+  }
   bool any = false;
-  for (int x = 0; x < width; x++) {
-    int y = 0;
-    while (y < height) {
+  int mx0 = width, mx1 = 0, my0 = height, my1 = 0;
+  for (int x = sx0; x < sx1; x++) {
+    int y = sy0;
+    while (y < sy1) {
       if (!IsSprite(*(uint32 *)(pixels + y * pitch + x * 4)) || !g_shadow_src[y * width + x]) {
         y++;
         continue;
       }
       int y0 = y;
-      while (y < height && IsSprite(*(uint32 *)(pixels + y * pitch + x * 4)) && g_shadow_src[y * width + x])
+      while (y < sy1 && IsSprite(*(uint32 *)(pixels + y * pitch + x * 4)) && g_shadow_src[y * width + x])
         y++;
       int foot = y - 1;
       // ogni pixel alto h sopra i piedi finisce spostato a destra e in basso
       for (int yy = y0; yy <= foot; yy++) {
         int h = foot - yy;
         int sx = x + (h * 5 + 5) / 10, sy = foot + (h * 3 + 10) / 20;
-        if (sx < width && sy < height)
+        if (sx < width && sy < height) {
           g_shadow[sy * width + sx] = 1, any = true;
+          if (sx < mx0) mx0 = sx;
+          if (sx >= mx1) mx1 = sx + 1;
+          if (sy < my0) my0 = sy;
+          if (sy >= my1) my1 = sy + 1;
+        }
       }
     }
   }
   if (!any)
     return;
+  dx0 = IntMax(mx0 - 2, 0), dx1 = IntMin(mx1 + 2, width);
+  dy0 = IntMax(my0 - 2, 0), dy1 = IntMin(my1 + 2, height);
+  g_shadow_dirty[0] = dx0, g_shadow_dirty[1] = dy0, g_shadow_dirty[2] = dx1, g_shadow_dirty[3] = dy1;
   for (int pass = 0; pass < 2; pass++) {
-    BoxBlurF(g_shadow, g_shadow_tmp, width, height, 1, 0);
-    BoxBlurF(g_shadow_tmp, g_shadow, width, height, 0, 1);
+    BoxBlurF(g_shadow, g_shadow_tmp, width, height, 1, 0, dx0, dy0, dx1, dy1);
+    BoxBlurF(g_shadow_tmp, g_shadow, width, height, 0, 1, dx0, dy0, dx1, dy1);
   }
-  for (int y = 0; y < height; y++) {
+  for (int y = dy0; y < dy1; y++) {
     uint32 *row = (uint32 *)(pixels + y * pitch);
     const float *m = g_shadow + y * width;
-    for (int x = 0; x < width; x++) {
+    for (int x = dx0; x < dx1; x++) {
       if (m[x] < 0.01f || IsSprite(row[x]) || IsHud(row[x]))
         continue;
       float k = 1.0f - 0.42f * (m[x] > 1 ? 1 : m[x]);
-      uint32 c = row[x];
-      row[x] = (c & 0xff000000) | (int)(((c >> 16) & 0xff) * k) << 16 |
-               (int)(((c >> 8) & 0xff) * k) << 8 | (int)((c & 0xff) * k);
+      row[x] = HdFx_ScaleRgb(row[x], k);
     }
   }
 }
@@ -2453,10 +2533,18 @@ static void Integral(int *s, int w, int h, const uint8 *m) {
   }
 }
 
-void HdFx_MarkBackdrop(uint8 *pixels, int pitch, int width, int height) {
+void HdFx_MarkBackdrop(uint8 *pixels, int pitch, int width, int height, int bias_x, int bias_y) {
   int mod;
   if (!HdFx_InGameplay(&mod) || mod != 9 || !IsBackdropScene())
     return;
+  // World-anchored 8x8 tiles whose visible part has no terrain (only
+  // backdrop, HUD or sprites) are sky too: the square test alone failed on a
+  // thin strip of sky at the screen edge, so while scrolling the sky turned
+  // painted pixel by pixel (top corners at the Pyramid)
+  int ext = (width - 256) / 2;
+  // (screen row 0 is background row 1, as in HdWorld_Composite)
+  BgLayer *bg2 = &g_zenv.ppu->bgLayer[1];
+  int cam_x = bg2->hScroll + bias_x - ext, cam_y = bg2->vScroll + bias_y + 1;
   static uint8 *mask, *core;
   static int *sum, cap;
   if (cap < width * height) {
@@ -2477,6 +2565,32 @@ void HdFx_MarkBackdrop(uint8 *pixels, int pitch, int width, int height) {
   for (int y = 0; y < height; y++)
     for (int x = 0; x < width; x++)
       core[y * width + x] = mask[y * width + x] && BoxSum(sum, width, height, x, y, kSkyCore) * 10 >= side * side * 9;
+  int cx0 = cam_x & ~7, cy0 = cam_y & ~7;
+  for (int wy = cy0; wy < cam_y + height; wy += 8) {
+    for (int wx = cx0; wx < cam_x + width; wx += 8) {
+      int x0 = wx - cam_x, y0 = wy - cam_y, x1 = x0 + 8, y1 = y0 + 8;
+      x0 = x0 < 0 ? 0 : x0, y0 = y0 < 0 ? 0 : y0;
+      x1 = x1 > width ? width : x1, y1 = y1 > height ? height : y1;
+      bool terrain = false, any = false;
+      for (int y = y0; y < y1 && !terrain; y++) {
+        const uint32 *row = (const uint32 *)(pixels + y * pitch);
+        for (int x = x0; x < x1; x++) {
+          int l = row[x] >> 24 & 7;
+          if (l == 5 || l == 3)
+            any = true;
+          else if (l != 2 && l != 4 && l != 6) {
+            terrain = true;
+            break;
+          }
+        }
+      }
+      if (terrain || !any)
+        continue;
+      for (int y = y0; y < y1; y++)
+        for (int x = x0; x < x1; x++)
+          core[y * width + x] |= mask[y * width + x];
+    }
+  }
   Integral(sum, width, height, core);
   for (int y = 0; y < height; y++) {
     uint32 *row = (uint32 *)(pixels + y * pitch);
@@ -2486,3 +2600,12 @@ void HdFx_MarkBackdrop(uint8 *pixels, int pitch, int width, int height) {
   }
 }
 
+
+// After loading a quick save: the room in view is the loaded one, and the
+// particles, window rays and lightning of the old place are gone
+void HdFx_ResetAfterLoad(void) {
+  g_hd_loaded_room = dungeon_room_index;
+  g_num_particles = 0;
+  g_shaft_room = -1;
+  g_flash = 0, g_flash_rise = false;
+}

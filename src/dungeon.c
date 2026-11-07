@@ -2677,7 +2677,7 @@ void Dungeon_LoadRoom() {  // 81873a
   } while (i != 0x120);
 
   dung_load_ptr_offs = 0x120;
-  HdPit_RoomLoaded();  // le caselle in dung_bg2 sono ora di questa stanza
+  g_hd_loaded_room = dungeon_room_index;  // le caselle in dung_bg2 sono ora di questa stanza (HdFx_LoadedRoom)
 }
 
 void RoomDraw_DrawAllObjects(const uint8 *level_data) {  // 8188e4
@@ -6708,22 +6708,33 @@ static bool InterRoomPhaseIsInstant(uint8 k) {
   return k != 8 && k != 13;
 }
 
+// Runs Step for the following instant phases of submodule sub (at most max),
+// with the NMI work before each, stopping at a phase that does not advance
+static void RunInstantPhases(void Step(), uint8 sub, bool IsInstant(uint8 k), int max) {
+  if (!(enhanced_features0 & kFeatures0_FastTransitions))
+    return;
+  for (int guard = 0; guard < max && submodule_index == sub && IsInstant(subsubmodule_index); guard++) {
+    uint8 old = subsubmodule_index;
+    NMI_DoUpdates();
+    Step();
+    if (subsubmodule_index == old)
+      break;
+  }
+}
+
+// One frame of the transition within a room, without Link's animation
+static void IntraRoomTransitionStep() {
+  link_y_coord_prev = link_y_coord;
+  link_x_coord_prev = link_x_coord;
+  kDungeon_IntraRoomTrans[subsubmodule_index]();
+}
+
 void Module07_01_SubtileTransition() {  // 82897c
   link_y_coord_prev = link_y_coord;
   link_x_coord_prev = link_x_coord;
   Link_HandleMovingAnimation_FullLongEntry();
   kDungeon_IntraRoomTrans[subsubmodule_index]();
-  if (!(enhanced_features0 & kFeatures0_FastTransitions))
-    return;
-  for (int guard = 0; guard < 8 && submodule_index == 1 && IntraRoomPhaseIsInstant(subsubmodule_index); guard++) {
-    uint8 old = subsubmodule_index;
-    NMI_DoUpdates();
-    link_y_coord_prev = link_y_coord;
-    link_x_coord_prev = link_x_coord;
-    kDungeon_IntraRoomTrans[subsubmodule_index]();
-    if (subsubmodule_index == old)
-      break;
-  }
+  RunInstantPhases(&IntraRoomTransitionStep, 1, &IntraRoomPhaseIsInstant, 8);
 }
 
 void DungeonTransition_Subtile_ResetShutters() {  // 828995
@@ -6791,15 +6802,7 @@ static void InterRoomTransitionStep() {
 void Module07_02_SupertileTransition() {  // 828a26
   Link_HandleMovingAnimation_FullLongEntry();
   InterRoomTransitionStep();
-  if (!(enhanced_features0 & kFeatures0_FastTransitions))
-    return;
-  for (int guard = 0; guard < 16 && submodule_index == 2 && InterRoomPhaseIsInstant(subsubmodule_index); guard++) {
-    uint8 old = subsubmodule_index;
-    NMI_DoUpdates();
-    InterRoomTransitionStep();
-    if (subsubmodule_index == old)
-      break;
-  }
+  RunInstantPhases(&InterRoomTransitionStep, 2, &InterRoomPhaseIsInstant, 16);
 }
 
 void Module07_02_00_InitializeTransition() {  // 828a4f
@@ -8287,8 +8290,8 @@ void DungeonTransition_AdjustCamera_Y(uint8 arg) {  // 82bde2
 
 // Con le transizioni veloci si fanno due passi per frame, fermandosi
 // appena lo scorrimento arriva a destinazione.
-static void RunTransitionSteps(void Step()) {
-  int steps = (enhanced_features0 & kFeatures0_FastTransitions) ? 2 : 1;
+// (at most `steps` steps)
+static void RunTransitionSteps(void Step(), int steps) {
   for (int i = 0; i < steps; i++) {
     uint8 old = subsubmodule_index;
     Step();
@@ -8301,24 +8304,18 @@ static void DungeonTransition_ScrollRoomStep();
 static void Module07_11_0A_ScrollCameraStep();
 
 void DungeonTransition_ScrollRoom() {  // 82be03
-  if (!(enhanced_features0 & kFeatures0_FastTransitions)) {
-    DungeonTransition_ScrollRoomStep();
-    return;
+  int steps = 1;
+  if (enhanced_features0 & kFeatures0_FastTransitions) {
+    // Transizioni veloci: 1 o 2 passi per frame, perche' la transizione duri
+    // sempre kHdTransFrames frame
+    HdTransPlan plan;
+    steps = Dungeon_TransitionPlan(&plan) ? HdTrans_ScrollSteps(&plan) : 2;
   }
-  // Transizioni veloci: 1 o 2 passi per frame, perche' la transizione duri
-  // sempre kHdTransFrames frame
-  HdTransPlan plan;
-  int steps = Dungeon_TransitionPlan(&plan) ? HdTrans_ScrollSteps(&plan) : 2;
-  for (int i = 0; i < steps; i++) {
-    uint8 old = subsubmodule_index;
-    DungeonTransition_ScrollRoomStep();
-    if (subsubmodule_index != old)
-      break;
-  }
+  RunTransitionSteps(&DungeonTransition_ScrollRoomStep, steps);
 }
 
 void Module07_11_0A_ScrollCamera() {  // 82be75
-  RunTransitionSteps(&Module07_11_0A_ScrollCameraStep);
+  RunTransitionSteps(&Module07_11_0A_ScrollCameraStep, (enhanced_features0 & kFeatures0_FastTransitions) ? 2 : 1);
 }
 
 static void DungeonTransition_ScrollRoomStep() {
@@ -8923,7 +8920,7 @@ void LayerEffect_Trinexx() {  // 8afeee
 // il cielo (0x6F e 0x77) va al rosso 0x1A e torna. Il GBA accende i colori
 // 0x6D-0x6E del pavimento di colpo solo al culmine; qui seguono il cielo
 // (stessa frazione del suo rosso), cosi' pavimento e sfondo vanno insieme
-static GbaLightning g_agah2_lightning;
+// g_agah2_lightning: in free RAM (variables.h)
 static void LayerEffect_Agahnim2Gba(void) {
   static const uint8 kIdx[1] = {0x6f};
   static const uint16 kFlash[1] = {0x1a};

@@ -5,6 +5,8 @@
 uint8 Overworld_GetTileAttributeAtLocation(uint16 x, uint16 y);
 // Casella 8x8 del terreno esterno (numero, palette, ribaltamenti) nello stesso punto
 uint16 Overworld_GetMap8AtLocation(uint16 x, uint16 y);
+// Frozen water (hd_burn.c) as ice: attribute rv at x (steps of 8 pixels), y
+uint8 TileDetect_FrozenWaterAttr(uint8 rv, uint16 x, uint16 y);
 void TileDetect_Movement_Y(uint16 direction);
 void TileDetect_Movement_X(uint16 direction);
 void TileDetect_Movement_VerticalSlopes(uint16_t direction);

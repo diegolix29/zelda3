@@ -62,7 +62,7 @@ static const MovableBlockData kBlockTo[3] = { { 0xbe, 0x165a }, { 0xbe, 0x165e }
 static IceRoom *FindRoom(int room) {
   if (!IceGbaOn())
     return NULL;
-  for (int i = 0; i < 2; i++)
+  for (int i = 0; i < (int)countof(g_ice_rooms); i++)
     if (g_ice_rooms[i].room == room)
       return &g_ice_rooms[i];
   return NULL;
@@ -126,21 +126,23 @@ static void BuildRoom(IceRoom *r) {
   r->built = true;
 }
 
-const uint8 *HdIce_RoomLayout(int room, const uint8 *p) {
+// The changed room (built the first time), NULL if the room is not changed
+static IceRoom *BuiltRoom(int room) {
   IceRoom *r = FindRoom(room);
-  if (!r)
-    return p;
-  if (!r->built)
+  if (r && !r->built)
     BuildRoom(r);
-  return r->layout;
+  return r;
+}
+
+const uint8 *HdIce_RoomLayout(int room, const uint8 *p) {
+  IceRoom *r = BuiltRoom(room);
+  return r ? r->layout : p;
 }
 
 const uint16 *HdIce_DoorInfo(int room, const uint16 *p) {
-  IceRoom *r = FindRoom(room);
+  IceRoom *r = BuiltRoom(room);
   if (!r)
     return p;
-  if (!r->built)
-    BuildRoom(r);
   return (const uint16 *)(r->layout + r->door_offs);
 }
 
@@ -158,9 +160,11 @@ const uint8 *HdIce_Sprites(int room, const uint8 *p) {
   if (room != 0xbe || !IceGbaOn())
     return p;
   int n = 1;
-  while (p[n] != 0xff && n + 4 < (int)sizeof(spr))
+  while (p[n] != 0xff && n + 3 < (int)sizeof(spr))
     n += 3;
-  memcpy(spr, p, n + 1);
+  // the end mark is written, also when a long list is cut
+  memcpy(spr, p, n);
+  spr[n] = 0xff;
   // lo Stalfos Cavaliere una casella piu' in basso
   for (int i = 1; i < n; i += 3)
     if (spr[i] == 0x16 && spr[i + 1] == 0x18 && spr[i + 2] == 0x91)

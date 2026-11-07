@@ -14,6 +14,12 @@ static uint16 Map16At(uint16 x, uint16 y, uint16 t) {
   return w >= 0 ? w : overworld_tileattr[t >> 1];
 }
 
+// Outdoor tile attribute rv at x (in steps of 8 pixels), y: frozen water
+// (hd_burn.c) becomes ice (0x0f)
+uint8 TileDetect_FrozenWaterAttr(uint8 rv, uint16 x, uint16 y) {
+  return (rv == 0x08 || rv == 0x09) && HdBurn_IsFrozenAt(x << 3, y) ? 0x0f : rv;
+}
+
 static const uint8 kDetectTiles_tab0[] = { 8, 24, 0, 15 };
 static const uint8 kDetectTiles_tab1[] = { 0, 0, 8, 8 };
 static const uint8 kDetectTiles_tab2[] = { 8, 8, 16, 16 };
@@ -44,8 +50,7 @@ uint8 Overworld_GetTileAttributeAtLocation(uint16 x, uint16 y) {  // 80882e
   uint8 rv = GetMap8toTileAttr()[t & 0x1ff];
   // acqua congelata (hd_burn.c): ghiaccio come quello del Palazzo del
   // Ghiaccio, per Link, i nemici e gli oggetti
-  if ((rv == 0x08 || rv == 0x09) && HdBurn_IsFrozenAt(x << 3, y))
-    rv = 0x0f;
+  rv = TileDetect_FrozenWaterAttr(rv, x, y);
   // Correzioni minori GBA: scale della Torre di Ganon (area 0x43). Sotto il
   // bordo del balcone le caselle della scalinata (map8 0x12e/0x13e/0x13f, x
   // 2288-2319, y 104-127) sono pavimento: Link, coperto dal balcone, ci andava

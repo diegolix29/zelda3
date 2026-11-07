@@ -4,13 +4,9 @@
 #define ZELDA3_HD_FX_H_
 
 #include "types.h"
+#include "snes/ppu.h"
+#include "config.h"
 
-extern bool g_fx_heat, g_fx_window_rays, g_fx_item_glow, g_fx_rain;
-extern bool g_fx_menu_blur, g_fx_sprite_shadows, g_fx_soft_iris;
-// Bagliori magici bianchi sopra i vortici di teletrasporto ("Distingui vortici da Zora")
-extern bool g_fx_whirlpool;
-// Nebbia del Bosco Perduto migliorata (prima della Spada Suprema)
-extern bool g_fx_fog;
 // Frame di gioco dall'avvio (per le animazioni: frame_counter si azzera ogni 256)
 extern uint32 g_fx_frames;
 
@@ -49,6 +45,38 @@ static inline uint32 HdFx_DimRgb(uint32 c, int bri) {
   return (c & 0xff000000) | r << 16 | g << 8 | b;
 }
 
+// Scales every channel of c by k (truncating), keeping the layer
+static inline uint32 HdFx_ScaleRgb(uint32 c, float k) {
+  return (c & 0xff000000) | (int)(((c >> 16) & 0xff) * k) << 16 |
+         (int)(((c >> 8) & 0xff) * k) << 8 | (int)((c & 0xff) * k);
+}
+
+// Luminance weight of a 0xRRGGBB color: r * 3 + g * 6 + b
+static inline int HdFx_Luma(uint32 c) {
+  return (int)(c >> 16 & 0xff) * 3 + (int)(c >> 8 & 0xff) * 6 + (int)(c & 0xff);
+}
+
+// Red-orange like lava (not water or anything else)
+static inline bool HdFx_IsLavaRgb(int r, int g, int b) {
+  return r > 120 && r > g + 30 && b < r / 2;
+}
+
+// HUD pixel (layer 2) or sprite pixel (layers 4 and 6)
+static inline bool HdFx_IsHudOrSprite(uint32 c) {
+  uint32 l = c >> 24;
+  return l == 2 || l == 4 || l == 6;
+}
+
+static inline float HdFx_Clamp01(float v) {
+  return v < 0 ? 0 : v > 1 ? 1 : v;
+}
+
+// Smoothstep of v from a to b (0-1)
+static inline float HdFx_Smooth(float a, float b, float v) {
+  float t = HdFx_Clamp01((v - a) / (b - a));
+  return t * t * (3 - 2 * t);
+}
+
 // Colore (0-3) del pixel (riga 0-15, colonna 0-7) del simbolo c nel font dei
 // dialoghi del gioco (blocco 0 di dialogue_font_blk: due tile 2bpp una sopra
 // l'altra, a 16 tile di distanza)
@@ -71,6 +99,18 @@ static inline int HdFx_Pixel4bpp(uint16 p01, uint16 p23, int bit) {
   return (p01 >> bit & 1) | (p01 >> (8 + bit) & 1) << 1 | (p23 >> bit & 1) << 2 | (p23 >> (8 + bit) & 1) << 3;
 }
 
+// Color (palette * 16 + index, 0 = transparent) of the 4bpp layer bg at map
+// point (px, py), as the PPU draws it (tile flips included)
+static inline int HdFx_BgTilePixel(const Ppu *ppu, const BgLayer *bg, int px, int py) {
+  px &= 0x3ff, py &= 0x3ff;
+  uint16 e = ppu->vram[HdFx_VramMapAdr(bg, px >> 3 & 63, py >> 3 & 63) & 0x7fff];
+  int row = (e & 0x8000) ? 7 - (py & 7) : (py & 7);
+  int bit = (e & 0x4000) ? (px & 7) : 7 - (px & 7);
+  int base = bg->tileAdr + (e & 0x3ff) * 16 + row;
+  int v = HdFx_Pixel4bpp(ppu->vram[base & 0x7fff], ppu->vram[(base + 8) & 0x7fff], bit);
+  return v ? (e >> 10 & 7) * 16 + v : 0;
+}
+
 // Prima dell'illuminazione: riconosce la lava e fa tremolare l'aria sopra
 void HdFx_BeforeLight(uint8 *pixels, int pitch, int width, int height, int bias_x, int bias_y);
 // Dopo l'illuminazione: particelle, raggi e bagliori, pioggia e lampi
@@ -83,20 +123,29 @@ void HdFx_AfterLight(uint8 *pixels, int pitch, int width, int height, int bias_x
 int HdFx_SceneModule(void);
 // Morte di Link con il mondo ancora (o di nuovo) sullo schermo
 bool HdFx_DeathShowsWorld(void);
+bool HdFx_DungeonRoomRuns(void);
 // Si gioca all'aperto (9/0): niente menu, transizioni o scene
 bool HdFx_LiveOverworld(void);
 // Una partita e' caricata: non titolo, scelta del file o dimostrazione
 bool HdFx_GameLoaded(void);
 // Labirinto in una fase diversa dal gioco (passaggi fra stanze, scale...)
 bool HdFx_DungeonPassing(void);
+// Stanza le cui caselle sono in dung_bg2/dung_bg1 (e torce, oggetti): nei
+// passaggi (scale, scorrimenti, buche) il gioco cambia dungeon_room_index
+// prima di caricare la stanza nuova, e sullo schermo resta quella di prima.
+// Unica regola per tutto cio' che legge le caselle della stanza (luci, raggi,
+// buche, acqua): non usare dungeon_room_index per questo
+int HdFx_LoadedRoom(void);
+// Scritta a fine Dungeon_LoadRoom (dungeon.c); -1 = non si sa
+extern int g_hd_loaded_room;
 // Scorrimento verso un'altra stanza (7/2) o l'altra meta' della stanza (7/1)
 bool HdFx_RoomScroll(void);
 // Si vede il gioco (HdFx_SceneModule 7, 9 o 11): unico controllo per acqua,
 // luci, particelle e ombre. *mod_out: il modulo della scena
 bool HdFx_InGameplay(int *mod_out);
+int HdFx_EndingScene(void);
 // Marca i pixel d'acqua (layer 7) per lo shader
 void HdFx_MarkWater(uint8 *pixels, int pitch, int width, int height, int bias_x, int bias_y);
-bool HdFx_FloodWindowShows(int sx, int sy);
 // Disegna l'acqua ghiacciata dalla Bacchetta del Ghiaccio (hd_burn.c), sopra
 // l'acqua di hd_water.c
 void HdFx_FrozenWater(uint8 *pixels, int pitch, int width, int height, int bias_x, int bias_y);
@@ -110,10 +159,12 @@ bool HdFx_SunnyOutdoors(void);
 void HdFx_MenuBlur(uint8 *pixels, int pitch, int width, int height);
 // Sfocatura in corso: lo shader non si applica finche' c'e'
 bool HdFx_MenuBlurActive(void);
+// How much of the menu blur is on screen (0 = none, 1 = full)
+float HdFx_MenuBlurAmount(void);
 // Cerchio di transizione (entrate e uscite) morbido e su tutta la larghezza
 typedef struct Ppu Ppu;
 // Blocchi spinti e lapidi in movimento: le n voci OAM da oam in poi si
-// disegnano con il layer del fondale (Ppu.objAsBg), lo shader le dipinge
+// disegnano con il layer kPpuLayerObjAsBg (Ppu.objAsBg), lo shader le dipinge
 void HdFx_OamAsBackground(const void *oam, int n);
 void HdFx_AsBgBeforeRender(Ppu *ppu);
 void HdFx_IrisBeforeRender(Ppu *ppu);
@@ -135,7 +186,7 @@ void HdFx_FadePost(uint8 *pixels, int pitch, int width, int height);
 // Mosaico del gioco anche sulle aggiunte HD (stessi quadrati della PPU)
 void HdFx_Mosaic(uint8 *pixels, int pitch, int width, int height);
 // Cielo e nuvole dietro la Piramide e sul Monte della Morte: lo shader non li dipinge
-void HdFx_MarkBackdrop(uint8 *pixels, int pitch, int width, int height);
+void HdFx_MarkBackdrop(uint8 *pixels, int pitch, int width, int height, int bias_x, int bias_y);
 // Ombre morbide sotto Link e i nemici che camminano a terra
 void HdFx_SpriteShadows(uint8 *pixels, int pitch, int width, int height);
 // Prima e dopo il disegno della PPU: sceglie gli sprite che fanno ombra e
@@ -165,5 +216,13 @@ bool HdFx_IsRainingOutdoors(void);
 // e il suo colore v e' nuvola
 bool HdFx_IsCloudTile(uint16 e);
 bool HdFx_IsCloudColor(uint16 e, int v);
+
+// After loading a quick save (zelda_rtl.c LoadSnesState)
+void HdFx_ResetAfterLoad(void);
+
+// Screen brightness of the frame being drawn (INIDISP, 0 = black or forced
+// blank): the PPU and the HD effects draw at 15 and the picture is dimmed at
+// the end (ZeldaDrawPpuFrame). For decisions, not for colours
+extern int g_hd_screen_bri;
 
 #endif  // ZELDA3_HD_FX_H_

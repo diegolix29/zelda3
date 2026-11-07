@@ -25,6 +25,7 @@
 #include "zelda_rtl.h"
 #include "variables.h"
 #include "dungeon.h"
+#include "assets.h"
 #include "load_gfx.h"
 #include "snes/ppu.h"
 #include "sprite.h"
@@ -33,7 +34,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-bool g_fx_pit;
 
 enum {
   kRoomPx = 512,
@@ -41,10 +41,13 @@ enum {
   kEntries = 2,
 };
 
-// sfocatura della stanza di sotto, raggio in pixel (anche con la virgola:
-// 1,5 = pesi 0,5 1 1 1 0,5); 0 = nitida. L'utente l'ha provata a 2 (due
-// passate), 1, 0 e 1,5 e ha scelto nitida: la stanza si deve riconoscere
-static const float kBlurRadius = 0.0f;
+// The room below is drawn sharp (no blur): the user tried radius 2, 1, 0 and
+// 1.5 and chose sharp, the room must be recognisable. The removed blur was a
+// separable box blur run once per axis (rows img -> tmp, then columns tmp ->
+// img, edges clamped) with a float radius R: integer part ri = (int)R taps
+// at weight 256, the two taps just beyond (+-(ri+1)) at weight
+// wf = (R - ri) * 256 (R = 1.5: weights 0.5 1 1 1 0.5), sum divided by
+// (2 * ri + 1) * 256 + 2 * wf; it needed a second 512x512 buffer.
 static const float kDepth = 0.12f;     // quanto la stanza di sotto e' rimpicciolita
 static const float kShadeTop = 18.0f;  // ombra del bordo in alto (pixel)
 static const float kShadeSide = 10.0f; // ombra dei bordi ai lati e in basso
@@ -63,15 +66,14 @@ typedef struct PitRoom {
 
 static PitRoom g_rooms[kEntries] = { { -1, -1 }, { -1, -1 } };
 static uint32 g_use;
-static uint32 *g_tmp;
-static uint8 g_saved_ram[0x20000];
-// stanza le cui caselle sono in dung_bg2/dung_bg1 (HdPit_RoomLoaded), -1 = non si sa
-static int g_loaded_room = -1;
-static bool g_building;
-static uint16 g_saved_vram[0x8000];
 
 static inline uint32 Pack(int r, int g, int b) {
   return (uint32)r << 16 | (uint32)g << 8 | (uint32)b;
+}
+
+// Screen brightness (INIDISP) clamped to 0-15
+static inline int ScreenBright(const Ppu *ppu) {
+  return ppu->brightness > 15 ? 15 : ppu->brightness;
 }
 
 // Disegna gli strati della stanza caricata in questo momento (dung_bg2 e
@@ -121,8 +123,6 @@ static void DrawLoadedRoom(uint32 *dst, const uint16 *pal, int bg2_prop) {
 // statue spostabili, interruttori di cristallo e a pressione, respingenti.
 // Lampade, torce, vasi, scrigni e statue decorative sono gia' caselle dello
 // sfondo. I nemici no: fermi in una posa sembrerebbero strani.
-
-extern uint8 g_oam_real_f0[128];
 
 static bool IsStillObject(uint8 type) {
   return type == 0x1c || type == 0x1e || type == 0x21 || type == 0x93;
@@ -201,64 +201,38 @@ static void DrawStillObjects(uint32 *dst, const uint16 *pal, int room) {
   memcpy(g_oam_real_f0, real_f0, sizeof(real_f0));
 }
 
-// Media mobile in orizzontale e in verticale, una volta: pixel entro il
-// raggio con peso 1, quello appena oltre con la parte decimale del raggio
-// (raggio 1,5: 0,5 1 1 1 0,5 su 4). La stanza resta riconoscibile
-static void BoxBlur(uint32 *img, uint32 *tmp) {
-  int ri = (int)kBlurRadius;
-  int wf = (int)((kBlurRadius - ri) * 256 + 0.5f);  // peso dei pixel di bordo, su 256
-  int reach = ri + (wf > 0), total = (2 * ri + 1) * 256 + 2 * wf;
-  if (reach == 0)
-    return;
-  for (int pass = 0; pass < 2; pass++) {
-    // passo 0: righe da img a tmp; passo 1: colonne da tmp a img
-    const uint32 *src = pass ? tmp : img;
-    uint32 *dst = pass ? img : tmp;
-    int step = pass ? kRoomPx : 1;
-    for (int y = 0; y < kRoomPx; y++) {
-      for (int x = 0; x < kRoomPx; x++) {
-        int pos = pass ? y : x;
-        const uint32 *base = src + (pass ? x : y * kRoomPx);
-        int r = 0, g = 0, b = 0;
-        for (int k = -reach; k <= reach; k++) {
-          int p = pos + k < 0 ? 0 : pos + k >= kRoomPx ? kRoomPx - 1 : pos + k;
-          int w = (k < -ri || k > ri) ? wf : 256;
-          uint32 c = base[p * step];
-          r += (c >> 16 & 0xff) * w, g += (c >> 8 & 0xff) * w, b += (c & 0xff) * w;
-        }
-        dst[y * kRoomPx + x] = Pack(r / total, g / total, b / total);
-      }
-    }
-  }
-}
-
 // Lontananza: piu' scura e un po' piu' fredda (aria in ombra)
 static void Darken(uint32 *img) {
   for (int i = 0; i < kRoomPx * kRoomPx; i++) {
     uint32 c = img[i];
     int r = c >> 16 & 0xff, g = c >> 8 & 0xff, b = c & 0xff;
     int l = (r * 77 + g * 150 + b * 29) >> 8;
-    // un quarto verso il grigio, poi circa due terzi della luce
+    // un quarto verso il grigio, poi circa tre quarti della luce (a bit
+    // lighter than the first two thirds, asked by the user)
     r = (r * 3 + l) >> 2, g = (g * 3 + l) >> 2, b = (b * 3 + l) >> 2;
-    img[i] = Pack(r * 62 / 100, g * 64 / 100, b * 72 / 100 + 4);
+    img[i] = Pack(r * 74 / 100, g * 76 / 100, b * 84 / 100 + 4);
   }
 }
 
-static bool BuildImage(uint32 *img, int dest) {
+static void BuildImage(uint32 *img, int dest) {
   Ppu *ppu = g_zenv.ppu;
   static uint16 pal[256];
-  memcpy(g_saved_ram, g_ram, sizeof(g_saved_ram));
-  memcpy(g_saved_vram, ppu->vram, sizeof(g_saved_vram));
+  HdWorld_SaveRamVram();
   // palette 0 e 1 (HUD, usate anche da qualche casella) restano quelle di ora
   memcpy(pal, main_palette_buffer, sizeof(pal));
 
   // come entrando nella stanza (vedi anche ztest ZTEST_ROOMDUMP)
   dungeon_room_index = dest;
-  g_building = true;
+  int loaded = g_hd_loaded_room;  // la stanza vera resta quella caricata
   Dungeon_LoadRoom();
-  g_building = false;
+  g_hd_loaded_room = loaded;
   int bg2_prop = dung_hdr_bg2_properties;
   InitializeTilesets();
+  // caselle animate (punte, ecc.: 0x1b0-0x1cf, VRAM 0x3b00): InitializeTilesets
+  // ci mette la grafica fissa del tileset (quadrati arancioni) e il gioco le
+  // copia a ogni giro dalla RAM (nmi.c). Qui il primo fotogramma, fermo
+  DecompressAnimatedDungeonTiles(kDungAnimatedTiles[main_tile_theme_index]);
+  memcpy(&ppu->vram[0x3b00], &g_ram[0xa680], 0x400);
   overworld_palette_aux_or_main = 0;
   Palette_Load_DungeonSet();
   memcpy(pal + 0x20, aux_palette_buffer + 0x20, (0x80 - 0x20) * sizeof(uint16));
@@ -270,12 +244,9 @@ static bool BuildImage(uint32 *img, int dest) {
   memcpy(pal + 0xe1, aux_palette_buffer + 0xe1, 7 * sizeof(uint16));
   DrawStillObjects(img, pal, dest);
 
-  memcpy(g_ram, g_saved_ram, sizeof(g_saved_ram));
-  memcpy(ppu->vram, g_saved_vram, sizeof(g_saved_vram));
+  HdWorld_RestoreRamVram();
 
-  BoxBlur(img, g_tmp);
   Darken(img);
-  return true;
 }
 
 // Stanza di sotto delle buche della stanza attuale, -1 se le buche non
@@ -287,9 +258,16 @@ static int PitDestination(void) {
   return dest;
 }
 
-void HdPit_RoomLoaded(void) {
-  if (!g_building)
-    g_loaded_room = dungeon_room_index;
+// The same for any room, from its header in the ROM (also for a room that is
+// not loaded, such as the one next to it during a passage)
+static bool RoomHasRoomBelow(int room) {
+  int dest = GetRoomHeaderPtr(room)[9];
+  if (dest == 0 || dest == (room & 0xff))
+    return false;
+  for (int i = kDungeonPitsHurtPlayer_SIZE / 2 - 1; i >= 0; i--)
+    if (kDungeonPitsHurtPlayer[i] == room)
+      return false;
+  return true;
 }
 
 // Mappa delle buche della stanza attuale; falso se non ce ne sono. A gioco
@@ -300,7 +278,7 @@ void HdPit_RoomLoaded(void) {
 // (Dungeon_LoadBasicAttribute_full), quando sono gia' della stanza nuova
 static bool ReadPitMap(uint8 *pit, bool *ok) {
   bool any = false, stable = submodule_index == 0;
-  *ok = stable || g_loaded_room == dungeon_room_index;
+  *ok = HdFx_LoadedRoom() == dungeon_room_index;
   if (!*ok)
     return false;
   for (int i = 0; i < 64 * 64; i++) {
@@ -334,13 +312,14 @@ static bool IsBlack15(uint16 c) {
 
 // Colori del "vuoto" della stanza e buche in cui si vede la stanza di sotto.
 // Solo le buche grandi, con almeno una casella interna (3x3 caselle, 24
-// pixel): i fori piccoli sono passaggi (es. gli angoli della stanza 0x77 di
-// Hera, 2x2 su BG1) e restano come nell'originale; con l'ombra dei bordi
-// diventavano quadrati neri. I colori vengono dalle caselle interne di tutta
-// la stanza (non solo quelle sullo schermo: niente cambi quando una buca entra
-// dal bordo). Se sono tutti neri il gioco disegna il buio (es. Palazzo della
-// Palude Nebbiosa, stanza 0x97, anche se sotto c'e' una stanza): allora la
-// stanza di sotto non si mostra
+// pixel) or at least 6 cells with a 2x2 block (a pit 2 cells wide, room 0x17
+// of Ganon's Tower): i fori piccoli sono passaggi (es. gli angoli della
+// stanza 0x77 di Hera, 2x2 su BG1) e restano come nell'originale; con l'ombra
+// dei bordi diventavano quadrati neri. I colori vengono dalle caselle
+// interne di tutta la stanza (non solo quelle sullo schermo: niente cambi
+// quando una buca entra dal bordo). Se sono tutti neri il gioco disegna il
+// buio (es. Palazzo della Palude Nebbiosa, stanza 0x97, anche se sotto c'e'
+// una stanza): allora la stanza di sotto non si mostra
 static void ComputeHoles(PitRoom *pr) {
   Ppu *ppu = g_zenv.ppu;
   memset(pr->hole, 0, sizeof(pr->hole));
@@ -354,11 +333,12 @@ static void ComputeHoles(PitRoom *pr) {
     if (!pr->pit[start] || seen[start])
       continue;
     int head = 0, tail = 0;
-    bool big = false;
+    bool big = false, square = false;
     queue[tail++] = start, seen[start] = 1;
     while (head < tail) {
       int i = queue[head++], cx = i & 63, cy = i >> 6;
       big |= IsInnerPitCell(pr, cx, cy);
+      square |= IsPitCell(pr, cx + 1, cy) && IsPitCell(pr, cx, cy + 1) && IsPitCell(pr, cx + 1, cy + 1);
       static const int8 kD[4][2] = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } };
       for (int d = 0; d < 4; d++) {
         int x = cx + kD[d][0], y = cy + kD[d][1];
@@ -369,11 +349,13 @@ static void ComputeHoles(PitRoom *pr) {
           seen[j] = 1, queue[tail++] = j;
       }
     }
-    if (big)
+    if (big || (square && tail >= 6))
       for (int q = 0; q < tail; q++)
         pr->show[queue[q]] = 1;
   }
   bool any = false;
+  static uint32 count[2][128];  // pixels of each colour inside the pits
+  memset(count, 0, sizeof(count));
   for (int n = 0; n < 2; n++) {
     const uint16 *map = n ? dung_bg2 : dung_bg1;
     uint16 chr = ppu->bgLayer[n].tileAdr;
@@ -386,21 +368,39 @@ static void ComputeHoles(PitRoom *pr) {
         for (int row = 0; row < 8; row++)
           for (int bit = 0; bit < 8; bit++) {
             int v = HdFx_Pixel4bpp(t[row], t[row + 8], bit);
-            pr->hole[n][v ? (e >> 10 & 7) * 16 + v : 0] = 1, any = true;
+            int c = v ? (e >> 10 & 7) * 16 + v : 0;
+            pr->hole[n][c] = 1, count[n][c]++, any = true;
           }
       }
     }
   }
+  // In a passage (falling in, a warp) the room fades in from black: the
+  // colours are the target ones, already loaded by the game (aux), or the
+  // holes looked black and the room below appeared only on landing
+  const uint16 *pal = submodule_index == 0 ? main_palette_buffer : aux_palette_buffer;
   bool black = true;
   for (int n = 0; n < 2; n++)
     for (int c = 0; c < 128; c++)
-      if (pr->hole[n][c] && !IsBlack15(main_palette_buffer[c]))
+      if (pr->hole[n][c] && !IsBlack15(pal[c]))
         black = false;
   // Correzioni minori GBA: nel Palazzo della Palude Nebbiosa (0x0E) il GBA
   // disegna il pavimento anche nelle buche nere (stanze 0x97 ecc.): qui si
   // vede la stanza di sotto come nelle altre buche; senza la correzione restano nere
   if (black && cur_palace_index_x2 == 0x0e && (enhanced_features0 & kFeatures0_GbaMinorFixes))
     black = false;
+  // Pits drawn as lava (Turtle Rock, room 0x14): the game shows lava, not a
+  // void, so the room below stays hidden like with black pits. Transparent
+  // pixels (colour 0, often a whole layer) do not count
+  uint32 lava = 0, total = 0;
+  for (int n = 0; n < 2; n++)
+    for (int c = 1; c < 128; c++) {
+      uint16 p = pal[c];
+      total += count[n][c];
+      if (HdFx_IsLavaRgb((p & 31) << 3, (p >> 5 & 31) << 3, (p >> 10 & 31) << 3))
+        lava += count[n][c];
+    }
+  if (lava * 2 > total)
+    black = true;
   pr->black = !any || black;
   pr->holes_known = true;
 }
@@ -419,15 +419,21 @@ static void ForgetAll(void) {
 
 static void SkyViewBeforeRender(void);
 
+// A room is on the screen (also Agahnim's room while Ganon leaves him, when
+// the game already says outdoors: HdFx_DungeonRoomRuns)
+static bool RoomIndoors(void) {
+  return player_is_indoors || HdFx_DungeonRoomRuns();
+}
+
 static bool SceneOn(void) {
   // labirinto (anche scorrimenti, scale e la dissolvenza della caduta) e
   // dialoghi; mai la mappa del mondo in Mode 7
-  return g_fx_pit && player_is_indoors && g_zenv.ppu->mode == 1 &&
-         (main_module_index == 7 || main_module_index == 14);
+  return g_config.fx_pit && RoomIndoors() && g_zenv.ppu->mode == 1 &&
+         (HdFx_DungeonRoomRuns() || main_module_index == 14);
 }
 
 void HdPit_BeforeRender(void) {
-  if (!g_fx_pit || !player_is_indoors) {
+  if (!g_config.fx_pit || !RoomIndoors()) {
     ForgetAll();
     return;
   }
@@ -435,13 +441,14 @@ void HdPit_BeforeRender(void) {
   // e' pronta prima che si veda. Se la si legge a meta' (attributi o
   // intestazione non ancora aggiornati) si rifa' al fotogramma dopo; i pixel
   // della stanza vecchia usano la sua voce, che qui non si tocca
-  if (!SceneOn() || main_module_index != 7)
+  // (SceneOn() reduced: g_config.fx_pit and the room were checked above)
+  if (g_zenv.ppu->mode != 1 || !HdFx_DungeonRoomRuns())
     return;
   SkyViewBeforeRender();
   int room = dungeon_room_index, dest = PitDestination();
   PitRoom *pr = FindRoom(room);
   // stanza nuova non ancora caricata: si aspetta (niente voce a meta')
-  if (!pr && submodule_index != 0 && g_loaded_room != room)
+  if (!pr && HdFx_LoadedRoom() != room)
     return;
   if (!pr) {
     pr = &g_rooms[0];
@@ -458,7 +465,7 @@ void HdPit_BeforeRender(void) {
   if (!ok)
     return;
   // colori del vuoto a gioco fermo (nelle dissolvenze le palette cambiano)
-  if (dest >= 0 && (submodule_index == 0 || !pr->holes_known))
+  if (dest >= 0 && (submodule_index == 0 || !pr->holes_known || pr->black))
     ComputeHoles(pr);
   if (pr->black)
     dest = -1;  // buche nere: niente stanza di sotto (e niente immagine)
@@ -469,10 +476,10 @@ void HdPit_BeforeRender(void) {
     return;
   if (!pr->img)
     pr->img = malloc(kRoomPx * kRoomPx * sizeof(uint32));
-  if (!g_tmp)
-    g_tmp = malloc(kRoomPx * kRoomPx * sizeof(uint32));
-  if (pr->img && g_tmp && BuildImage(pr->img, dest))
+  if (pr->img) {
+    BuildImage(pr->img, dest);
     pr->dest = dest;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -548,7 +555,7 @@ static void SkyViewBeforeRender(void) {
   int room = dungeon_room_index;
   const SkyView *v = FindSkyView(room);
   // nei passaggi solo a stanza nuova gia' caricata (come le buche)
-  if (!v || room == g_view_room || (submodule_index != 0 && g_loaded_room != room))
+  if (!v || room == g_view_room || HdFx_LoadedRoom() != room)
     return;
   int w = (int)(v->w / v->zoom), h = (int)(v->h / v->zoom);
   uint32 *img = malloc((size_t)w * h * sizeof(uint32));
@@ -586,7 +593,7 @@ static void SkyViewApply(uint8 *pixels, int pitch, int width, int height) {
   if (g_view_room < 0 || !SceneOn())
     return;
   Ppu *ppu = g_zenv.ppu;
-  int bright = ppu->brightness > 15 ? 15 : ppu->brightness;
+  int bright = ScreenBright(ppu);
   if (!bright)
     return;
   int ext = ppu->extraLeftRight;
@@ -598,13 +605,24 @@ static void SkyViewApply(uint8 *pixels, int pitch, int width, int height) {
   // la vista resta dentro l'immagine (in cima al mondo non c'e' niente sopra)
   // Lampi (e dissolvenze): il gioco cambia il colore del vuoto nella
   // palette, nella seconda stanza dal nero al rosso per qualche fotogramma.
-  // La differenza dal colore normale si aggiunge alla vista, che si accende
-  // insieme al cielo come faceva il vuoto
-  int delta[2][3];
+  // The view moves towards the current void color by how far that color went
+  // from its normal one towards white or black (mean of the channels that
+  // changed): it flashes with the sky as the void did, and in the fade to
+  // white after the first Agahnim it turns white (adding the difference
+  // left the land yellow: the void's blue was already almost full)
+  int target[2][3];
+  float t[2];
   for (int i = 0; i < 2; i++) {
     uint32 cur = HdFx_Bgr15ToRgb(ppu->cgram[i ? kVoidColorB : kVoidColorA]);
-    for (int ch = 0; ch < 3; ch++)
-      delta[i][ch] = (int)(cur >> (16 - 8 * ch) & 0xff) - (int)(g_view_normal >> (16 - 8 * ch) & 0xff);
+    float sum = 0;
+    int nch = 0;
+    for (int ch = 0; ch < 3; ch++) {
+      int a = cur >> (16 - 8 * ch) & 0xff, b = g_view_normal >> (16 - 8 * ch) & 0xff;
+      target[i][ch] = a;
+      if (a != b)
+        sum += (float)(a - b) / ((a > b ? 255 : 0) - b), nch++;
+    }
+    t[i] = nch ? sum / nch : 0.0f;
   }
   ox = ox > g_view_w - width ? g_view_w - width : ox, ox = ox < 0 ? 0 : ox;
   oy = oy > g_view_h - height ? g_view_h - height : oy, oy = oy < 0 ? 0 : oy;
@@ -624,11 +642,11 @@ static void SkyViewApply(uint8 *pixels, int pitch, int width, int height) {
       ix = ix < 0 ? 0 : ix >= g_view_w ? g_view_w - 1 : ix;
       iy = iy < 0 ? 0 : iy >= g_view_h ? g_view_h - 1 : iy;
       uint32 s = g_view_img[iy * g_view_w + ix];
-      const int *d = delta[c == kVoidColorB];
-      int r = (int)(s >> 16 & 0xff) + d[0], g = (int)(s >> 8 & 0xff) + d[1], b = (int)(s & 0xff) + d[2];
-      r = r < 0 ? 0 : r > 255 ? 255 : r;
-      g = g < 0 ? 0 : g > 255 ? 255 : g;
-      b = b < 0 ? 0 : b > 255 ? 255 : b;
+      int i = c == kVoidColorB;
+      const int *d = target[i];
+      float k = t[i];
+      int r = (int)(s >> 16 & 0xff), g = (int)(s >> 8 & 0xff), b = (int)(s & 0xff);
+      r += (int)((d[0] - r) * k), g += (int)((d[1] - g) * k), b += (int)((d[2] - b) * k);
       // strato 3 (fondale, come il cielo della montagna): lo shader Four
       // Swords non lo dipinge
       row[x] = 3u << 24 | Pack(r * bright / 15, g * bright / 15, b * bright / 15);
@@ -647,21 +665,8 @@ static inline void WorldAt(int n, int x, int y, int ext, int *wx, int *wy) {
 // Punto del fondale (strato n) sotto il pixel (x, y) dello schermo, colore
 // (palette*16 + indice, 0 se trasparente) come lo disegna la PPU
 static int BgColorAt(int n, int x, int y, int ext, int *wx, int *wy) {
-  Ppu *ppu = g_zenv.ppu;
-  const BgLayer *bg = &ppu->bgLayer[n];
-  int hofs = n ? BG2HOFS_copy : BG1HOFS_copy, vofs = n ? BG2VOFS_copy : BG1VOFS_copy;
-  // la riga 0 dello schermo e' la riga 1 del fondale (come HdWorld_Composite)
-  int px = (x - ext + hofs + ppu->bgBiasX) & 0xffff, py = (y + 1 + vofs + ppu->bgBiasY) & 0xffff;
-  *wx = px, *wy = py;
-  px &= 0x3ff, py &= 0x3ff;
-  int tx = px >> 3 & 63, ty = py >> 3 & 63;
-  uint16 adr = HdFx_VramMapAdr(bg, tx, ty);
-  uint16 e = ppu->vram[adr & 0x7fff];
-  int row = (e & 0x8000) ? 7 - (py & 7) : (py & 7);
-  int bit = (e & 0x4000) ? (px & 7) : 7 - (px & 7);
-  const uint16 *t = &ppu->vram[(bg->tileAdr + (e & 0x3ff) * 16) & 0x7fff];
-  int v = HdFx_Pixel4bpp(t[row], t[row + 8], bit);
-  return v ? (e >> 10 & 7) * 16 + v : 0;
+  WorldAt(n, x, y, ext, wx, wy);
+  return HdFx_BgTilePixel(g_zenv.ppu, &g_zenv.ppu->bgLayer[n], *wx, *wy);
 }
 
 // Strato del pixel per le buche: l'interno delle buche e' spesso trasparente
@@ -698,19 +703,54 @@ static inline float Clamp01(float v) {
   return v < 0 ? 0 : v > 1 ? 1 : v;
 }
 
+// World point the room below shrinks towards (screen centre, depth effect)
+static void DepthCenter(const Ppu *ppu, int height, int *cxw, int *cyw) {
+  *cxw = BG2HOFS_copy + ppu->bgBiasX + 128;
+  *cyw = BG2VOFS_copy + ppu->bgBiasY + 1 + height / 2;
+}
+
+// Pixel of the room below seen at world point (wx, wy), with the depth effect
+static uint32 BelowPixel(const PitRoom *pr, int wx, int wy, int cxw, int cyw) {
+  int lx = wx & 0x1ff, ly = wy & 0x1ff;
+  int sx = lx - (int)((wx - cxw) * kDepth), sy = ly - (int)((wy - cyw) * kDepth);
+  sx = sx < 0 ? 0 : sx >= kRoomPx ? kRoomPx - 1 : sx;
+  sy = sy < 0 ? 0 : sy >= kRoomPx ? kRoomPx - 1 : sy;
+  return pr->img[sy * kRoomPx + sx];
+}
+
 // Correzioni minori GBA: nel Palazzo della Palude Nebbiosa la casella vuota
 // 0x1EC di BG1 (sotto le buche e sotto la grata del pavimento) lascia vedere
 // il fondale nero: errore dello SNES. Il GBA ci mette uno strato con un
 // intreccio 8x8 col colore 4/10 della palette (0x2545 nella Palude, uguale al
 // GBA) che scorre a meta' velocita' della telecamera (misurato con mGBA: per
 // 16-20 pixel di scorrimento l'intreccio si sposta della meta'), cosi' sembra
-// seguire Link. Casella presa dalla cattura del GBA (stanza 0x97); la fase e'
-// quella della cattura. Si guarda la casella di BG1 nella mappa in VRAM (giusto
+// seguire Link. The weave is the game's own: the void of the Moldorm room in
+// Ganon's Tower (tile 1 of background sheet 13, colour 10 of palette 4 like
+// cgram 0x4a here), read from the ROM's graphics, with each of its bars cut
+// in two by one pixel so that it looks like the GBA's. Si guarda la casella di BG1 nella mappa in VRAM (giusto
 // anche nei passaggi e nelle dissolvenze). Con "Stanza sotto le buche" al
 // posto dell'intreccio si vede la stanza di sotto in tutto il vuoto (buchi
 // della grata compresi, piu' scura); nelle buche la disegna poi HdPit_Apply
 // con l'ombra dei bordi
-static const uint8 kGbaMireFloor[8] = { 0xd9, 0xe6, 0x67, 0x9b, 0xb9, 0x76, 0x6e, 0x9d };
+enum { kMireFloorSheet = 13, kMireFloorTile = 1 };
+// pixels (x, y) of the tile that cut the bars in two
+static const uint8 kMireFloorCut[4][2] = { {0, 7}, {7, 0}, {3, 3}, {4, 4} };
+static uint8 g_mire_floor[8];  // one bit per pixel, as the tile's rows
+static bool g_mire_floor_ready;
+
+static void BuildMireFloor(void) {
+  if (g_mire_floor_ready)
+    return;
+  static uint8 sheet[0x1000];
+  Decomp_bg(sheet, kMireFloorSheet);
+  // 3bpp tile: planes 0-1 in 16 bytes, then plane 2 in 8 (any colour = weave)
+  const uint8 *t = sheet + kMireFloorTile * 24;
+  for (int y = 0; y < 8; y++)
+    g_mire_floor[y] = t[y * 2] | t[y * 2 + 1] | t[16 + y];
+  for (int i = 0; i < 4; i++)
+    g_mire_floor[kMireFloorCut[i][1]] &= ~(0x80 >> kMireFloorCut[i][0]);
+  g_mire_floor_ready = true;
+}
 enum { kMireVoidTile = 0x1ec };
 static const float kMireBelowShade = 0.45f;
 // Scia come lo schermo del GBA: l'intreccio si mescola con le sue ultime
@@ -727,9 +767,10 @@ static void GbaMireFloor(uint8 *pixels, int pitch, int width, int height) {
       cur_palace_index_x2 != 0x0e || ppu->mode != 1 || ppu->forcedBlank ||
       (main_module_index != 7 && main_module_index != 14))
     return;
-  int bright = ppu->brightness > 15 ? 15 : ppu->brightness;
+  int bright = ScreenBright(ppu);
   if (!bright)
     return;
+  BuildMireFloor();
   uint32 c = HdFx_Bgr15ToRgb(ppu->cgram[0x4a]);
   int r = (c >> 16 & 0xff) * bright / 15, g = (c >> 8 & 0xff) * bright / 15, b = (c & 0xff) * bright / 15;
   int ext = ppu->extraLeftRight;
@@ -752,9 +793,11 @@ static void GbaMireFloor(uint8 *pixels, int pitch, int width, int height) {
     shade[i] = Pack(r * i / kMireTrail, g * i / kMireTrail, b * i / kMireTrail);
   // stanza di sotto: stessa profondita' di HdPit_Apply
   bool below = SceneOn();
-  int cxw = BG2HOFS_copy + ppu->bgBiasX + 128;
-  int cyw = BG2VOFS_copy + ppu->bgBiasY + 1 + height / 2;
+  int cxw, cyw;
+  DepthCenter(ppu, height, &cxw, &cyw);
   float k = kMireBelowShade * bright / 15.0f;
+  int last_room = -1;
+  bool last_below = false;
   for (int y = 0; y < height; y++) {
     uint32 *row = (uint32 *)(pixels + y * pitch);
     for (int x = 0; x < width; x++) {
@@ -766,16 +809,19 @@ static void GbaMireFloor(uint8 *pixels, int pitch, int width, int height) {
       uint16 adr = HdFx_VramMapAdr(bg, tx, ty);
       if ((ppu->vram[adr & 0x7fff] & 0x3ff) != kMireVoidTile)
         continue;
+      // only where something is below: in a room whose pits lead to no
+      // room the void stays black as in the game
+      int room = (dungeon_room_index & 0x100) | ((wy >> 9) & 15) << 4 | ((wx >> 9) & 15);
+      if (room != last_room)
+        last_room = room, last_below = RoomHasRoomBelow(room);
+      if (!last_below)
+        continue;
       if (below) {
         int bx, by;
         WorldAt(1, x, y, ext, &bx, &by);
         PitRoom *pr = RoomAt(bx, by);
         if (pr) {
-          int lx = bx & 0x1ff, ly = by & 0x1ff;
-          int sx = lx - (int)((bx - cxw) * kDepth), sy = ly - (int)((by - cyw) * kDepth);
-          sx = sx < 0 ? 0 : sx >= kRoomPx ? kRoomPx - 1 : sx;
-          sy = sy < 0 ? 0 : sy >= kRoomPx ? kRoomPx - 1 : sy;
-          uint32 s = pr->img[sy * kRoomPx + sx];
+          uint32 s = BelowPixel(pr, bx, by, cxw, cyw);
           row[x] = (row[x] & 0xff000000) |
                    Pack((int)((s >> 16 & 0xff) * k), (int)((s >> 8 & 0xff) * k), (int)((s & 0xff) * k));
           continue;
@@ -784,7 +830,7 @@ static void GbaMireFloor(uint8 *pixels, int pitch, int width, int height) {
       int n = 0;
       for (int i = 0; i < kMireTrail; i++) {
         int qx = x - ext + g_mire_hx[i], qy = y + 1 + g_mire_hy[i];
-        n += kGbaMireFloor[qy & 7] >> (7 - (qx & 7)) & 1;
+        n += g_mire_floor[qy & 7] >> (7 - (qx & 7)) & 1;
       }
       if (n)
         row[x] = (row[x] & 0xff000000) | shade[n];
@@ -800,9 +846,9 @@ void HdPit_Apply(uint8 *pixels, int pitch, int width, int height) {
   Ppu *ppu = g_zenv.ppu;
   int ext = ppu->extraLeftRight;
   // dissolvenze e luminosita' dello schermo come i pixel veri
-  int bright = ppu->brightness > 15 ? 15 : ppu->brightness;
-  int cxw = BG2HOFS_copy + ppu->bgBiasX + 128;
-  int cyw = BG2VOFS_copy + ppu->bgBiasY + 1 + height / 2;
+  int bright = ScreenBright(ppu);
+  int cxw, cyw;
+  DepthCenter(ppu, height, &cxw, &cyw);
   for (int y = 0; y < height; y++) {
     uint32 *row = (uint32 *)(pixels + y * pitch);
     for (int x = 0; x < width; x++) {
@@ -815,14 +861,11 @@ void HdPit_Apply(uint8 *pixels, int pitch, int width, int height) {
       int lx = wx & 0x1ff, ly = wy & 0x1ff;
       if (!pr || !pr->show[(ly >> 3) * 64 + (lx >> 3)])
         continue;
-      if (!pr->hole[n][BgColorAt(n, x, y, ext, &wx, &wy) & 0x7f])
+      // (wx, wy is already the layer point: no second WorldAt)
+      if (!pr->hole[n][HdFx_BgTilePixel(ppu, &ppu->bgLayer[n], wx, wy) & 0x7f])
         continue;
       // profondita': il punto della stanza di sotto si avvicina al centro
-      int dx = wx - cxw, dy = wy - cyw;
-      int sx = lx - (int)(dx * kDepth), sy = ly - (int)(dy * kDepth);
-      sx = sx < 0 ? 0 : sx >= kRoomPx ? kRoomPx - 1 : sx;
-      sy = sy < 0 ? 0 : sy >= kRoomPx ? kRoomPx - 1 : sy;
-      uint32 s = pr->img[sy * kRoomPx + sx];
+      uint32 s = BelowPixel(pr, wx, wy, cxw, cyw);
       // ombra dei bordi: forte sotto il bordo in alto, leggera ai lati
       float top = Clamp01(EdgeDist(pr, lx, ly, 0, -1, 32) / kShadeTop);
       float side = Clamp01(EdgeDist(pr, lx, ly, -1, 0, 16) / kShadeSide) *
@@ -833,4 +876,10 @@ void HdPit_Apply(uint8 *pixels, int pitch, int width, int height) {
       row[x] = (row[x] & 0xff000000) | Pack(r, g, b);
     }
   }
+}
+
+// After loading a quick save: the rooms seen through the pits are read again
+void HdPit_ResetAfterLoad(void) {
+  for (int i = 0; i < kEntries; i++)
+    g_rooms[i].room = -1;
 }

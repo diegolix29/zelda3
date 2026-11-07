@@ -29,7 +29,6 @@ typedef struct ZeldaEnv {
 extern ZeldaEnv g_zenv;
 extern int frame_ctr_dbg;
 extern float g_interp_alpha;
-void ZeldaUpdateCamera();
 extern int g_text_speed;
 
 typedef void PlayerHandlerFunc();

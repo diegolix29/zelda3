@@ -335,8 +335,6 @@ static uint8 *g_sdl_pixels;
 static int g_sdl_pitch;
 static SDL_Texture *g_sdl_overlay;
 static int g_sdl_overlay_w, g_sdl_overlay_h;
-static uint32 *g_sdl_overlay_pixels;
-static int g_sdl_overlay_cap;
 
 static bool SdlRenderer_Init(SDL_Window *window) {
 
@@ -393,15 +391,10 @@ static void SdlRenderer_BeginDraw(int width, int height, uint8 **pixels, int *pi
 static void SdlRenderer_EndDraw() {
   // Testo nitido: si prepara il riquadro dei dialoghi ingrandito 4x
   int rx, ry, rw, rh;
-  bool hd_text = HdText_GetRect(g_sdl_renderer_rect.w, g_sdl_renderer_rect.h, &rx, &ry, &rw, &rh);
-  if (hd_text) {
-    if (rw * rh * 16 > g_sdl_overlay_cap) {
-      g_sdl_overlay_cap = rw * rh * 16;
-      free(g_sdl_overlay_pixels);
-      g_sdl_overlay_pixels = malloc(g_sdl_overlay_cap * 4);
-    }
-    HdText_Scale4x(g_sdl_pixels, g_sdl_pitch, rx, ry, rw, rh, g_sdl_overlay_pixels);
-  }
+  const uint32 *overlay_pixels = NULL;
+  if (HdText_GetRect(g_sdl_renderer_rect.w, g_sdl_renderer_rect.h, &rx, &ry, &rw, &rh))
+    overlay_pixels = HdText_Scale4x(g_sdl_pixels, g_sdl_pitch, rx, ry, rw, rh);
+  bool hd_text = overlay_pixels != NULL;
 
 //  uint64 before = SDL_GetPerformanceCounter();
   SDL_UnlockTexture(g_texture);
@@ -419,7 +412,7 @@ static void SdlRenderer_EndDraw() {
                                         g_sdl_overlay_w, g_sdl_overlay_h);
     }
     if (g_sdl_overlay) {
-      SDL_UpdateTexture(g_sdl_overlay, NULL, g_sdl_overlay_pixels, g_sdl_overlay_w * 4);
+      SDL_UpdateTexture(g_sdl_overlay, NULL, overlay_pixels, g_sdl_overlay_w * 4);
       SDL_SetTextureBlendMode(g_sdl_overlay, SDL_BLENDMODE_BLEND);
       SDL_Rect dst = { rx, ry, rw, rh };
       if (g_config.ignore_aspect_ratio) {

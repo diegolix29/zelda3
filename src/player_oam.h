@@ -9,6 +9,7 @@ typedef struct SwordResult {
 bool PlayerOam_WantInvokeSword();
 void CalculateSwordHitBox();
 void LinkOam_Main();
+int LinkOam_DrawnHeight(void);
 uint8 FindMostSignificantBit(uint8 v);
 bool LinkOam_SetWeaponVRAMOffsets(int r2, SwordResult *sr);
 bool LinkOam_SetEquipmentVRAMOffsets(int r2, SwordResult *sr);

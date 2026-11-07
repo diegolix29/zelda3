@@ -305,13 +305,15 @@ static void ClearHiddenBands(Ppu *ppu, uint8 *pixels, size_t pitch, int width, i
   int y1 = IntMin(224 + ppu->extraBottomCur, height);
   if (x0 < 0) x0 = 0;
   if (x1 > width) x1 = width;
+  // the START menu pushes BG3 down, HUD included: its rows go with it
+  int hud_y0 = IntMax(-(int16)BG3VOFS_copy2, 0), hud_y1 = hud_y0 + 72;
   for (int y = 0; y < height; y++) {
     uint32 *row = (uint32 *)(pixels + y * pitch);
     if (y >= y1) {
       memset(row, 0, sizeof(uint32) * width);
       continue;
     }
-    if (ppu->hudSplitExt && y < 72) {
+    if (ppu->hudSplitExt && y >= hud_y0 && y < hud_y1) {
       // HUD classico diviso ai lati (PpuHudSplitSrc): resta anche sul nero
       for (int x = 0; x < width; x++)
         if ((x < x0 || x >= x1) && (row[x] >> 24 & 0xf) != 2)
@@ -342,6 +344,11 @@ static void ConfigurePpuSideSpace() {
   int mod = HdFx_SceneModule();
   if (mod == 14)
     mod = saved_module_for_menu;
+  // ending: the place shown (HdFx_EndingScene). Not the Triforce room (25):
+  // it is drawn for 256 pixels only (the 3D Triforce tiles and a repeated
+  // altar in the bands), so its bands stay black
+  if (HdFx_EndingScene() && main_module_index != 25)
+    mod = HdFx_EndingScene();
   // mappa del mondo e mappa dell'Ocarina: nuvole anche oltre il bordo della mappa
   g_zenv.ppu->m7CloudFill = main_module_index == 14 && (submodule_index == 7 || submodule_index == 10);
   g_zenv.ppu->bg1ConeQuadrant = (mod == 7 && hdr_dungeon_dark_with_lantern && TS_copy != 0) ? g_lamp_cone_idx : -1;
@@ -358,6 +365,17 @@ static void ConfigurePpuSideSpace() {
       extra_right = ow_scroll_vars0.xend - BG2HOFS_copy2;
       extra_bottom = ow_scroll_vars0.yend - BG2VOFS_copy2;
     }
+  } else if (mod == 7 && HdFx_EndingScene()) {
+    // Ending room: the bands from its entrance data (Credits_LoadScene_Dungeon
+    // loads it with Dungeon_LoadEntrance), not from the RAM, which can keep
+    // the bounds of another room: then the other half of the tile map, never
+    // drawn, showed as stray pixels on the right
+    int i = WORD(which_entrance);
+    const uint8 *rc = kEntranceData_relativeCoords + i * 8;
+    int qm = kEntranceData_quadrant1[i] >> 5, qy = (kEntranceData_quadrant1[i] & 0xf) >> 1;
+    extra_left = IntMax(BG2HOFS_copy2 - (rc[4 + qm] << 8), 0);
+    extra_right = IntMax((rc[6 + qm] << 8) - BG2HOFS_copy2, 0);
+    extra_bottom = IntMax((rc[2 + qy] << 8 | 0x10) - BG2VOFS_copy2, 0);
   } else if (mod == 7) {
     // indoors (anche col cono della Lanterna: la PPU tiene solo il suo
     // quadrante di BG1, vedi PpuClipLampCone)
@@ -367,8 +385,8 @@ static void ConfigurePpuSideSpace() {
 
     int qy = quadrant_fullsize_y >> 1;
     extra_bottom = IntMax(room_bounds_y.v[qy + 2] - BG2VOFS_copy2, 0);
-    // scorrimento verso un'altra stanza o l'altra meta' (RoomScrollBands)
-    RoomSeamRemember();
+    // scorrimento verso un'altra stanza o l'altra meta' (RoomScrollBands;
+    // the still room is remembered once per game frame, in ZeldaRunFrame)
     room_scroll = RoomScrollActive();
   } else if (mod == 20 || mod == 0 || mod == 1 || mod == 18) {
     // (18: schermo rosso e nero della morte, senza il mondo)
@@ -399,7 +417,7 @@ static int g_vis_prev_x, g_vis_prev_y, g_vis_cur_x, g_vis_cur_y;
 // e' quella del gioco, oppure con il mondo continuo la telecamera "libera"
 // che non si ferma ai bordi dell'area; le transizioni veloci la spostano
 // durante il passaggio.
-void ZeldaUpdateCamera() {
+static void ZeldaUpdateCamera() {
   int gx = BG2HOFS_copy2, gy = BG2VOFS_copy2;
   int lx = gx, ly = gy;
   HdWorld_UpdateCamera(&lx, &ly);
@@ -413,7 +431,8 @@ void ZeldaUpdateCamera() {
   if (trans)
     g_cam_dx += trans_x, g_cam_dy += trans_y;
   g_view_wx = lx, g_view_wy = ly;
-  g_view_valid = HdWorld_Active();
+  // (ending: its figures are drawn at the game camera, not in a world view)
+  g_view_valid = HdWorld_Active() && !HdFx_EndingScene();
   g_vis_prev_x = g_vis_cur_x, g_vis_prev_y = g_vis_cur_y;
   g_vis_cur_x = gx + g_cam_dx, g_vis_cur_y = gy + g_cam_dy;
 }
@@ -445,6 +464,8 @@ static void ApplyRenderBias() {
   ppu->objBiasX = obj_x, ppu->objBiasY = obj_y;
 }
 
+extern uint8 g_link_oam_ground[128];  // player_oam.c
+int LinkOam_DrawnHeight(void);        // player_oam.c
 extern uint8 g_link_oam_mask[128], g_link_oam_real_f0[128], g_sprite_oam_owner[128], g_oam_real_f0[128];
 
 // Fra v + k*period sceglie il valore la cui posizione sullo schermo (v - bias)
@@ -479,6 +500,16 @@ static void ResolveSpritePositions(Ppu *ppu) {
   int oy[32], ox[32], n = 0, cy = BG2VOFS_copy2, cx = BG2HOFS_copy2;
   int slot[16];  // posto di ogni nemico in oy/ox, -1 = non attivo
   oy[n] = (int16)(link_y_coord - cy), ox[n++] = link_x - 8;
+  // Link in the air (any fall or jump: cliffs, ledges, holes, knock-back) is
+  // drawn link_z_coord higher, and the game keeps only the low byte of the
+  // height (the 8 bit OAM y wraps back on the SNES). In a long fall from a
+  // cliff the height is over 128 and his body was taken 256 pixels lower, off
+  // the screen: his pieces also refer to where he is drawn (the shadow stays
+  // on the ground reference, his other pieces on the air one)
+  int link_refs = 1;
+  int link_z = LinkOam_DrawnHeight();
+  if (link_z > 0)
+    oy[n] = (int16)(link_y_coord - link_z - cy), ox[n++] = link_x - 8, link_refs = 2;
   for (int k = 0; k < 16; k++)
     if (slot[k] = -1, sprite_state[k]) {
       slot[k] = n;
@@ -509,7 +540,7 @@ static void ResolveSpritePositions(Ppu *ppu) {
     // volo, effetti) l'oggetto piu' vicino
     int k0 = 0, k1 = n, o = g_sprite_oam_owner[i];
     if (g_link_oam_mask[i])
-      k1 = 1;
+      k0 = link_refs == 2 && !g_link_oam_ground[i], k1 = k0 + 1;
     else if (o < 16 && slot[o] >= 0)
       k0 = slot[o], k1 = k0 + 1;
     int best = 1 << 30, y = yy;
@@ -535,6 +566,17 @@ void ZeldaDrawPpuFrame(uint8 *pixel_buffer, size_t pitch, uint32 render_flags) {
 
   // Lampi della pioggia come su GBA: fusione al posto della somma a meta'
   g_zenv.ppu->gbaBlend = GbaFlash_RainBlend();
+  // Screen brightness (INIDISP fades), one rule for everything: the PPU and
+  // every HD effect draw at full brightness and the whole picture is dimmed
+  // at the end of this function, so rain, rays, embers, flames... fade
+  // to black with the game. Not with the 4x Mode 7 picture (no HD effects).
+  // Set before PpuBeginDrawing, which builds the PPU's brightness tables
+  int screen_bri = g_zenv.ppu->forcedBlank ? 0 : g_zenv.ppu->brightness;
+  g_hd_screen_bri = screen_bri;
+  uint8 game_bri = g_zenv.ppu->brightness;
+  bool bri_post = screen_bri < 15 && PpuGetCurrentRenderScale(g_zenv.ppu, render_flags) == 1;
+  if (bri_post && !g_zenv.ppu->forcedBlank)
+    g_zenv.ppu->brightness = 15;
   PpuBeginDrawing(g_zenv.ppu, pixel_buffer, pitch, render_flags);
 
   dma_startDma(g_zenv.dma, HDMAEN_copy, true);
@@ -567,6 +609,8 @@ void ZeldaDrawPpuFrame(uint8 *pixel_buffer, size_t pitch, uint32 render_flags) {
     g_zenv.ppu->m7CloudFill = true;
 
   int height = render_flags & kPpuRenderFlags_Height240 ? 240 : 224;
+  // Width of the rendered frame, wide-screen bands included
+  int frame_w = 256 + 2 * g_zenv.ppu->extraLeftRight;
 
   ResolveSpritePositions(g_zenv.ppu);
   // Durante il passaggio fra aree, dove la telecamera del gioco e' lontana
@@ -576,21 +620,21 @@ void ZeldaDrawPpuFrame(uint8 *pixel_buffer, size_t pitch, uint32 render_flags) {
   g_zenv.ppu->objOnTop = HdWorld_BackgroundFromImages();
   // stanza di sotto per le buche: prima delle modifiche alla VRAM per il disegno
   HdPit_BeforeRender();
-  RoomSeamPatch(g_zenv.ppu, 256 + 2 * g_zenv.ppu->extraLeftRight, height);
+  RoomSeamPatch(g_zenv.ppu, frame_w, height);
   HdLight_BeforeRender(g_zenv.ppu);
   HdHud_BeforeRender(g_zenv.ppu);
   HdText_BeforeRender(g_zenv.ppu);
   HudIt_BeforeRender(g_zenv.ppu);
   Overworld_GbaCharsBeforeRender(g_zenv.ppu);
   HdFx_IrisBeforeRender(g_zenv.ppu);
-  HdFx_ShadowsBeforeRender(g_zenv.ppu, 256 + 2 * g_zenv.ppu->extraLeftRight, height);
-  HdWater_BeforeRender(g_zenv.ppu, 256 + 2 * g_zenv.ppu->extraLeftRight, height);
+  HdFx_ShadowsBeforeRender(g_zenv.ppu, frame_w, height);
+  HdWater_BeforeRender(g_zenv.ppu, frame_w, height);
   HdFx_IceBeforeRender(g_zenv.ppu);
   HdFx_DiveBeforeRender(g_zenv.ppu);
   HdFx_AsBgBeforeRender(g_zenv.ppu);
   HdFx_SuperBombBeforeRender(g_zenv.ppu);
   HdFx_FogBeforeRender(g_zenv.ppu);
-  HdWorld_BeforeRender(256 + 2 * g_zenv.ppu->extraLeftRight, height);
+  HdWorld_BeforeRender(frame_w, height);
   // specchio: la PPU disegna senza onda e con i colori veri (vedi hd_world.c)
   HdWorld_WarpBeforeRender();
   // dissolvenze delle palette: lo stesso per il fondale (vedi hd_fx.c)
@@ -632,29 +676,35 @@ void ZeldaDrawPpuFrame(uint8 *pixel_buffer, size_t pitch, uint32 render_flags) {
   HdFx_ShadowsAfterRender(g_zenv.ppu);
   HdWater_AfterRender(g_zenv.ppu);
   HdFx_FogAfterRender(g_zenv.ppu);
-  HdWorld_Composite(pixel_buffer, (int)pitch, 256 + 2 * g_zenv.ppu->extraLeftRight, height);
-  HdWorld_WarpMask(pixel_buffer, (int)pitch, 256 + 2 * g_zenv.ppu->extraLeftRight, height);
-  HdFx_FadeMask(pixel_buffer, (int)pitch, 256 + 2 * g_zenv.ppu->extraLeftRight, height);
+  HdWorld_Composite(pixel_buffer, (int)pitch, frame_w, height);
+  HdWorld_WarpMask(pixel_buffer, (int)pitch, frame_w, height);
+  HdFx_FadeMask(pixel_buffer, (int)pitch, frame_w, height);
 
   // Illuminazione dinamica (non sulla mappa del mondo in Mode 7)
   if (g_zenv.ppu->mode != 7) {
-    int frame_w = 256 + 2 * g_zenv.ppu->extraLeftRight;
     // tabella degli attributi finita (nei passaggi la RAM e' rifatta a pezzi):
     // una volta per fotogramma, per luci, acqua e buche
     HdWater_PrepareAttrs();
-    HdPit_Apply(pixel_buffer, (int)pitch, frame_w, height);
-    HdWater_BeforeEffects(pixel_buffer, (int)pitch, frame_w, height);
-    HdFx_SpriteShadows(pixel_buffer, (int)pitch, frame_w, height);
-    HdFx_BeforeLight(pixel_buffer, (int)pitch, frame_w, height, g_render_bias_x, g_render_bias_y);
+    // all black in the game (dark room, no Lantern, no torch lit): the HD
+    // scenery effects would paint over the darkness, so they are not drawn
+    bool pitch_black = HdLight_PitchBlack();
+    if (!pitch_black) {
+      HdPit_Apply(pixel_buffer, (int)pitch, frame_w, height);
+      HdWater_BeforeEffects(pixel_buffer, (int)pitch, frame_w, height);
+      HdFx_SpriteShadows(pixel_buffer, (int)pitch, frame_w, height);
+      HdFx_BeforeLight(pixel_buffer, (int)pitch, frame_w, height, g_render_bias_x, g_render_bias_y);
+    }
     HdLight_Apply(pixel_buffer, (int)pitch, frame_w, height, g_render_bias_x, g_render_bias_y);
-    HdFx_AfterLight(pixel_buffer, (int)pitch, frame_w, height, g_render_bias_x, g_render_bias_y);
-    HdFx_MarkWater(pixel_buffer, (int)pitch, frame_w, height, g_render_bias_x, g_render_bias_y);
-    HdFx_MarkBackdrop(pixel_buffer, (int)pitch, frame_w, height);
-    HdWater_Apply(pixel_buffer, (int)pitch, frame_w, height, g_render_bias_x, g_render_bias_y);
-    HdFx_FrozenWater(pixel_buffer, (int)pitch, frame_w, height, g_render_bias_x, g_render_bias_y);
-    HdFx_Fog(pixel_buffer, (int)pitch, frame_w, height, g_render_bias_x, g_render_bias_y);
-    HdLight_FairyGlow(pixel_buffer, (int)pitch, frame_w, height);
-    HdFx_Lightning(pixel_buffer, (int)pitch, frame_w, height);
+    if (!pitch_black) {
+      HdFx_AfterLight(pixel_buffer, (int)pitch, frame_w, height, g_render_bias_x, g_render_bias_y);
+      HdFx_MarkWater(pixel_buffer, (int)pitch, frame_w, height, g_render_bias_x, g_render_bias_y);
+      HdFx_MarkBackdrop(pixel_buffer, (int)pitch, frame_w, height, g_render_bias_x, g_render_bias_y);
+      HdWater_Apply(pixel_buffer, (int)pitch, frame_w, height, g_render_bias_x, g_render_bias_y);
+      HdFx_FrozenWater(pixel_buffer, (int)pitch, frame_w, height, g_render_bias_x, g_render_bias_y);
+      HdFx_Fog(pixel_buffer, (int)pitch, frame_w, height, g_render_bias_x, g_render_bias_y);
+      HdLight_FairyGlow(pixel_buffer, (int)pitch, frame_w, height);
+      HdFx_Lightning(pixel_buffer, (int)pitch, frame_w, height);
+    }
     HdFx_Mosaic(pixel_buffer, (int)pitch, frame_w, height);
     // dissolvenza delle palette del gioco su tutto, aggiunte HD comprese
     HdFx_FadePost(pixel_buffer, (int)pitch, frame_w, height);
@@ -663,7 +713,15 @@ void ZeldaDrawPpuFrame(uint8 *pixel_buffer, size_t pitch, uint32 render_flags) {
     HdFx_SoftIris(pixel_buffer, (int)pitch, frame_w, height);
     HdFx_MenuBlur(pixel_buffer, (int)pitch, frame_w, height);
   }
-  ClearHiddenBands(g_zenv.ppu, pixel_buffer, pitch, 256 + 2 * g_zenv.ppu->extraLeftRight, height);
+  if (bri_post) {
+    g_zenv.ppu->brightness = game_bri;
+    for (int y = 0; y < height; y++) {
+      uint32 *row = (uint32 *)(pixel_buffer + y * pitch);
+      for (int x = 0; x < frame_w; x++)
+        row[x] = HdFx_DimRgb(row[x], screen_bri);
+    }
+  }
+  ClearHiddenBands(g_zenv.ppu, pixel_buffer, pitch, frame_w, height);
   RoomSeamRestore(g_zenv.ppu);
 }
 
@@ -855,6 +913,12 @@ static void LoadSnesState(SaveLoadFunc *func, void *ctx) {
   EmuSynchronizeWholeState();
   HdWorld_ResetStates();  // il mondo persistente riparte dal salvataggio
   HdWorld_AfterLoad();
+  // every HD effect starts again from the loaded game, not from the old place
+  g_seam_prev_room = -1;
+  HdFx_ResetAfterLoad();
+  HdLight_ResetAfterLoad();
+  HdPit_ResetAfterLoad();
+  HdTrans_ResetAfterLoad();
 }
 
 static void SaveSnesState(SaveLoadFunc *func, void *ctx) {
@@ -1212,6 +1276,10 @@ bool ZeldaRunFrame(int inputs) {
   Cheats_AfterFrame();
 
   ZeldaPushApuState();
+  // the still room is remembered every game frame, also the ones not drawn
+  // (above 60 Hz or in turbo): a short stop between two scrolls counts too
+  if (g_zenv.ppu->extraLeftRight != 0 || (g_zenv.ppu->renderFlags & kPpuRenderFlags_Height240))
+    RoomSeamRemember();
   ZeldaUpdateCamera();
   HdWorld_TickNeighbors();  // mondo continuo: nemici delle aree vicine
 
@@ -1278,6 +1346,10 @@ void SaveLoadSlot(int cmd, int which) {
       StateRecorder_Save(&state_recorder, f);
 
     fclose(f);
+    // a quick save (not the reference chapters) brings its continuous world
+    // setting: the state of the world in it depends on that option
+    if (cmd == kSaveLoad_Load && !(which & 256) && animated_tile_data_src != 0)
+      HdMenu_SetContinuousWorld((enhanced_features0 & kFeatures0_ContinuousWorld) != 0);
   }
 }
 

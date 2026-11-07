@@ -4,6 +4,8 @@
 
 const uint8 *GetMap8toTileAttr();
 const uint16 *GetMap16toMap8Table();
+// Head area of one of the 64 map squares (big areas cover 4)
+uint8 Overworld_AreaHead(int square);
 bool LookupInOwEntranceTab(uint16 r0, uint16 r2);
 int LookupInOwEntranceTab2(uint16 pos);
 bool CanEnterWithTagalong(int e);
@@ -90,7 +92,6 @@ void Overworld_EnterSpecialArea();
 void LoadOverworldFromSpecialOverworld();
 void FluteMenu_LoadTransport();
 void Overworld_LoadBirdTravelPos(int k);
-void Overworld_LoadBirdTravel9();
 void FluteMenu_LoadSelectedScreenPalettes();
 void FindPartnerWhirlpoolExit();
 void Overworld_LoadAmbientOverlay(bool load_map_data);

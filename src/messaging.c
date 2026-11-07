@@ -2913,8 +2913,6 @@ uint32 Text_DecodeCmd(uint8 a, const uint8 *src) {
   }
 }
 
-// Testo moderno (hd_hud.c): larghezza della riga piu' lunga del messaggio
-// caricato (adv = avanzamento di ogni carattere) e righe usate
 // Testo moderno: il messaggio e' fermo in attesa di un tasto (per andare
 // avanti o per chiudersi)
 bool Text_WaitingForKey(void) {
@@ -2949,10 +2947,12 @@ static int Text_ParagraphStep(int kind, int line) {
 // Cancellazione della pagina: 3 righe di 168 pixel in strisce da 4
 enum { kTextPageClearCols = 42, kTextPageClearSteps = 3 * kTextPageClearCols };
 
+// Start of each of the 3 text lines in messaging_buf (0x2a0 bytes each)
+static const uint16 kTextLinePos[3] = { 0, 0x2a0, 0x540 };
+
 static void Text_PageClearStrip(int n) {
-  static const uint16 kLinePos[3] = { 0, 0x2a0, 0x540 };
   int col = n % kTextPageClearCols;
-  uint8 *p = (uint8 *)messaging_buf + kLinePos[n / kTextPageClearCols] + (col >> 1) * 16;
+  uint8 *p = (uint8 *)messaging_buf + kTextLinePos[n / kTextPageClearCols] + (col >> 1) * 16;
   uint8 keep = col & 1 ? 0 : 0x0f;  // bit 7 = pixel a sinistra
   for (int i = 0; i < 16; i++)
     p[i] &= keep, p[i + 0x150] &= keep;
@@ -3058,8 +3058,8 @@ int Text_MaxLineWidth(int (*adv)(int c)) {
   return best;
 }
 
-int Text_MeasureMessage(int (*adv)(int c), int *lines, int *first) {
-  int w = 0, best = 0, used = 1, line = 0;
+void Text_MeasureMessage(int *lines, int *first) {
+  int used = 1, line = 0;
   *first = 2;
   for (int pos = 0; pos < 0x7f0;) {
     uint32 cmd = Text_DecodeCmd(messaging_text_buffer[pos], &messaging_text_buffer[pos + 1]);
@@ -3067,11 +3067,9 @@ int Text_MeasureMessage(int (*adv)(int c), int *lines, int *first) {
     if (k == kTextCmd_EndMessage)
       break;
     if (k == kTextCmd_IsLetter) {
-      w += adv(TEXTCMD_PARAM(cmd));
       if (TEXTCMD_PARAM(cmd) != 89)  // lettera che non e' uno spazio
         *first = IntMin(*first, line);
     } else if (k == kTextCmd_1 || k == kTextCmd_2 || k == kTextCmd_3 || k == kTextCmd_Scroll) {
-      best = IntMax(best, w), w = 0;
       used = IntMax(used, k == kTextCmd_Scroll ? 3 : k - kTextCmd_1 + 1);
       line = k == kTextCmd_Scroll ? 2 : k - kTextCmd_1;
       if (k == kTextCmd_Scroll)
@@ -3081,7 +3079,6 @@ int Text_MeasureMessage(int (*adv)(int c), int *lines, int *first) {
   }
   *lines = used;
   *first = IntMin(*first, used - 1);
-  return IntMax(best, w);
 }
 
 bool Dialogue_HasMessage(int i) {
@@ -3212,6 +3209,28 @@ void RenderText_Draw_CharacterTilemap() {  // 8ec97d
 // 2 = sempre istantaneo.
 int g_text_speed;
 
+static bool Text_WantFast();
+
+// A line the message writes again from its start ([1] [2] [3]) while it still
+// shows letters: its spaces erase them (the Triforce writes 42 spaces per line
+// at [Speed 01] to clear the page). Modern text keeps the game's pace for
+// those spaces, so the letters still go away from left to right as in the
+// original instead of all at once. Ends with the first real letter
+static bool g_text_erasing;
+
+// Modern text writes the letters at once, but not the spaces that erase
+static bool Text_LetterFast(bool fast, uint32 cmd) {
+  return fast && !(g_text_erasing && TEXTCMD_PARAM(cmd) == 0x59 && !Text_WantFast());
+}
+
+static bool Text_LineHasPixels(int line) {
+  const uint8 *p = (const uint8 *)messaging_buf + kTextLinePos[line];
+  for (int i = 0; i < 0x2a0; i++)
+    if (p[i])
+      return true;
+  return false;
+}
+
 static bool Text_WantFast() {
   if (g_text_speed >= 2)
     return true;
@@ -3251,13 +3270,15 @@ RESTART:;
     if ((enhanced_features0 & kFeatures0_GbaMinorFixes) && vwf_line_speed >= 2 &&
         ((filtered_joypad_H | filtered_joypad_L) & 0xc0))
       vwf_line_speed = vwf_line_speed_cur = 1;
-    if (vwf_line_speed_cur >= 2 && !fast) {
+    if (vwf_line_speed_cur >= 2 && !Text_LetterFast(fast, cmd)) {
       vwf_line_speed_cur--;
       break;
     }
     VWF_RenderSingle(TEXTCMD_PARAM(cmd));
     dialogue_msg_read_pos += 1 + TEXTCMD_MULTIBYTE(cmd);
-    if (vwf_line_speed_cur == 0 || fast)
+    if (TEXTCMD_PARAM(cmd) != 0x59)
+      g_text_erasing = false;  // a real letter: the page is being written again
+    if (vwf_line_speed_cur == 0 || Text_LetterFast(fast, cmd))
       goto RESTART;
     break;
   case kTextCmd_NextPic:  // RenderText_Draw_NextImage
@@ -3329,6 +3350,7 @@ RESTART:;
   case kTextCmd_3:  // VWF_SetLine
     vwf_curline = kVWF_RowPositions[TEXTCMD_CMD(cmd) - kTextCmd_1];
     vwf_flag_next_line = 1;
+    g_text_erasing = Text_LineHasPixels(TEXTCMD_CMD(cmd) - kTextCmd_1);
     goto COMMAND_DONE;
   case kTextCmd_Wait:  // RenderText_Draw_Wait
     switch (joypad1L_last & 0x80 ? 1 : text_wait_countdown) {

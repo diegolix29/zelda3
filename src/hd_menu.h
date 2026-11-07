@@ -28,6 +28,8 @@ void HdMenu_ApplyConfig();
 bool HdMenu_IsOpen();
 void HdMenu_Open();
 void HdMenu_Close();
+// After loading a quick save: the continuous world option as in the save
+void HdMenu_SetContinuousWorld(bool on);
 // Restituiscono true se l'evento e' stato usato dal menu
 bool HdMenu_HandleKey(int code, int mod, bool pressed);
 bool HdMenu_HandlePadButton(int button, bool pressed);
@@ -54,6 +56,6 @@ void HdMenu_AfterFrame(void);
 // Testo nitido: rettangolo (in pixel del frame) del riquadro dei dialoghi da
 // ridisegnare sopra lo shader, e ingrandimento 4x per pixel art.
 bool HdText_GetRect(int frame_w, int frame_h, int *x, int *y, int *w, int *h);
-void HdText_Scale4x(const uint8 *src, int src_pitch, int x, int y, int w, int h, uint32 *dst);
+const uint32 *HdText_Scale4x(const uint8 *src, int src_pitch, int x, int y, int w, int h);
 
 #endif  // ZELDA3_HD_MENU_H_

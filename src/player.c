@@ -142,7 +142,7 @@ void CheckAbilityToSwim() {  // 81ffb6
 // quando ci entra con un salto: nuota, o senza pinne (Ancilla15_JumpSplash ->
 // CheckAbilityToSwim) torna all'ultimo punto di terra: sul ghiaccio
 // LinkState_Default non aggiorna la posizione di ritorno
-static bool g_link_on_frozen_water;
+// g_link_on_frozen_water: in free RAM (variables.h)
 
 static void Link_CheckMeltedIce(void) {
   bool was = g_link_on_frozen_water;
@@ -174,16 +174,16 @@ static void Link_CheckMeltedIce(void) {
 
 // Immersione con le pinne (Spada e oggetti, come su GBA): fotogrammi che
 // restano sott'acqua e pausa prima della prossima immersione
-uint8 g_link_dive_timer;
+// g_link_dive_timer: in free RAM (variables.h)
 
 // Pozione d'oro (bottiglia 9), da BS Zelda - Le Antiche Tavole di Pietra:
 // fotogrammi che restano all'effetto (carica rapida e scintille)
-uint16 g_gold_potion_timer;
+// g_gold_potion_timer: in free RAM (variables.h)
 // il negozio della strega da' la pozione d'oro come la blu (oggetto 0x30):
 // g_gold_potion_next lo chiede, g_gold_potion_receipt vale per l'oggetto
 // ricevuto adesso (bottiglia, colore e messaggio)
 bool g_gold_potion_next, g_gold_potion_receipt;
-static uint8 g_link_dive_wait;
+// g_link_dive_wait: in free RAM (variables.h)
 
 void Link_Main() {  // 878000
 //  RunEmulatedFunc(0x878000, 0, 0, 0, true, true, -2, 0);
@@ -2299,8 +2299,7 @@ void Link_CheckForSwordSwing() {  // 879cd9
 // rotante diventa lungo: premendo B durante il giro ne parte un altro
 // (0x809d828), con 2 di magia (1/2: 2, 1/4: 0 come sul GBA), e nei giri
 // successivi Link avanza da solo (0x809d2ac).
-static uint8 g_hurricane_spin;  // 0x80 carica lunga, 0x40 altro giro prenotato, 1 giri successivi
-static uint8 g_hurricane_dir;   // direzione dei giri successivi (bit della croce)
+// g_hurricane_spin and g_hurricane_dir: in free RAM (variables.h)
 static bool g_link_on_stairs;    // la collisione ha messo Link sulle scale (in verticale)
 
 static bool HurricaneSpin_Unlocked() {
@@ -2411,6 +2410,7 @@ void Player_Sword_SpinAttackJerks_HoldDown() {  // 879d9f
           AncillaSpawn_SwordChargeSparkle();
 
         bool hurricane = HurricaneSpin_Unlocked();
+        int lim = hurricane ? 96 : 64;  // (top of the charge)
         if (hurricane && link_spin_attack_step_counter >= 96) {
           // carica lunga della Giravolta Tornado: secondo suono e scintille
           if (link_spin_attack_step_counter == 96) {
@@ -2420,9 +2420,8 @@ void Player_Sword_SpinAttackJerks_HoldDown() {  // 879d9f
           }
           if ((frame_counter & 7) == 0)
             AncillaAdd_ChargedSpinAttackSparkle();
-        } else if (link_spin_attack_step_counter < (hurricane ? 96 : 64)) {
+        } else if (link_spin_attack_step_counter < lim) {
           // con la pozione d'oro la carica va al doppio della velocita' (BS 87a099)
-          int lim = hurricane ? 96 : 64;
           uint8 old = link_spin_attack_step_counter;
           int c = old + (g_gold_potion_timer ? 2 : 1);
           link_spin_attack_step_counter = c > lim ? lim : c;
@@ -2593,6 +2592,7 @@ void LinkItem_Boomerang() {  // 87a0bb
     link_delay_timer_spin_attack = 7;
 
     int s0 = AncillaAdd_Boomerang(5, 0);
+    Boomerang_NoteThrow(GetCurrentItemButtonIndex());
 
     if (button_b_frames >= 9) {
       Link_ResetBoomerangYStuff();
@@ -2633,7 +2633,7 @@ void LinkItem_Bombs() {  // 87a138
   if (is_standing_in_doorway || follower_indicator == 13 || !CheckYButtonPress())
     return;
   button_mask_b_y &= ~0x40;
-  AncillaAdd_Bomb(7, enhanced_features0 & kFeatures0_MoreActiveBombs ? 9 : 1);
+  AncillaAdd_Bomb(7, enhanced_features0 & kFeatures0_MoreActiveBombs ? 4 : 1);
   link_item_in_hand = 0;
 }
 

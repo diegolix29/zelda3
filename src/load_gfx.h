@@ -165,14 +165,11 @@ void Palette_ApplyDimFlashFloor(bool on);
 // ---------------------------------------------------------------------------
 // "Meno flash GBA" (kFeatures0_DimFlashesGba): tutti i comportamenti copiati
 // dalla versione GBA stanno in load_gfx.c, i punti del gioco li chiamano soltanto
-extern uint8 g_gba_dim_timer;
 // Sfondo che si scurisce poco a poco (Etere, telewarp, introduzione)
 void GbaFlash_DimStep(uint8 mask, uint8 min);
 void GbaFlash_DimHold(uint8 v);
 // Fulmini di Agahnim: lo sfondo si scurisce e si rischiara
 void GbaFlash_Bolt(uint8 len);
-// Colore c spostato di un passo (1 per canale a 5 bit) verso t, come il GBA
-uint16 GbaFlash_StepColor(uint16 c, uint16 t);
 // Colore fra a (f = 0) e b (f = n), canale per canale
 uint16 GbaFlash_MixColor(uint16 a, uint16 b, int f, int n);
 // Lampi a palette (stanza del secondo Agahnim 0x80abf64, Monte della Morte

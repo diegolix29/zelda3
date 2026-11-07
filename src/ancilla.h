@@ -20,6 +20,13 @@ typedef struct AncillaRadialProjection {
 
 uint16 Ancilla_GetX(int k);
 uint16 Ancilla_GetY(int k);
+// Mondo continuo: regola unica degli oggetti di Link per tipo di ancilla
+// (unico elenco, in ancilla.c). Keep: resta al cambio d'area e finisce il suo
+// lavoro (overworld.c, ResetAncillaKeepThrown). Hits: tocca i nemici delle
+// aree vicine, che passano nel gioco vero (hd_world.c, CollectLinkHits).
+// Wide: con Hits, raggio largo (bomba)
+enum { kAncWorld_Keep = 1, kAncWorld_Hits = 2, kAncWorld_Wide = 4 };
+uint8 Ancilla_WorldRules(uint8 type);
 int Arrow_StuckPieces(int k, uint8 *chr, uint8 *flags, int8 *dx, int8 *dy);
 void Ancilla_SetX(int k, uint16 x);
 void Ancilla_SetY(int k, uint16 y);
@@ -77,6 +84,8 @@ void Ancilla05_Boomerang(int k);
 bool Boomerang_ScreenEdge(int k);
 void Boomerang_StopOffScreen(int k);
 void Boomerang_Terminate(int k);
+// Boomerang as in FSA: the button (0 Y, 1 X, 2 L, 3 R) that threw it
+void Boomerang_NoteThrow(int btn);
 void Boomerang_Draw(int k);
 void Ancilla06_WallHit(int k);
 void Ancilla_SwordWallHit(int k);

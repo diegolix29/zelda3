@@ -31,11 +31,13 @@
 #include "hd_fx.h"
 #include "hd_burn.h"
 #include "sprite.h"
+#include "sprite_main.h"
 #include "ancilla.h"
 #include "misc.h"
 #include "nmi.h"
 #include "hd_menu.h"
 #include "hd_water.h"
+#include "player.h"
 
 uint8 Overworld_AreaHead(int square);
 extern int g_cam_dx, g_cam_dy;          // vista rispetto alla telecamera del gioco (zelda_rtl.c)
@@ -70,7 +72,7 @@ static bool InFluteArrival(void) {
 // continuo anche li': la vista e' gia' al suo posto quando il cerchio si apre
 // e resta dov'era quando si chiude, invece di scivolare o saltare.
 static bool InSoftIris(void) {
-  return g_fx_soft_iris && (main_module_index == 15 || main_module_index == 16) &&
+  return g_config.fx_soft_iris && (main_module_index == 15 || main_module_index == 16) &&
          !player_is_indoors;
 }
 
@@ -86,11 +88,24 @@ static bool InMapReturn(void) {
   return main_module_index == 9 && submodule_index >= 32 && submodule_index <= 34;
 }
 
+// Scenes outdoors outside module 9: past the area edge the wide screen shows
+// the areas next to it, as when playing. The view stays the game's one
+// (UpdateCamera mode 0)
+// - ending: a place outdoors (HdFx_EndingScene);
+// - Agahnim beaten (21) after the mirror wave (from step 5: text and spin);
+// - Ganon leaving Agahnim (24) once the Pyramid is loaded (state 5 on).
+static bool InEndingOverWorld(void) {
+  int m = main_module_index;
+  return HdFx_EndingScene() == 9 ||
+         (m == 21 && submodule_index >= 5 && !player_is_indoors) ||
+         (m == 24 && overworld_map_state >= 5);
+}
+
 bool HdWorld_Active(void) {
   if (!FeatureOn() || overworld_screen_index >= 0x80)
     return false;
   if (main_module_index != 9 && !InMenuOverWorld() && !InFluteArrival() && !InSoftIris() &&
-      !InDeathOverWorld())
+      !InDeathOverWorld() && !InEndingOverWorld())
     return false;
   return g_zenv.ppu->mode != 7;
 }
@@ -99,6 +114,22 @@ bool HdWorld_Active(void) {
 // dissolvenze, per esempio all'arrivo con l'Ocarina. La PPU la applica ai
 // suoi pixel; a quelli presi dalle immagini delle aree si applica qui.
 static int g_bright = 15;
+
+static void UpdateBright(void) {
+  Ppu *ppu = g_zenv.ppu;
+  g_bright = ppu->forcedBlank ? 0 : ppu->brightness;
+}
+
+// World point of the top left pixel of the frame being composed (game camera
+// plus the PPU bias; width - 256 = the wide screen columns)
+static void FrameCam(int width, int *cam_x, int *cam_y) {
+  Ppu *ppu = g_zenv.ppu;
+  int ext = (width - 256) / 2;
+  *cam_x = (int16)BG2HOFS_copy + ppu->bgBiasX - ext;  // la PPU tiene solo 10 bit
+  // +1: la PPU non mostra la sua riga 0, quindi la riga 0 dello schermo e' la
+  // riga 1 del fondale
+  *cam_y = (int16)BG2VOFS_copy + ppu->bgBiasY + 1;
+}
 
 // Regola unica degli effetti sui colori dello schermo (scelta dell'utente,
 // 02/11/2026: tutto cio' che e' inquadrato, non solo l'area di Link). Il gioco
@@ -206,6 +237,13 @@ static bool InMosaicTransition(void) {
   return main_module_index == 9 && (submodule_index >= 13 && submodule_index <= 22 || submodule_index == 31);
 }
 
+// Mirror and warp tiles (0x23, 0x2c, see InMirrorWarp): Link keeps his place
+// in the other world, so the view stays where it is (UpdateCamera mode 3).
+// With the game's view it jumped onto him near an area edge, and back after
+static bool InWarpView(void) {
+  return main_module_index == 9 && (submodule_index == 0x23 || submodule_index == 0x2c) && !player_is_indoors;
+}
+
 // Uscita da un'area speciale (Dominio di Zora...), modulo 11: l'area nuova
 // arriva a schermo nero (37-40), poi il mosaico si scioglie (41). Il mondo
 // continuo e' ancora spento, ma la vista va gia' dove sara' nell'area
@@ -232,8 +270,7 @@ bool HdWorld_BackgroundFromImages(void) {
 // schermo (HdWorld_WarpRowDx, HdWorld_WarpWhite): le aggiunte restano
 // visibili per tutta l'animazione e la seguono.
 static int16 g_warp_line_hofs[241];
-static int8 g_warp_dx[240];   // spostamento di ogni riga dello schermo
-static float g_warp_dxf[240]; // lo stesso per lo shader
+static float g_warp_dxf[240]; // shift of each screen row (-127..127, whole pixels), also for the shader
 static int g_warp_white;      // 0-31: quanto il gioco ha aggiunto ai colori
 static int g_warp_floor;      // 0-31: livello sotto cui nessun colore scende
 static bool g_warp_old_world; // prima del cambio: lo schermo mostra il mondo di prima
@@ -247,7 +284,7 @@ static int g_warp_cap;
 // Solo con l'acqua realistica o con uno shader: sono loro che ridisegnano lo
 // schermo dopo la PPU. Senza, onda e bianco li fa la PPU come nell'originale.
 static bool InMirrorWarp(void) {
-  return (g_fx_water || Host_HasShader()) && main_module_index == 9 && (submodule_index == 0x23 || submodule_index == 0x2c) &&
+  return (g_config.fx_water || Host_HasShader()) && main_module_index == 9 && (submodule_index == 0x23 || submodule_index == 0x2c) &&
          subsubmodule_index >= 1 && !player_is_indoors && BYTE(overworld_screen_index) < 0x80;
 }
 
@@ -259,7 +296,6 @@ void HdWorld_WarpBeforeRender(void) {
   Ppu *ppu = g_zenv.ppu;
   g_warp_white = g_warp_floor = 0, g_warp_old_world = false;
   g_warp_on = InMirrorWarp();
-  memset(g_warp_dx, 0, sizeof(g_warp_dx));
   memset(g_warp_dxf, 0, sizeof(g_warp_dxf));
   if (!g_warp_on) {
     memcpy(g_warp_real_pal, main_palette_buffer, sizeof(g_warp_real_pal));
@@ -317,7 +353,6 @@ void HdWorld_WarpAfterRender(void) {
     int d = (g_warp_line_hofs[y + 1] - BG2HOFS_copy2) & 0x3ff;
     d = d >= 0x200 ? d - 0x400 : d;
     d = d < -127 ? -127 : d > 127 ? 127 : d;
-    g_warp_dx[y] = (int8)d;
     g_warp_dxf[y] = (float)d;
   }
 }
@@ -363,7 +398,7 @@ void HdWorld_WarpPost(uint8 *pixels, int pitch, int width, int height) {
   for (int y = 0; y < height; y++) {
     uint32 *row = (uint32 *)(pixels + y * pitch);
     const uint8 *m = g_warp_mask + y * width;
-    int dx = y < 240 ? g_warp_dx[y] : 0;
+    int dx = y < 240 ? (int)g_warp_dxf[y] : 0;
     if (dx)
       memcpy(g_warp_row, row, width * 4);
     for (int x = 0; x < width; x++) {
@@ -400,10 +435,15 @@ static void AreaRect(int head, int *x, int *y, int *size) {
   *size = kOverworldMapIsSmall[i] ? 512 : 1024;
 }
 
+// Is (x, y) inside the s x s square at (ax, ay)?
+static inline bool InSquare(int x, int y, int ax, int ay, int s) {
+  return x >= ax && x < ax + s && y >= ay && y < ay + s;
+}
+
 bool HdWorld_InsideCurrentArea(int wx, int wy) {
   int x, y, s;
   AreaRect(overworld_screen_index, &x, &y, &s);
-  return wx >= x && wx < x + s && wy >= y && wy < y + s;
+  return InSquare(wx, wy, x, y, s);
 }
 
 // ---------------------------------------------------------------------------
@@ -563,6 +603,7 @@ static int g_sight_px, g_sight_py;
 static uint8 g_sight_hp, g_sight_state, g_sight_alert;
 
 static bool IsAreaEnemy(int k);
+static void DropCompanionsOf(int k, int area);
 static int SpriteWorldX(int k);
 static int SpriteWorldY(int k);
 static int HeadAt(int wx, int wy);
@@ -573,6 +614,11 @@ static bool SightOn(int k) {
          main_module_index == 9 && IsAreaEnemy(k);
 }
 
+// The game marked table entry blk of the loaded area as already loaded
+static inline bool WasLoaded(int blk) {
+  return (overworld_sprite_was_loaded[blk >> 3] & (0x80 >> (blk & 7))) != 0;
+}
+
 // Punto di partenza di un nemico dell'area caricata dal suo blocco nella
 // tabella (sprite_N_word): angolo in alto a sinistra della casella 16x16
 static void BlkHome(uint16 blk, int *hx, int *hy) {
@@ -580,10 +626,15 @@ static void BlkHome(uint16 blk, int *hx, int *hy) {
   *hy = (sprcoll_y_base & 0xff00) + ((blk >> 10) << 8) + (blk & 0xf0);
 }
 
+// Centre of the 16x16 starting square of the table entry blk
+static void BlkCenter(uint16 blk, int *hx, int *hy) {
+  BlkHome(blk, hx, hy);
+  *hx += 8, *hy += 8;
+}
+
 // Punto di partenza (centro) del nemico k
 static void HomeOf(int k, int *hx, int *hy) {
-  BlkHome(sprite_N_word[k], hx, hy);
-  *hx += 8, *hy += 8;
+  BlkCenter(sprite_N_word[k], hx, hy);
 }
 
 // Distanza "a rettangolo": vale kSightLimit sul bordo della schermata
@@ -607,6 +658,7 @@ static uint8 g_hold[128][0x200];
 static void ResetEnemy(int k) {
   uint16 blk = sprite_N_word[k];
   uint8 bit = 0x80 >> (blk & 7);
+  DropCompanionsOf(k, BYTE(overworld_screen_index));  // reloaded, it makes them again
   sprite_state[k] = 0;
   spr_disturbed[k] = 0;
   overworld_sprite_was_loaded[blk >> 3] &= ~bit;
@@ -673,10 +725,14 @@ bool HdWorld_HoldReload(uint16 blk) {
 
 // Corvo che scappa e avvoltoio sveglio: come nell'originale volano finche'
 // escono dalla vista, poi spariscono (l'avvoltoio sveglio lontano da Link
-// sparisce subito e torna a dormire a casa)
+// sparisce subito e torna a dormire a casa).
+// Also the Haunted Grove animals (0x9e-0xa0) running away when the flute boy
+// vanishes: their "own screen" wall parked them just outside the area, seen
+// in the wide band
 static bool FliesUntilOffscreen(int k) {
   return (sprite_type[k] == 0x00 && sprite_ai_state[k] == 3) ||
-         (sprite_type[k] == 0x01 && sprite_ai_state[k] == 1);
+         (sprite_type[k] == 0x01 && sprite_ai_state[k] == 1) ||
+         (sprite_type[k] >= 0x9e && sprite_type[k] <= 0xa0 && sprite_ai_state[k] != 0);
 }
 
 void HdWorld_SpriteBegin(int k) {
@@ -855,8 +911,7 @@ static void ResetFarEnemies(int lx, int ly, const uint8 *main_ram) {
     if (!t || t >= 0xf4)
       continue;
     int hx, hy;
-    BlkHome(blk, &hx, &hy);
-    hx += 8, hy += 8;
+    BlkCenter(blk, &hx, &hy);
     if (!FarFromLink(hx, hy, lx, ly)) {
       revived[blk >> 3] &= ~bit;
       continue;
@@ -910,11 +965,14 @@ static void MakeRoomNearLink(void) {
   int best = -1, best_d = kSightLimit + 1;
   for (int blk = 0; blk < 0x1000; blk++) {
     uint8 t = sprite_where_in_overworld[blk];
-    if (!t || t >= 0xf4 || (overworld_sprite_was_loaded[blk >> 3] & (0x80 >> (blk & 7))))
+    if (!t || t >= 0xf4 || WasLoaded(blk))
+      continue;
+    // a held enemy cannot be loaded yet (HdWorld_HoldReload): picking it made
+    // room for nothing, removing one far enemy per frame
+    if (HdWorld_HoldReload(blk))
       continue;
     int hx, hy;
-    BlkHome(blk, &hx, &hy);
-    hx += 8, hy += 8;
+    BlkCenter(blk, &hx, &hy);
     int d = Dist2(hx, hy, lx, ly);
     if (d < best_d)
       best = blk, best_d = d;
@@ -967,6 +1025,11 @@ static bool PersistOn(void) {
   return FeatureOn() && BYTE(overworld_screen_index) < 0x80;
 }
 
+// Persistent world on and Link outdoors
+static bool PersistOutdoors(void) {
+  return PersistOn() && !player_is_indoors;
+}
+
 // Gioco normale (senza il mondo continuo), all'aperto: frecce piantate e
 // oggetti caduti restano anche qui, fino al cambio d'area (NormalGameArrows)
 static bool KeepInNormalGame(void) {
@@ -1010,6 +1073,22 @@ void HdWorld_ResetStates(void) {
     ForgetEnemies(i);
   g_state_epoch++;
   g_any_state = false;
+}
+
+// Changing world (mirror, portals, the Pyramid) forgets everything, as going
+// indoors does (user's choice, 07/11/2026): the original reloads the area from
+// scratch and some scenes rely on it (the flute boy and his animals came back
+// in the original, not with the remembered world). Called before the area's
+// remembered tiles and enemies are applied (HdWorld_EnterAreaTiles,
+// HdWorld_RestoreKilled) and when the current area is remembered
+static int g_mem_world = -1;
+static void ForgetOnWorldChange(void) {
+  if (g_hd_neighbor_tick || player_is_indoors)
+    return;
+  int w = BYTE(overworld_screen_index) & 0x40;
+  if (g_mem_world >= 0 && w != g_mem_world)
+    HdWorld_ResetStates();
+  g_mem_world = w;
 }
 
 static uint32 StateVersion(int head) {
@@ -1086,10 +1165,51 @@ static bool IsAreaEnemy(int k) {
   uint16 blk = sprite_N_word[k];
   if (!sprite_state[k] || blk >= 0x1000)
     return false;
-  if (!(overworld_sprite_was_loaded[blk >> 3] & (0x80 >> (blk & 7))))
+  if (!WasLoaded(blk))
     return false;
   uint8 t = sprite_where_in_overworld[blk];
   return t && t < 0xf4 && (uint8)(t - 1) == sprite_type[k];
+}
+
+// Area enemies that create other sprites when they appear (in their
+// SpritePrep: the bully of the pink ball, Debirando in its pit, the eyes of
+// the talking trees, the antifairy circles...). Those sprites
+// are not in the area table, so the persistent world must not bring such an
+// enemy back "as it was": it reappears new, with them, as in the original.
+// Learned once per area and type, running the preparation on a copy of the
+// game RAM with the other slots free. Only what the game never removes off
+// screen (sprite_defl_bits bit 7) counts: not the probes a soldier sends
+// while its preparation runs its first steps.
+typedef struct CompanionInfo { uint8 known, n, types[4]; } CompanionInfo;
+static CompanionInfo g_companions[128][256];
+static uint8 g_probe_ram[0x20000];
+
+static const CompanionInfo *Companions(int k, int area) {
+  CompanionInfo *ci = &g_companions[area & 0x7f][sprite_type[k]];
+  if (ci->known)
+    return ci;
+  memcpy(g_probe_ram, g_ram, sizeof(g_probe_ram));
+  for (int j = 0; j < 16; j++)
+    if (j != k)
+      sprite_state[j] = 0;
+  sprite_state[k] = 8;
+  int spawner = g_hd_spawner;
+  g_hd_spawner = k;
+  SpriteModule_Initialize(k);
+  g_hd_spawner = spawner;
+  uint8 types[4];
+  int n = 0;
+  for (int j = 0; j < 16; j++)
+    if (j != k && sprite_state[j] && (sprite_defl_bits[j] & 0x80) && n < 4)
+      types[n++] = sprite_type[j];
+  memcpy(g_ram, g_probe_ram, sizeof(g_probe_ram));
+  ci->known = 1, ci->n = n;
+  memcpy(ci->types, types, n);
+  return ci;
+}
+
+static bool HasCompanions(int k) {
+  return IsAreaEnemy(k) && Companions(k, BYTE(overworld_screen_index))->n != 0;
 }
 
 // Mondo vivo: un nemico dell'area che esce dalla vista continua a muoversi
@@ -1101,7 +1221,7 @@ static bool IsAreaEnemy(int k) {
 // lanciati da Link): spariscono solo quando Link esce dall'area in cui si
 // trovano (HdWorld_BeforeNewSprites; scelta dell'utente, 02/11/2026)
 bool HdWorld_KeepOffscreen(int k) {
-  if (!PersistOn() || player_is_indoors)
+  if (!PersistOutdoors())
     return false;
   return IsTimedDrop(k) || IsAreaEnemy(k) || (!g_hd_neighbor_tick && IsMarkedCarried(k));
 }
@@ -1116,16 +1236,16 @@ bool HdWorld_KeepDropNormal(int k) {
 // come nel gioco originale (chi segue Link ha sprite_N_word 0xffff). Nelle
 // copie delle aree vicine ci pensa LiveTick
 bool HdWorld_ConfinedToArea(int k) {
-  return PersistOn() && !player_is_indoors && !g_hd_neighbor_tick && IsAreaEnemy(k) && !FreeMover(k);
+  return PersistOutdoors() && !g_hd_neighbor_tick && IsAreaEnemy(k) && !FreeMover(k);
 }
 
 // Riporta dentro la sua area un nemico che ne e' uscito: dov'era prima, o
 // (se anche li' era fuori, per esempio in un salvataggio) appena dentro il bordo
 static void KeepInArea(int k, int ox, int oy, bool old_valid, int ax, int ay, int as) {
   int x = SpriteWorldX(k), y = SpriteWorldY(k);
-  if (x + 8 >= ax && x + 8 < ax + as && y + 8 >= ay && y + 8 < ay + as)
+  if (InSquare(x + 8, y + 8, ax, ay, as))
     return;
-  if (old_valid && ox + 8 >= ax && ox + 8 < ax + as && oy + 8 >= ay && oy + 8 < ay + as) {
+  if (old_valid && InSquare(ox + 8, oy + 8, ax, ay, as)) {
     x = ox, y = oy;
   } else {
     x = x < ax ? ax : x > ax + as - 16 ? ax + as - 16 : x;
@@ -1152,6 +1272,15 @@ static void LoadFields(int k, const uint8 *d) {
   }
 }
 
+// Sprites of a scene the original replays each time Link enters the area,
+// never remembered (neither alive nor gone): the Haunted Grove's flute boy
+// (0x2e, he vanishes when Link comes near) and his animals (0x9e-0xa0, they
+// run away then). Remembered, the boy stayed gone after Link left the area
+// and came back, and the animals waited for him forever
+static bool IsReplayedScene(uint8 type) {
+  return type == 0x2e || (type >= 0x9e && type <= 0xa0);
+}
+
 // Copia i nemici dell'area caricata in questo momento (quella corrente, o
 // un'area vicina nella sua copia dello stato del gioco)
 static void SnapshotEnemies(void) {
@@ -1160,7 +1289,7 @@ static void SnapshotEnemies(void) {
   // nemici vivi
   st->n_alive = 0;
   for (int k = 0; k < 16 && st->n_alive < kMaxAlive; k++) {
-    if (!IsAreaEnemy(k))
+    if (!IsAreaEnemy(k) || HasCompanions(k) || IsReplayedScene(sprite_type[k]))
       continue;
     EnemyRec *r = &st->alive[st->n_alive++];
     r->blk = sprite_N_word[k];
@@ -1172,10 +1301,10 @@ static void SnapshotEnemies(void) {
   // Quelli usciti dallo schermo il gioco li segna di nuovo come da caricare.
   st->n_killed = 0;
   for (int blk = 0; blk < 0x1000 && st->n_killed < kMaxKilled; blk++) {
-    if (!(overworld_sprite_was_loaded[blk >> 3] & (0x80 >> (blk & 7))))
+    if (!WasLoaded(blk))
       continue;
     uint8 t = sprite_where_in_overworld[blk];
-    if (!t || t >= 0xf4)
+    if (!t || t >= 0xf4 || IsReplayedScene(t - 1))
       continue;  // niente da caricare, o un generatore di nemici
     bool alive = false;
     for (int i = 0; i < st->n_alive && !alive; i++)
@@ -1195,6 +1324,7 @@ static void SnapshotEnemies(void) {
 
 // Copia lo stato dell'area corrente (una volta per frame di gioco)
 static void SnapshotArea(void) {
+  ForgetOnWorldChange();
   int a = BYTE(overworld_screen_index) & 0x7f;
   AreaState *st = &g_states[a];
   bool changed = !st->used;
@@ -1215,7 +1345,7 @@ static void SnapshotArea(void) {
 static bool RememberExtraIn(AreaState *st, uint16 pos, uint16 value);
 
 void HdWorld_RememberExtraTile(uint16 pos, uint16 value) {
-  if (!PersistOn() || player_is_indoors)
+  if (!PersistOutdoors())
     return;
   RememberExtraIn(&g_states[BYTE(overworld_screen_index) & 0x7f], pos, value);
 }
@@ -1330,6 +1460,7 @@ static void ApplyTiles(int head, bool memorize) {
 void HdWorld_EnterAreaTiles(bool memorize) {
   if (!PersistOn())
     return;
+  ForgetOnWorldChange();
   int a = BYTE(overworld_screen_index);
   TrailPush(g_last_head, a);  // (TrackMain non ha ancora visto l'area nuova)
   // i nemici delle aree scaricate tornano quelli di partenza
@@ -1352,10 +1483,30 @@ void HdWorld_RememberTiles(void) {
     Overworld_Memorize_Map16_Change(st->tile_pos[i], st->tile_val[i]);
 }
 
+// Highest free sprite slot (15 down to 0), -1 if all are taken
+// Free sprite slots: the enemies the world brings back always leave
+// kHdSpareSlots free for what is born while playing (see HdWorld_FreeSlot)
+int HdWorld_FreeSlotCount(void) {
+  int n = 0;
+  for (int i = 0; i < 16; i++)
+    n += !sprite_state[i];
+  return n;
+}
+
+static int FreeSlotFromTop(void) {
+  if (HdWorld_FreeSlotCount() <= kHdSpareSlots)
+    return -1;
+  int k = 15;
+  while (k >= 0 && sprite_state[k])
+    k--;
+  return k;
+}
+
 // Dopo che il gioco ha letto i nemici dell'area appena raggiunta
 void HdWorld_RestoreKilled(void) {
   if (!PersistOn())
     return;
+  ForgetOnWorldChange();
   AreaState *st = &g_states[BYTE(overworld_screen_index) & 0x7f];
   if (!st->used)
     return;
@@ -1364,14 +1515,20 @@ void HdWorld_RestoreKilled(void) {
   // i nemici vivi tornano com'erano, ognuno in un posto libero
   for (int i = 0; i < st->n_alive; i++) {
     EnemyRec *r = &st->alive[i];
-    int k = 15;
-    while (k >= 0 && sprite_state[k])
-      k--;
+    int k = FreeSlotFromTop();
     if (k < 0)
       break;  // niente posto: ricomparira' come nuovo
     LoadFields(k, r->data);
     overworld_sprite_was_loaded[r->blk >> 3] |= 0x80 >> (r->blk & 7);
   }
+}
+
+// Captured look of the enemy blk of area a, NULL if none
+static EnemyPatch *FindPatch(int a, uint16 blk) {
+  for (int j = 0; j < kMaxAlive; j++)
+    if (g_patches[a][j].valid && g_patches[a][j].blk == blk)
+      return &g_patches[a][j];
+  return NULL;
 }
 
 // Aspetto dei nemici sullo schermo (dal frame appena disegnato dalla PPU)
@@ -1394,10 +1551,7 @@ static void CaptureEnemies(uint8 *pixels, int pitch, int width, int height) {
     if (sx < 0 || sy < 0 || sx + kPatchW > width || sy + kPatchH > height)
       continue;  // non tutto sullo schermo: si tiene l'aspetto precedente
     uint16 blk = sprite_N_word[k];
-    EnemyPatch *pt = NULL;
-    for (int j = 0; j < kMaxAlive && !pt; j++)
-      if (g_patches[a][j].valid && g_patches[a][j].blk == blk)
-        pt = &g_patches[a][j];
+    EnemyPatch *pt = FindPatch(a, blk);
     for (int j = 0; j < kMaxAlive && !pt; j++)
       if (!g_patches[a][j].valid)
         pt = &g_patches[a][j];
@@ -1430,6 +1584,8 @@ static bool LiveShown(int a);
 
 // Nemici delle aree vicine, fermi come l'ultima volta che si sono visti
 // (quelle che non si muovono dal vivo)
+static bool BgHighAt(int sx, int sy);
+
 static void DrawFrozenEnemies(uint8 *pixels, int pitch, int width, int height, int cam_x, int cam_y) {
   int cur = BYTE(overworld_screen_index) & 0x7f;
   for (int a = 0; a < 128; a++) {
@@ -1441,17 +1597,7 @@ static void DrawFrozenEnemies(uint8 *pixels, int pitch, int width, int height, i
       EnemyRec *r = &st->alive[i];
       if (r->hidden)
         continue;
-      if (a == cur) {
-        bool loaded = false;
-        for (int k = 0; k < 16 && !loaded; k++)
-          loaded = sprite_state[k] && sprite_N_word[k] == r->blk;
-        if (loaded)
-          continue;
-      }
-      EnemyPatch *pt = NULL;
-      for (int j = 0; j < kMaxAlive && !pt; j++)
-        if (g_patches[a][j].valid && g_patches[a][j].blk == r->blk)
-          pt = &g_patches[a][j];
+      EnemyPatch *pt = FindPatch(a, r->blk);
       if (!pt)
         continue;
       int x0 = r->x + pt->ox - cam_x, y0 = r->y - r->z + pt->oy - cam_y;
@@ -1467,10 +1613,9 @@ static void DrawFrozenEnemies(uint8 *pixels, int pitch, int width, int height, i
           uint32 c = pt->pix[y * kPatchW + x];
           if (!c || (unsigned)sx >= (unsigned)width)
             continue;
-          uint32 l = row[sx] >> 24;
-          if (l == 2 || l == 4 || l == 6)
+          if (HdFx_IsHudOrSprite(row[sx]))
             continue;  // HUD e sprite veri restano davanti
-          if (HdWorld_InsideCurrentArea(cam_x + sx, cam_y + sy))
+          if (HdWorld_InsideCurrentArea(cam_x + sx, cam_y + sy) || BgHighAt(sx, sy))
             continue;
           row[sx] = Dim(c);
         }
@@ -1489,6 +1634,11 @@ static bool g_vis_valid;
 static int g_prev_module;
 static int g_prev_area = -1;      // area esterna nel frame precedente
 static bool g_vis_glide;          // uscita da una casa: la vista scivola al suo posto
+
+// Free view position rounded to the nearest pixel
+static inline int RoundVis(float v) {
+  return (int)floorf(v + 0.5f);
+}
 
 // Avvicina v a t, muovendosi al massimo quanto Link (m) piu' un quarto di
 // pixel; mentre Link cammina la vista non va mai nel verso opposto al suo,
@@ -1532,7 +1682,7 @@ void HdWorld_UpdateCamera(int *cam_x, int *cam_y) {
   // si apre il portone (chiesa, castello): la vista resta su Link
   int mode = !HdWorld_Active() ? 0 : InFluteArrival() || InSoftIris() ? 1 : main_module_index != 9 ? 0 :
              submodule_index == 0 || submodule_index == 9 || submodule_index == 10 || InMapReturn() ? 1 :
-             InMosaicTransition() ? 3 : 0;
+             InMosaicTransition() || InWarpView() ? 3 : 0;
   // Col mondo continuo il passaggio fra aree si fa tutto in un frame di gioco
   // (fasi 1-8 nello stesso frame, InstantWorldTransition): il cambio d'area
   // si riconosce dal numero dell'area
@@ -1562,12 +1712,7 @@ void HdWorld_UpdateCamera(int *cam_x, int *cam_y) {
     // gia' entro i limiti della vista (bordo del mondo, montagna): uscendo
     // dal Dominio di Zora la telecamera del gioco e' oltre e, finita la
     // dissolvenza, la vista saltava di 37 pixel
-    if (BYTE(overworld_screen_index) < 0x80) {
-      int cx = (int)floorf(g_vis_x + 0.5f), cy = (int)floorf(g_vis_y + 0.5f), vx = cx, vy = cy;
-      HdWorld_ClampView(&cx, &cy);
-      if (cx != vx) g_vis_x = (float)cx;
-      if (cy != vy) g_vis_y = (float)cy;
-    }
+    // (done after the if/else, the same as for the other modes)
   } else {
     // Appena finito il passaggio il gioco fissa il punto dello schermo in cui
     // tiene Link (camera_*_coord_scroll_hi) a modo suo, anche 20-30 pixel
@@ -1582,11 +1727,25 @@ void HdWorld_UpdateCamera(int *cam_x, int *cam_y) {
     // in basso con la vista spostata giu'
     if (area_changed && g_vis_valid) {
       bool vert = overworld_screen_transition < 2;
-      int px = lx - (int)floorf(g_vis_x + 0.5f), py = ly - (int)floorf(g_vis_y + 0.5f);
+      int px = lx - RoundVis(g_vis_x), py = ly - RoundVis(g_vis_y);
       if (vert)
         px = -1;
       else
         py = -1;
+      if (px > 16 && px < 240) {
+        camera_x_coord_scroll_hi = gx + px;
+        camera_x_coord_scroll_low = camera_x_coord_scroll_hi + 2;
+      }
+      if (py > 16 && py < 208) {
+        camera_y_coord_scroll_hi = gy + py;
+        camera_y_coord_scroll_low = camera_y_coord_scroll_hi + 2;
+      }
+    }
+    // Back to play on the Pyramid (after 21 or 24, whose view is the game's
+    // one): the game's scroll point is 3 pixels off Link and the view jumped
+    // when the text closed. It moves where Link is, as after an area change
+    if (!g_vis_valid && (prev_module == 21 || prev_module == 24)) {
+      int px = lx - gx, py = ly - gy;
       if (px > 16 && px < 240) {
         camera_x_coord_scroll_hi = gx + px;
         camera_x_coord_scroll_low = camera_x_coord_scroll_hi + 2;
@@ -1634,15 +1793,17 @@ void HdWorld_UpdateCamera(int *cam_x, int *cam_y) {
       g_vis_x = Approach(g_vis_x, (float)tx, mx);
       g_vis_y = Approach(g_vis_y, (float)ty, my);
     }
-    int vx = (int)floorf(g_vis_x + 0.5f), vy = (int)floorf(g_vis_y + 0.5f);
-    int cx = vx, cy = vy;
-    HdWorld_ClampView(&cx, &cy);
-    if (cx != vx) g_vis_x = (float)cx;
-    if (cy != vy) g_vis_y = (float)cy;
   }
+  // the view stays within its limits (HdWorld_ClampView; mode != 0 implies
+  // HdWorld_Active, so ClampViewArea directly)
+  int vx = RoundVis(g_vis_x), vy = RoundVis(g_vis_y);
+  int cx = vx, cy = vy;
+  ClampViewArea(&cx, &cy);
+  if (cx != vx) g_vis_x = (float)cx;
+  if (cy != vy) g_vis_y = (float)cy;
   g_vis_valid = true;
-  g_world_dx = (int)floorf(g_vis_x + 0.5f) - gx;
-  g_world_dy = (int)floorf(g_vis_y + 0.5f) - gy;
+  g_world_dx = RoundVis(g_vis_x) - gx;
+  g_world_dy = RoundVis(g_vis_y) - gy;
   *cam_x = gx + g_world_dx;
   *cam_y = gy + g_world_dy;
 }
@@ -1728,23 +1889,23 @@ static void ClampViewArea(int *cam_x, int *cam_y) {
   int rows = (ppu->renderFlags & kPpuRenderFlags_Height240) ? 240 : 224;
   int min_x = ext, max_x = 4096 - 256 - ext;
   int min_y = 0, max_y = kWorldBottom - 1 - rows;
+  // (every caller is outdoors: HdWorld_Active or InSpecialExit, so
+  // BYTE(overworld_screen_index) < 0x80)
   int bottom;
-  if (BYTE(overworld_screen_index) < 0x80 && PlainBelow(overworld_screen_index, &bottom))
+  if (PlainBelow(overworld_screen_index, &bottom))
     max_y = bottom - kHiddenRows - 1 - rows;
   if (gy < min_y) min_y = gy;
   if (gy - (rows - 224) > max_y) max_y = gy - (rows - 224);
   int top;
-  if (BYTE(overworld_screen_index) < 0x80 && MountainAbove(overworld_screen_index, &top) && top > min_y && gy >= top)
+  if (MountainAbove(overworld_screen_index, &top) && top > min_y && gy >= top)
     min_y = top;
-  if (BYTE(overworld_screen_index) < 0x80) {
-    int a = overworld_screen_index & 0x3f, x, y, s;
-    AreaRect(a, &x, &y, &s);
-    bool mountain = IsMountainCell(a);
-    if (OtherLevelAt(x - 1, y, s, mountain) && gx >= x && x + ext > min_x)
-      min_x = x + ext;
-    if (OtherLevelAt(x + s, y, s, mountain) && gx <= x + s - 256 && x + s - 256 - ext < max_x)
-      max_x = x + s - 256 - ext;
-  }
+  int a = overworld_screen_index & 0x3f, x, y, s;
+  AreaRect(a, &x, &y, &s);
+  bool mountain = IsMountainCell(a);
+  if (OtherLevelAt(x - 1, y, s, mountain) && gx >= x && x + ext > min_x)
+    min_x = x + ext;
+  if (OtherLevelAt(x + s, y, s, mountain) && gx <= x + s - 256 && x + s - 256 - ext < max_x)
+    max_x = x + s - 256 - ext;
   if (*cam_x < min_x) *cam_x = min_x;
   if (*cam_x > max_x) *cam_x = max_x;
   if (*cam_y < min_y) *cam_y = min_y;
@@ -1762,7 +1923,7 @@ typedef struct AnimCell {
 typedef struct AreaImage {
   uint32 key, version;
   int x, y, size;
-  uint32 *pix;     // size * size pixel 0xLLRRGGBB
+  uint32 *pix;     // size * size pixel 0xLLRRGGBB (bit 31: high-priority tile, BgHighAt)
   uint32 last_use;
   AnimCell *anim;
   int n_anim, cap_anim;
@@ -1796,10 +1957,10 @@ static void DrawLoadedArea(AreaImage *img) {
   uint16 chr_base = ppu->bgLayer[1].tileAdr;
   int n16 = img->size / 16;
   int a = BYTE(overworld_screen_index), sc = a & 0x3f;
-  bool backdrop_scene = sc == 0x03 || sc == 0x05 || sc == 0x07 || a == 0x5b;
   // sulla montagna le nuvole non hanno pennellate, come l'acqua (hd_fx.c,
   // HdFx_IsCloudColor)
   bool mountain = sc == 0x03 || sc == 0x05 || sc == 0x07;
+  bool backdrop_scene = mountain || a == 0x5b;
   uint32 backdrop = Bgr15ToPixel(HdFx_RealBg(main_palette_buffer, 0), backdrop_scene ? 3 : 5);
   for (int r = 0; r < n16; r++) {
     for (int c = 0; c < n16; c++) {
@@ -1811,8 +1972,16 @@ static void DrawLoadedArea(AreaImage *img) {
         int ox = c * 16 + (q & 1) * 8, oy = r * 16 + (q >> 1) * 8;
         const uint16 *t = &ppu->vram[(chr_base + tile * 16) & 0x7fff];
         uint8 at = attr8[e & 0x1ff];
-        bool water = (at == 0x08 || at == 0x09);
+        bool water = HdWater_IsWaterAttr(at);
         bool cloud_tile = mountain && HdFx_IsCloudTile(e);
+        // the pixel of each color of the tile (0 = background), with its layer
+        // sulla montagna lo sfondo e' il cielo anche nelle caselle che per
+        // il gioco sono acqua profonda (il vuoto oltre i dirupi)
+        uint32 color[16];
+        color[0] = water && !backdrop_scene ? (backdrop & 0xffffff) | 7u << 24 : backdrop;
+        for (int v = 1; v < 16; v++)
+          color[v] = Bgr15ToPixel(HdFx_RealBg(main_palette_buffer, pal * 16 + v),
+                                  water || (cloud_tile && HdFx_IsCloudColor(e, v)) ? 7 : 1);
         if (tile >= kAnimTileFirst && tile < kAnimTileEnd) {
           if (img->n_anim == img->cap_anim) {
             int cap = img->cap_anim ? img->cap_anim * 2 : 256;
@@ -1823,10 +1992,7 @@ static void DrawLoadedArea(AreaImage *img) {
           if (img->n_anim < img->cap_anim) {
             AnimCell *ac = &img->anim[img->n_anim++];
             ac->x = ox, ac->y = oy, ac->entry = e;
-            ac->color[0] = water && !backdrop_scene ? (backdrop & 0xffffff) | 7u << 24 : backdrop;
-            for (int v = 1; v < 16; v++)
-              ac->color[v] = Bgr15ToPixel(HdFx_RealBg(main_palette_buffer, pal * 16 + v),
-                                          water || (cloud_tile && HdFx_IsCloudColor(e, v)) ? 7 : 1);
+            memcpy(ac->color, color, sizeof(ac->color));
           }
         }
         for (int row = 0; row < 8; row++) {
@@ -1836,11 +2002,7 @@ static void DrawLoadedArea(AreaImage *img) {
           for (int col = 0; col < 8; col++) {
             int bit = hf ? col : 7 - col;
             int v = HdFx_Pixel4bpp(p01, p23, bit);
-            // sulla montagna lo sfondo e' il cielo anche nelle caselle che per
-            // il gioco sono acqua profonda (il vuoto oltre i dirupi)
-            dst[col] = v ? Bgr15ToPixel(HdFx_RealBg(main_palette_buffer, pal * 16 + v),
-                                        water || (cloud_tile && HdFx_IsCloudColor(e, v)) ? 7 : 1) :
-                       water && !backdrop_scene ? (backdrop & 0xffffff) | 7u << 24 : backdrop;
+            dst[col] = v ? color[v] | (e & 0x2000 ? 0x80000000u : 0) : color[0];
           }
         }
       }
@@ -1920,9 +2082,7 @@ static bool WorldMapOn(void) {
 int HdWorld_WorldTile(int px, int py) {
   if (!WorldMapOn() || px < 0 || py < 0 || px >= 4096 || py >= 4096)
     return -1;
-  int ax, ay, as;
-  AreaRect(overworld_screen_index, &ax, &ay, &as);
-  if (px >= ax && px < ax + as && py >= ay && py < ay + as)
+  if (HdWorld_InsideCurrentArea(px, py))
     return -1;  // area corrente: vale la mappa del gioco
   int head = HeadAt(px, py);
   if (head < 0)
@@ -1930,6 +2090,7 @@ int HdWorld_WorldTile(int px, int py) {
   AreaMap *m = GetMap(head);
   if (!m)
     return -1;
+  int ax, ay, as;
   AreaRect(head, &ax, &ay, &as);
   return m->tiles[((py - ay) >> 4) * 64 + ((px - ax) >> 4)];
 }
@@ -1939,11 +2100,11 @@ bool HdWorld_SeamlessOn(void) {
 }
 
 bool HdWorld_OutsideArea(int px, int py) {
-  if (!WorldMapOn())
-    return false;
-  int ax, ay, as;
-  AreaRect(overworld_screen_index, &ax, &ay, &as);
-  return px < ax || px >= ax + as || py < ay || py >= ay + as;
+  return WorldMapOn() && !HdWorld_InsideCurrentArea(px, py);
+}
+
+bool HdWorld_TerrainKnown(int px, int py) {
+  return !HdWorld_OutsideArea(px, py) || HdWorld_WorldTile(px, py) >= 0;
 }
 
 void HdWorld_LeaveArea(void) {
@@ -1968,11 +2129,23 @@ static void UpdateWorldMap(void) {
 static uint8 g_saved_ram[0x20000];
 static uint16 g_saved_vram[0x8000];
 
-static void RenderArea(AreaImage *img, int head) {
-  Ppu *ppu = g_zenv.ppu;
+// Shared by RenderArea and hd_pit.c BuildImage, never nested: both run
+// before the PPU draws, outside SaveMain (which reuses g_saved_ram during
+// HdWorld_TickNeighbors); GetMap, which can run inside them, has its own copy
+void HdWorld_SaveRamVram(void) {
   memcpy(g_saved_ram, g_ram, sizeof(g_saved_ram));
-  memcpy(g_saved_vram, ppu->vram, sizeof(g_saved_vram));
+  memcpy(g_saved_vram, g_zenv.ppu->vram, sizeof(g_saved_vram));
+}
 
+void HdWorld_RestoreRamVram(void) {
+  memcpy(g_ram, g_saved_ram, sizeof(g_saved_ram));
+  memcpy(g_zenv.ppu->vram, g_saved_vram, sizeof(g_saved_vram));
+}
+
+// Loads area head into the game state the way the game does leaving a house
+// (graphics, colors, tile map), plus the remembered tile changes, and stores
+// its tile map. The caller saves and restores the real state
+static void LoadAreaLikeExit(int head) {
   // Stessa preparazione di quando si esce all'aperto da una casa
   overworld_screen_index = head;
   Overworld_LoadGFXAndScreenSize();
@@ -1985,11 +2158,14 @@ static void RenderArea(AreaImage *img, int head) {
   Overworld_HandleOverlaysAndBombDoors();
   ApplyTiles(head, false);  // cespugli tagliati e simili (mondo persistente)
   StoreMap(head);
-  Overworld_GbaBridgeChars(ppu, head);  // la VRAM si ripristina qui sotto
-  DrawLoadedArea(img);
+}
 
-  memcpy(g_ram, g_saved_ram, sizeof(g_saved_ram));
-  memcpy(ppu->vram, g_saved_vram, sizeof(g_saved_vram));
+static void RenderArea(AreaImage *img, int head) {
+  HdWorld_SaveRamVram();
+  LoadAreaLikeExit(head);
+  Overworld_GbaBridgeChars(g_zenv.ppu, head);  // la VRAM si ripristina qui sotto
+  DrawLoadedArea(img);
+  HdWorld_RestoreRamVram();
 }
 
 // Disegna in pix (w x h, 0x00RRGGBB) il pezzo di mondo (0 chiaro, 0x40
@@ -2074,6 +2250,56 @@ static int HeadAt(int wx, int wy) {
   return Overworld_AreaHead((wy >> 9) * 8 + (wx >> 9)) | world;
 }
 
+// Columns of the current area that the PPU has around the game camera (ext
+// more pixels per side with the wide screen); the rest of the view comes
+// from the area images (HdWorld_Composite)
+static void LoadedColumns(int ext, int *x0, int *x1) {
+  int ax, ay, as;
+  AreaRect(overworld_screen_index, &ax, &ay, &as);
+  *x0 = (int16)BG2HOFS_copy - ext, *x1 = (int16)BG2HOFS_copy + 256 + ext;
+  // mulinello: all'arrivo il gioco carica solo le 256 colonne normali, le
+  // altre ripetono un pezzo di mappa finche' il passaggio non e' finito
+  if (main_module_index == 9 && submodule_index == 0x2e)
+    *x0 += ext, *x1 -= ext;
+  if (*x0 < ax) *x0 = ax;
+  if (*x1 > ax + as) *x1 = ax + as;
+}
+
+// Where the frame being composed shows the world (set by HdWorld_Composite)
+static struct { int cam_x, cam_y, in_x0, in_x1, ax, ay, ay1; } g_bgq;
+
+// Is the screen pixel (sx, sy) a non-transparent BG2 tile pixel with the
+// priority bit (tree canopies, roofs, bridges)? The sprites drawn apart (the
+// neighbor areas, the guests, the pieces beyond the area border, the frozen
+// enemies) are pasted over the finished frame: without this check they ended
+// up over the canopies that hide Link and the enemies of the game
+static bool BgHighAt(int sx, int sy) {
+  int wx = g_bgq.cam_x + sx, wy = g_bgq.cam_y + sy;
+  if (wx >= g_bgq.in_x0 && wx < g_bgq.in_x1 && wy >= g_bgq.ay && wy < g_bgq.ay1) {
+    // drawn by the PPU: the tile of the game's map
+    uint16 m16 = dung_bg2[((wy - g_bgq.ay) >> 4) * 64 + ((wx - g_bgq.ax) >> 4)];
+    uint16 e = GetMap16toMap8Table()[m16 * 4 + (wy >> 3 & 1) * 2 + (wx >> 3 & 1)];
+    if (!(e & 0x2000))
+      return false;
+    Ppu *ppu = g_zenv.ppu;
+    int row = e & 0x8000 ? 7 - (wy & 7) : wy & 7, col = wx & 7;
+    const uint16 *t = &ppu->vram[(ppu->bgLayer[1].tileAdr + (e & 0x3ff) * 16) & 0x7fff];
+    return HdFx_Pixel4bpp(t[row], t[row + 8], e & 0x4000 ? col : 7 - col) != 0;
+  }
+  int head = HeadAt(wx, wy);
+  if (head < 0)
+    return false;
+  static int last_head = -1;
+  static AreaImage *last_img;
+  AreaImage *img = last_head == head && last_img && last_img->key == AreaKey(head) ? last_img : GetAreaImage(head);
+  last_head = head, last_img = img;
+  if (!img)
+    return false;
+  int ix = wx - img->x, iy = IntMin(wy - img->y, img->size - kHiddenRows - 1);
+  return (unsigned)ix < (unsigned)img->size && (unsigned)iy < (unsigned)img->size &&
+         img->pix[iy * img->size + ix] >> 31;
+}
+
 // Prepara in anticipo, una per frame, le aree che confinano con quella
 // corrente: quando compaiono sullo schermo sono gia' pronte
 static void PrefetchNeighbors(void) {
@@ -2138,23 +2364,24 @@ static void OverlayBegin(OverlayCtx *o, int ext) {
 // dove e' trasparente
 static int OverlayColor(const OverlayCtx *o, int sx, int sy) {
   Ppu *ppu = g_zenv.ppu;
-  const BgLayer *bg = &ppu->bgLayer[0];
-  int px = (o->x0 + sx) & 0x3ff, py = (o->y0 + sy) & 0x3ff;
-  int tx = px >> 3 & 63, ty = py >> 3 & 63;
-  uint16 adr = HdFx_VramMapAdr(bg, tx, ty);
-  uint16 e = ppu->vram[adr & 0x7fff];
-  int row = (e & 0x8000) ? 7 - (py & 7) : (py & 7);
-  int bit = (e & 0x4000) ? (px & 7) : 7 - (px & 7);
-  const uint16 *t = &ppu->vram[(bg->tileAdr + (e & 0x3ff) * 16) & 0x7fff];
-  uint16 p01 = t[row], p23 = t[row + 8];
-  int v = HdFx_Pixel4bpp(p01, p23, bit);
-  return v ? HdFx_RealBg(ppu->cgram, (e >> 10 & 7) * 16 + v) : -1;
+  int c = HdFx_BgTilePixel(ppu, &ppu->bgLayer[0], o->x0 + sx, o->y0 + sy);
+  return c ? HdFx_RealBg(ppu->cgram, c) : -1;
 }
 
 int HdWorld_OverlayColorAt(int sx, int sy) {
   OverlayCtx o;
   OverlayBegin(&o, g_zenv.ppu->extraLeftRight);
   return OverlayColor(&o, sx, sy);
+}
+
+// Fixed color of the color math (COLDATA) as BGR555
+static inline int FixedColor15(const Ppu *ppu) {
+  return ppu->fixedColorR | ppu->fixedColorG << 5 | ppu->fixedColorB << 10;
+}
+
+// Channels r, g, b (>= 0) capped at 255, with the layer byte of c
+static inline uint32 PackSat(uint32 c, int r, int g, int b) {
+  return (c & 0xff000000) | (r > 255 ? 255 : r) << 16 | (g > 255 ? 255 : g) << 8 | (b > 255 ? 255 : b);
 }
 
 static inline uint32 OverlayBlend(const OverlayCtx *o, uint32 c, int sx, int sy) {
@@ -2169,7 +2396,7 @@ static inline uint32 OverlayBlend(const OverlayCtx *o, uint32 c, int sx, int sy)
     int col = OverlayColor(o, sx, sy);
     bool half = o->half && col >= 0;
     if (col < 0)
-      col = ppu->fixedColorR | ppu->fixedColorG << 5 | ppu->fixedColorB << 10;
+      col = FixedColor15(ppu);
     int base = ppu->cgram[0], ch[3];
     for (int k = 0; k < 3; k++) {
       int v = (base >> (5 * k) & 31) + (col >> (5 * k) & 31);
@@ -2186,12 +2413,12 @@ static inline uint32 OverlayBlend(const OverlayCtx *o, uint32 c, int sx, int sy)
     // somma piena come la PPU (lampi): strato, o colore fisso dove e' trasparente
     Ppu *ppu = g_zenv.ppu;
     if (col < 0)
-      col = ppu->fixedColorR | ppu->fixedColorG << 5 | ppu->fixedColorB << 10;
+      col = FixedColor15(ppu);
     if (!col)
       return c;
     uint32 oc = Dim(HdFx_Bgr15ToRgb((uint16)col));
     int r = (c >> 16 & 255) + (oc >> 16 & 255), g = (c >> 8 & 255) + (oc >> 8 & 255), b = (c & 255) + (oc & 255);
-    return (c & 0xff000000) | (r > 255 ? 255 : r) << 16 | (g > 255 ? 255 : g) << 8 | (b > 255 ? 255 : b);
+    return PackSat(c, r, g, b);
   }
   if (col < 0)
     return c;  // trasparente: il terreno resta com'e'
@@ -2203,7 +2430,7 @@ static inline uint32 OverlayBlend(const OverlayCtx *o, uint32 c, int sx, int sy)
   int r = oc >> 16 & 255, g = oc >> 8 & 255, b = oc & 255;
   if (o->blend) {  // lampi della pioggia con Meno flash GBA
     r = ((c >> 16 & 255) + r) * o->blend >> 4, g = ((c >> 8 & 255) + g) * o->blend >> 4, b = ((c & 255) + b) * o->blend >> 4;
-    return (c & 0xff000000) | (r > 255 ? 255 : r) << 16 | (g > 255 ? 255 : g) << 8 | (b > 255 ? 255 : b);
+    return PackSat(c, r, g, b);
   }
   return (c & 0xff000000) | (((c >> 16 & 255) + r) >> 1) << 16 | (((c >> 8 & 255) + g) >> 1) << 8 | ((c & 255) + b) >> 1;
 }
@@ -2211,7 +2438,7 @@ static inline uint32 OverlayBlend(const OverlayCtx *o, uint32 c, int sx, int sy)
 // Ridisegna le caselle animate delle immagini visibili con il fotogramma
 // d'animazione attuale (stessa memoria video per tutte le aree dello stesso
 // mondo), dove il fondale viene dalle immagini
-static void DrawAnimatedCells(uint8 *pixels, int pitch, int width, int height, int cam_x, int cam_y, bool all,
+static void DrawAnimatedCells(uint8 *pixels, int pitch, int width, int height, int cam_x, int cam_y,
                               const OverlayCtx *ov) {
   Ppu *ppu = g_zenv.ppu;
   uint16 chr_base = ppu->bgLayer[1].tileAdr;
@@ -2219,12 +2446,10 @@ static void DrawAnimatedCells(uint8 *pixels, int pitch, int width, int height, i
   // telecamera morbida la vista va qualche pixel oltre, e li' anche le celle
   // dell'area corrente vengono dall'immagine (con il disegno di quando e'
   // stata fatta: sui bordi della palude restavano pezzi marroni)
-  int ext = (width - 256) / 2;
-  int in_x0 = (int16)BG2HOFS_copy - ext, in_x1 = (int16)BG2HOFS_copy + 256 + ext;
-  // mulinello: all'arrivo il gioco carica solo le 256 colonne normali, le
-  // altre ripetono un pezzo di mappa finche' il passaggio non e' finito
-  if (main_module_index == 9 && submodule_index == 0x2e)
-    in_x0 += ext, in_x1 -= ext;
+  // (LoadedColumns also clamps them to the current area: same result, they
+  // are only compared with cells inside it)
+  int in_x0, in_x1;
+  LoadedColumns((width - 256) / 2, &in_x0, &in_x1);
   for (int i = 0; i < kMaxImages; i++) {
     AreaImage *img = &g_images[i];
     if (!img->key || !img->n_anim || ((img->key ^ BYTE(overworld_screen_index)) & 0x40) ||
@@ -2247,7 +2472,7 @@ static void DrawAnimatedCells(uint8 *pixels, int pitch, int width, int height, i
       // celle allineate a 8 pixel e aree a 512: questi controlli valgono per
       // tutta la cella
       int cwx = img->x + ac->x, cwy = img->y + ac->y;
-      bool by_game = !all && HdWorld_InsideCurrentArea(cwx, cwy);
+      bool by_game = HdWorld_InsideCurrentArea(cwx, cwy);
       bool part = by_game && (cwx < in_x0 || cwx + 8 > in_x1);  // in parte oltre le colonne del gioco
       if (by_game && !hidden && !part)
         continue;  // qui disegna gia' il gioco (tranne le righe nascoste)
@@ -2275,8 +2500,7 @@ static void DrawAnimatedCells(uint8 *pixels, int pitch, int width, int height, i
             continue;
           if (game_row && cwx + col >= in_x0 && cwx + col < in_x1)
             continue;
-          uint32 l = dst[sx] >> 24;
-          if (l == 2 || l == 4 || l == 6)
+          if (HdFx_IsHudOrSprite(dst[sx]))
             continue;  // HUD e sprite restano davanti
           int bit = hf ? col : 7 - col;
           int v = HdFx_Pixel4bpp(p01, p23, bit);
@@ -2341,6 +2565,7 @@ static bool g_carried[16];  // nemico che segue Link fuori dalla sua area
 static uint16 g_chase_x[16], g_chase_y[16];
 static Ppu *g_guest_ppu;
 static uint32 *g_guest_pix, *g_guest_tmp;
+static int g_guest_y0, g_guest_y1;  // rows of g_guest_pix with something (DrawGuests)
 static int g_guest_w, g_guest_h;
 static bool g_guest_drawn;
 // Voci OAM del gioco nascoste per questo disegno (si rimettono dopo: con
@@ -2463,8 +2688,7 @@ static void TrackMain(void) {
     if (held)
       g_thrown[k] = kThrownFrames;
     else if (g_thrown[k] && --g_thrown[k] && IsAreaEnemy(k)) {
-      int cx = SpriteWorldX(k) + 8, cy = SpriteWorldY(k) + 8;
-      if (cx < ax || cx >= ax + as || cy < ay || cy >= ay + as)
+      if (!InSquare(SpriteWorldX(k) + 8, SpriteWorldY(k) + 8, ax, ay, as))
         MakeGuest(k, cur), g_thrown[k] = 0;
     }
     // i nemici dell'area che camminano (non chi segue Link) non ne escono,
@@ -2488,6 +2712,80 @@ static void TrackMain(void) {
   UpdateWorldMap();
 }
 
+// Guest k leaves the game and goes back home (like an enemy that lost Link,
+// HdWorld_CarriedLost); its separate drawing is dropped
+static void GuestSendHome(int k) {
+  Guest *g = GuestFind(k);
+  if (g)
+    g->used = false;
+  HdWorld_CarriedLost(k);
+  sprite_state[k] = 0;
+}
+
+// Guest k stops following Link while it is inside its home area: it becomes
+// that area's enemy again, where it stands, and the area's copy moves it on
+// (before, it vanished in view when Link changed area). The copy is rebuilt
+// from the area's records, so a copy already running picks it up too.
+// False when it can't (not at home, area not remembered, no room)
+static bool GuestBackHome(int k) {
+  if (!IsMarkedCarried(k))
+    return false;
+  int a = carried_area[k] & 0x7f;
+  uint16 blk = carried_blk[k];
+  AreaState *st = &g_states[a];
+  int ax, ay, as;
+  AreaRect(a, &ax, &ay, &as);
+  if (!st->used || st->n_alive >= kMaxAlive || IsHoming(a, blk) ||
+      !InSquare(SpriteWorldX(k) + 8, SpriteWorldY(k) + 8, ax, ay, as))
+    return false;
+  int j = 0;
+  for (int i = 0; i < st->n_killed; i++)
+    if (st->killed[i] != blk)
+      st->killed[j++] = st->killed[i];
+  st->n_killed = j;
+  sprite_N_word[k] = blk;
+  EnemyRec *r = &st->alive[st->n_alive++];
+  r->blk = blk;
+  r->x = SpriteWorldX(k), r->y = SpriteWorldY(k), r->z = sprite_z[k];
+  r->hidden = false;
+  SaveFields(k, r->data);
+  LiveDropArea(a);
+  Guest *g = GuestFind(k);
+  if (g)
+    g->used = false;
+  carried_area[k] = 0;
+  g_carried[k] = false;
+  sprite_state[k] = 0;
+  return true;
+}
+
+// Removes the sprites that area enemy k created when it appeared (see
+// Companions): it leaves, and when it is loaded again it makes new ones
+static void DropCompanionsOf(int k, int area) {
+  if (!IsAreaEnemy(k))
+    return;
+  const CompanionInfo *ci = Companions(k, area);
+  for (int j = 0; j < 16; j++) {
+    if (j == k || !sprite_state[j] || sprite_N_word[j] != 0xffff || GuestFind(j) || IsMarkedCarried(j) ||
+        g_thrown[j] || IsFollower(j, g_chase[j]))
+      continue;
+    for (int i = 0; i < ci->n; i++)
+      if (sprite_type[j] == ci->types[i]) {
+        sprite_state[j] = 0;
+        break;
+      }
+  }
+}
+
+// A sprite without an area (shots, avenger cuccos...) that crosses the border
+// with Link keeps the graphics of the area it was born in, as guests do: in
+// the new area its tiles and palette are another area's (cuccos turned into
+// orange bats)
+static void KeepAreaGfx(int k) {
+  if (g_area_gfx_valid && sprite_N_word[k] == 0xffff && !GuestFind(k))
+    GuestAdd(k, &g_area_gfx);
+}
+
 void HdWorld_BeforeNewSprites(void) {
   if (!PersistOn() || g_last_head < 0 || g_last_head == BYTE(overworld_screen_index))
     return;
@@ -2505,33 +2803,33 @@ void HdWorld_BeforeNewSprites(void) {
       // continuano il loro volo: alla fine del passaggio il gioco li
       // toglierebbe (Sprite_InitializeSlots)
       sprite_room[k] = BYTE(overworld_area_index);
+      KeepAreaGfx(k);
       continue;
     }
     // chi vola (corvi...) ed e' gia' nell'area nuova resta con Link
     int cx = SpriteWorldX(k) + 8, cy = SpriteWorldY(k) + 8;
-    bool flies_in = FreeMover(k) && cx >= ax && cx < ax + as && cy >= ay && cy < ay + as;
+    bool in_new = InSquare(cx, cy, ax, ay, as);
+    bool flies_in = FreeMover(k) && in_new;
     if (!IsFollower(k, g_chase[k]) && !flies_in && !held) {
       // ospite che non segue Link: Link esce dall'area in cui si trova, e lui
       // sparisce e torna a casa (come chi perde Link, HdWorld_CarriedLost);
       // se e' gia' nell'area nuova resta
-      bool in_new = cx >= ax && cx < ax + as && cy >= ay && cy < ay + as;
       if (!area && IsMarkedCarried(k) && !in_new) {
-        Guest *g = GuestFind(k);
-        if (g)
-          g->used = false;
-        HdWorld_CarriedLost(k);
-        sprite_state[k] = 0;
+        if (!GuestBackHome(k))
+          GuestSendHome(k);
         continue;
       }
-      if (!area)
-        sprite_room[k] = BYTE(overworld_area_index);
       // resta nella sua area (mondo persistente): li' lo muove la sua copia
       if (area)
-        sprite_state[k] = 0;
+        DropCompanionsOf(k, g_last_head), sprite_state[k] = 0;
+      else
+        sprite_room[k] = BYTE(overworld_area_index);
       continue;
     }
     if (area)
       MakeGuest(k, g_last_head);
+    else
+      KeepAreaGfx(k);
     g_thrown[k] = 0;
     g_chase[k] = kChaseMax;
     g_carried[k] = true;
@@ -2544,9 +2842,7 @@ void HdWorld_BeforeNewSprites(void) {
 // I nemici arrivati dalle aree vicine entrano nel gioco vero
 static void InsertPending(void) {
   for (int i = 0; i < g_n_pending; i++) {
-    int k = 15;
-    while (k >= 0 && sprite_state[k])
-      k--;
+    int k = FreeSlotFromTop();
     if (k < 0)
       break;
     LoadFields(k, g_pending[i].rec.data);
@@ -2567,6 +2863,10 @@ static void InsertPending(void) {
 // Dopo il caricamento di un salvataggio (il mondo persistente e' ripartito
 // da zero): chi seguiva Link resta sconfitto nella sua area
 void HdWorld_AfterLoad(void) {
+  // the free view starts again from the loaded game (not from the old view)
+  g_vis_valid = false, g_vis_glide = false;
+  g_prev_area = -1, g_prev_module = main_module_index;
+  g_world_dx = g_world_dy = 0;
   g_room_n_arrows = 0;  // le frecce della stanza non vengono dal salvataggio
   memset(g_guests, 0, sizeof(g_guests));
   memset(g_carried, 0, sizeof(g_carried));
@@ -2579,7 +2879,7 @@ void HdWorld_AfterLoad(void) {
     g_chase[k] = 0, g_chase_type[k] = sprite_state[k] ? sprite_type[k] : 0xff;
     g_chase_x[k] = SpriteWorldX(k), g_chase_y[k] = SpriteWorldY(k);
   }
-  if (!PersistOn() || player_is_indoors)
+  if (!PersistOutdoors())
     return;
   for (int k = 0; k < 16; k++) {
     if (!IsMarkedCarried(k))
@@ -2646,11 +2946,7 @@ int HdWorld_FreeSlot(int k, int last) {
   if (link && !g_hd_neighbor_tick) {
     int j = PickGuest(k, last);
     if (j >= 0) {
-      Guest *g = GuestFind(j);
-      if (g)
-        g->used = false;
-      HdWorld_CarriedLost(j);
-      sprite_state[j] = 0;
+      GuestSendHome(j);
       return j;
     }
   }
@@ -2670,6 +2966,27 @@ static void HideObj(Ppu *p, int i) {
   p->objY[i] = -1000;
 }
 
+// Per-sprite effects of the game (ice, under water, drawn as background)
+// that do not apply to a separate drawing
+static void ClearObjEffects(Ppu *p) {
+  memset(p->objIce, 0, sizeof(p->objIce));
+  memset(p->objUnderWater, 0, sizeof(p->objUnderWater));
+  memset(p->objAsBg, 0, sizeof(p->objAsBg));
+}
+
+// Starts a drawing of PPU copy p into pix (width wide, mp's render flags)
+// with only the sprites, no window, color math or mosaic
+static void SpritesOnlyBegin(Ppu *p, uint32 *pix, int width, const Ppu *mp) {
+  p->brightness = 15;  // la luminosita' del gioco si applica dopo (Dim)
+  p->forcedBlank = false;
+  PpuBeginDrawing(p, (uint8 *)pix, width * 4, mp->renderFlags);
+  p->screenEnabled[0] = 0x10, p->screenEnabled[1] = 0;  // solo gli sprite
+  p->screenWindowed[0] = p->screenWindowed[1] = 0;
+  p->mathEnabled = 0, p->addSubscreen = p->subtractColor = p->halfColor = false;
+  p->clipMode = p->preventMathMode = 0;
+  p->mosaicEnabled = 0, p->mosaicSize = 1;
+}
+
 // Disegna a parte (sopra al fondale, dietro all'HUD: DrawGuests) le voci OAM
 // scelte, con la grafica gfx (NULL: quella del gioco); nel gioco spariscono
 static void RenderApart(const bool *sel, const GuestGfx *gfx, int width, int height) {
@@ -2687,8 +3004,10 @@ static void RenderApart(const bool *sel, const GuestGfx *gfx, int width, int hei
       return;
     }
   }
-  if (!g_guest_drawn)
+  if (!g_guest_drawn) {
     memset(g_guest_pix, 0, (size_t)width * height * 4);
+    g_guest_y0 = height, g_guest_y1 = 0;
+  }
   // nella copia solo i pezzi scelti; nel gioco spariscono
   Ppu *p = g_guest_ppu;
   memcpy(p, mp, sizeof(Ppu));
@@ -2700,31 +3019,28 @@ static void RenderApart(const bool *sel, const GuestGfx *gfx, int width, int hei
     }
     else
       HideObj(p, i);
+  p->objPrioOut = true;  // for BgHighAt in DrawGuests
   if (gfx) {
     LoadGfx(p, gfx);
-    memset(p->objIce, 0, sizeof(p->objIce));
-    memset(p->objUnderWater, 0, sizeof(p->objUnderWater));
-    memset(p->objAsBg, 0, sizeof(p->objAsBg));
+    ClearObjEffects(p);
   }
-  p->brightness = 15;  // la luminosita' del gioco si applica dopo (Dim)
-  p->forcedBlank = false;
-  PpuBeginDrawing(p, (uint8 *)g_guest_tmp, width * 4, mp->renderFlags);
-  p->screenEnabled[0] = 0x10, p->screenEnabled[1] = 0;  // solo gli sprite
-  p->screenWindowed[0] = p->screenWindowed[1] = 0;
-  p->mathEnabled = 0, p->addSubscreen = p->subtractColor = p->halfColor = false;
-  p->clipMode = p->preventMathMode = 0;
-  p->mosaicEnabled = 0, p->mosaicSize = 1;
+  SpritesOnlyBegin(p, g_guest_tmp, width, mp);
   // l'ombra morbida dei suoi pezzi va nella stessa mappa delle ombre del
   // gioco (objShadowOut e objCastShadow copiati da HdFx_ShadowsBeforeRender,
   // che ha gia' nascosto la sua ombra del gioco)
-  for (int i = 0; i <= height; i++)
+  // only the rows with its sprites (the others of g_guest_tmp stay old)
+  int y0, y1;
+  PpuObjRows(p, height, &y0, &y1);
+  for (int i = y0 + 1; i <= y1; i++)
     ppu_runLine(p, i);
   int n = 0;
-  for (int i = 0; i < width * height; i++) {
-    uint32 c = g_guest_tmp[i], l = c >> 24;
+  for (int i = y0 * width; i < y1 * width; i++) {
+    uint32 c = g_guest_tmp[i], l = c >> 24 & 15;
     if ((l == 4 || l == 6) && !g_guest_pix[i])
       g_guest_pix[i] = c, n++;
   }
+  if (n)
+    g_guest_y0 = IntMin(g_guest_y0, y0), g_guest_y1 = IntMax(g_guest_y1, y1);
   if (!n) {
     // niente disegnato (fuori dallo schermo o altro): lo disegna il gioco,
     // anche con la grafica sbagliata, piuttosto che sparire
@@ -2765,13 +3081,11 @@ void HdWorld_BeforeRender(int width, int height) {
       (g_world_dx == 0 && g_world_dy == 0 && mp->extraLeftRight == 0))
     return;
   int ext = (width - 256) / 2;
-  int cam_x = (int16)BG2HOFS_copy + mp->bgBiasX - ext;  // come HdWorld_Composite
-  int cam_y = (int16)BG2VOFS_copy + mp->bgBiasY + 1;
-  int ax, ay, as;
+  int cam_x, cam_y;
+  FrameCam(width, &cam_x, &cam_y);  // come HdWorld_Composite
+  int ax, ay, as, in_x0, in_x1;
   AreaRect(overworld_screen_index, &ax, &ay, &as);
-  int in_x0 = (int16)BG2HOFS_copy - ext, in_x1 = (int16)BG2HOFS_copy + 256 + ext;
-  if (in_x0 < ax) in_x0 = ax;
-  if (in_x1 > ax + as) in_x1 = ax + as;
+  LoadedColumns(ext, &in_x0, &in_x1);
   int in_y1 = ay + as - kHiddenRows;
   bool any = false;
   for (int i = 0; i < 128; i++) {
@@ -2813,20 +3127,35 @@ static void GuestRestoreOam(void) {
       UnhideObj(g_zenv.ppu, i);
 }
 
+// A sprite pixel of a copy (Ppu.objPrioOut) with priority 0-2 goes behind
+// the high-priority BG2 tiles (z-buffer level 11, see ppu.c)
+static inline bool SpriteBehindBg(uint32 c, int x, int y) {
+  return (c >> 28) < 11 && BgHighAt(x, y);
+}
+
+// Pastes the sprite pixels (layer 4 or 6) of rows y0..y1-1 of src, drawn by
+// a copy of the PPU, over the frame: behind the HUD, the real sprites and the
+// high-priority BG2 tiles
+static void PasteSprites(uint8 *pixels, int pitch, int width, const uint32 *pix, int y0, int y1,
+                         const OverlayCtx *ov) {
+  for (int y = y0; y < y1; y++) {
+    uint32 *row = (uint32 *)(pixels + y * pitch);
+    const uint32 *src = pix + y * width;
+    for (int x = 0; x < width; x++) {
+      uint32 c = src[x], l = c >> 24 & 15, dl = row[x] >> 24;
+      if ((l != 4 && l != 6) || dl == 2 || dl == 4 || dl == 6 || SpriteBehindBg(c, x, y))
+        continue;
+      row[x] = OverlayBlend(ov, Dim(c & 0x0fffffff), x, y);
+    }
+  }
+}
+
 // I nemici disegnati a parte, sopra al fondale e dietro all'HUD
 static void DrawGuests(uint8 *pixels, int pitch, int width, int height, const OverlayCtx *ov) {
   if (!g_guest_drawn || g_guest_w != width || g_guest_h != height)
     return;
-  for (int y = 0; y < height; y++) {
-    uint32 *row = (uint32 *)(pixels + y * pitch);
-    const uint32 *src = g_guest_pix + y * width;
-    for (int x = 0; x < width; x++) {
-      uint32 c = src[x], dl = row[x] >> 24;
-      if (!c || dl == 2 || dl == 4 || dl == 6)
-        continue;
-      row[x] = OverlayBlend(ov, Dim(c), x, y);
-    }
-  }
+  // (g_guest_pix holds only sprite pixels, layer 4 or 6, or 0: RenderApart)
+  PasteSprites(pixels, pitch, width, g_guest_pix, g_guest_y0, g_guest_y1, ov);
 }
 
 // ---------------------------------------------------------------------------
@@ -2845,9 +3174,13 @@ static void DrawGuests(uint8 *pixels, int pitch, int width, int height, const Ov
 // erano. La PPU della copia disegna solo i suoi sprite, che si mettono sul
 // fotogramma oltre il bordo.
 
-// Tutto il mondo e' attivo: ogni area del mondo di Link ha la sua copia, che
-// fa un passo a ogni frame. Solo quelle che toccano la vista (near) si
-// disegnano. Si prepara al massimo una copia per frame, prima le vicine.
+// Active areas (AreaKept): every area touching Link's one, diagonals included
+// (8 around a normal area, up to 12 around a big one), plus the last
+// kTrailLen areas crossed. Each has its own copy that takes a step every
+// frame. From a big area a neighbor is built only when the view nears its
+// border (kBigReach) and dropped when it moves away (kBigKeep); the trail
+// always stays. Only the copies touching the view (near, kLiveMargin) are
+// drawn. At most one copy is built per frame, the near ones first.
 enum { kMaxLive = 64, kLiveMargin = 96 };
 
 typedef struct LiveArea {
@@ -2857,6 +3190,7 @@ typedef struct LiveArea {
   bool near;           // tocca la vista (con il margine): si disegna
   bool fresh;          // ha fatto un passo: gli sprite vanno ridisegnati
   bool drawn;          // pix contiene gli sprite dell'ultimo passo
+  int pix_y0, pix_y1;  // rows of pix with sprites (LiveRender), the others are old
   uint8 *ram;          // copia di g_ram
   Ppu *ppu;            // copia della PPU
   uint32 *pix;         // sprite disegnati dalla sua PPU
@@ -2873,7 +3207,6 @@ typedef struct LiveLink {
 } LiveLink;
 
 static LiveArea g_live[kMaxLive];
-static uint32 g_live_frame;
 static Ppu *g_saved_ppu;
 bool g_hd_neighbor_tick;
 
@@ -2911,7 +3244,7 @@ enum { kScreenEffectMargin = 64 };
 static bool LiveVisibleNow(void);
 
 bool HdWorld_SpriteOnScreen(int k) {
-  if (!PersistOn() || player_is_indoors || !g_view_valid)
+  if (!PersistOutdoors() || !g_view_valid)
     return true;
   return InView(SpriteWorldX(k), SpriteWorldY(k), kScreenEffectMargin);
 }
@@ -2919,7 +3252,7 @@ bool HdWorld_SpriteOnScreen(int k) {
 static int g_screen_medallion = -1;  // ancilla del medaglione che colpisce in questo frame
 
 void HdWorld_ScreenMedallion(uint8 type) {
-  if (!g_hd_neighbor_tick && PersistOn() && !player_is_indoors)
+  if (!g_hd_neighbor_tick && PersistOutdoors())
     g_screen_medallion = type;
 }
 
@@ -2931,25 +3264,33 @@ static void CopyEffects(LiveArea *la, int medallion) {
   HdBurn_HurtSpritesInArea((uint8)la->head);  // le fiamme delle sue caselle
 }
 
+// An absorbable (hearts, rupees, fairies... 0xd8-0xea) hidden under a rock,
+// a bush or anything else: outdoors sprite_E is set until it comes out, and
+// SpriteDraw_AbsorbableTransient does not draw it. Not shown, so no light,
+// glow or sparkle gives it away (the fairy under the bush near Link shone)
+static bool HiddenAbsorbable(uint8 type, uint8 e) {
+  return type >= 0xd8 && type < 0xd8 + 19 && e != 0;
+}
+
 int HdWorld_ShownSprites(HdShownSprite *out, int max) {
   int n = 0;
   for (int k = 0; k < 16 && n < max; k++)
-    if (sprite_state[k])
+    if (sprite_state[k] && !(!player_is_indoors && HiddenAbsorbable(sprite_type[k], sprite_E[k])))
       out[n++] = (HdShownSprite){ SpriteWorldX(k), SpriteWorldY(k), (int8)sprite_z[k], k,
                                   sprite_type[k], sprite_state[k], sprite_head_dir[k] };
-  if (!PersistOn() || player_is_indoors || !g_view_valid || !LiveVisibleNow())
+  if (!PersistOutdoors() || !g_view_valid || !LiveVisibleNow())
     return n;
   // stesse tabelle del gioco, lette nella RAM delle copie disegnate
   size_t o_st = sprite_state - g_ram, o_ty = sprite_type - g_ram, o_hd = sprite_head_dir - g_ram;
   size_t o_xl = sprite_x_lo - g_ram, o_xh = sprite_x_hi - g_ram, o_yl = sprite_y_lo - g_ram;
-  size_t o_yh = sprite_y_hi - g_ram, o_z = sprite_z - g_ram;
+  size_t o_yh = sprite_y_hi - g_ram, o_z = sprite_z - g_ram, o_e = sprite_E - g_ram;
   for (int i = 0; i < kMaxLive; i++) {
     LiveArea *la = &g_live[i];
     if (!la->used || !la->near || !la->drawn)
       continue;
     const uint8 *r = la->ram;
     for (int k = 0; k < 16 && n < max; k++) {
-      if (!r[o_st + k])
+      if (!r[o_st + k] || HiddenAbsorbable(r[o_ty + k], r[o_e + k]))
         continue;
       int x = r[o_xh + k] << 8 | r[o_xl + k], y = r[o_yh + k] << 8 | r[o_yl + k];
       if (InView(x, y, 32))
@@ -3048,7 +3389,8 @@ bool HdWorld_BoulderGone(int k) {
 // aggiornano subito la mappa del mondo e la copia dal vivo dell'area;
 // l'immagine dell'area si ridisegna da sola (StateVersion)
 bool HdWorld_SetWorldTile(int px, int py, uint16 value) {
-  if (!PersistOn() || !WorldMapOn() || HdWorld_WorldTile(px, py) < 0)
+  // (HdWorld_WorldTile is -1 unless WorldMapOn, which implies PersistOn)
+  if (HdWorld_WorldTile(px, py) < 0)
     return false;
   int head = HeadAt(px, py), ax, ay, as;
   AreaRect(head, &ax, &ay, &as);
@@ -3112,18 +3454,8 @@ static bool LiveBuild(LiveArea *la, int head, int vx, int vy) {
   if (!la->ppu && !(la->ppu = malloc(sizeof(Ppu))))
     return false;
   // come all'uscita da una casa (RenderArea), con in piu' i nemici
-  overworld_screen_index = head;
   overworld_area_index = head;
-  Overworld_LoadGFXAndScreenSize();
-  InitializeTilesets();
-  OverworldLoadScreensPaletteSet();
-  Overworld_LoadPalettes(kOverworldBgPalettes[head], overworld_sprite_palettes[head]);
-  Palette_SetOwBgColor();
-  Overworld_CopyPalettesToCache();
-  Overworld_DecompressAndDrawAllQuadrants();
-  Overworld_HandleOverlaysAndBombDoors();
-  ApplyTiles(head, false);
-  StoreMap(head);
+  LoadAreaLikeExit(head);
   num_memorized_tiles = 0;
   follower_indicator = 0;  // il compagno di Link resta con Link
   SetLiveCamera(vx, vy);
@@ -3144,6 +3476,62 @@ static bool LiveBuild(LiveArea *la, int head, int vx, int vy) {
 }
 
 // Un passo dei nemici nella copia
+// Regola unica per le armi di Link contro i nemici delle aree vicine: nelle
+// copie Link non colpisce, quindi un nemico toccato da un'arma di Link in
+// volo (boomerang, frecce, rampino, bacchette, bombe...) o vicino a Link
+// (spada, attacco rotante) passa nel gioco vero come ospite, dove viene
+// colpito; torna a casa quando Link lascia l'area in cui si trova (come chi
+// insegue Link, HdWorld_BeforeNewSprites). Riquadri nel mondo, presi dal
+// gioco vero prima dei passi delle copie (CollectLinkHits)
+typedef struct LinkHit { int x0, y0, x1, y1; } LinkHit;
+enum { kMaxLinkHits = kAncilla_LinkSlots + 1, kLinkReach = 24, kWeaponReach = 12, kBombReach = 32 };
+static LinkHit g_link_hits[kMaxLinkHits];
+static int g_n_link_hits;
+
+static void CollectLinkHits(void) {
+  g_n_link_hits = 0;
+  if (link_player_handler_state == kPlayerState_Mirror || link_is_bunny_mirror)
+    return;
+  int lx = link_x_coord, ly = link_y_coord;
+  g_link_hits[g_n_link_hits++] = (LinkHit){ lx - kLinkReach, ly - kLinkReach, lx + 16 + kLinkReach, ly + 24 + kLinkReach };
+  // weapons out of view hit nobody in the copies: in the original they only
+  // ever met enemies on screen (a boomerang held in mid-air far away pulled
+  // every passing enemy of that area into the real game)
+  int vx, vy, vw, vh;
+  HdWorld_ScreenRect(&vx, &vy, &vw, &vh);
+  for (int i = 0; i < kAncilla_LinkSlots && g_n_link_hits < kMaxLinkHits; i++) {
+    uint8 rules = Ancilla_WorldRules(ancilla_type[i]);  // elenco unico, ancilla.c
+    if (!(rules & kAncWorld_Hits))
+      continue;
+    int x = Ancilla_GetX(i), y = Ancilla_GetY(i);
+    if (x + 16 <= vx || x >= vx + vw || y + 16 <= vy || y >= vy + vh)
+      continue;
+    int r = (rules & kAncWorld_Wide) ? kBombReach : kWeaponReach;
+    g_link_hits[g_n_link_hits++] = (LinkHit){ x - r, y - r, x + 16 + r, y + 16 + r };
+  }
+}
+
+static bool TouchesLinkHit(int k) {
+  int x = SpriteWorldX(k), y = SpriteWorldY(k);
+  for (int i = 0; i < g_n_link_hits; i++) {
+    const LinkHit *h = &g_link_hits[i];
+    if (x + 16 > h->x0 && x < h->x1 && y + 16 > h->y0 && y < h->y1)
+      return true;
+  }
+  return false;
+}
+
+// Sprite k of the copy moves to the real game (InsertPending) and leaves the
+// copy; area = its home area, 0xff for shots and other objects without one
+static void PendingAdd(int k, uint8 area) {
+  Pending *pe = &g_pending[g_n_pending++];
+  SaveFields(k, pe->rec.data);
+  SaveGfx(&pe->gfx, g_zenv.ppu);
+  pe->rec.blk = sprite_N_word[k];
+  pe->area = area;
+  sprite_state[k] = 0;
+}
+
 static void LiveTick(LiveArea *la, int vx, int vy, const LiveLink *m) {
   memcpy(g_ram, la->ram, sizeof(g_saved_ram));
   memcpy(g_zenv.ppu, la->ppu, sizeof(Ppu));
@@ -3192,11 +3580,16 @@ static void LiveTick(LiveArea *la, int vx, int vy, const LiveLink *m) {
   for (int k = 0; k < 16; k++) {
     if (!sprite_state[k])
       continue;
+    // toccato da un'arma di Link: nel gioco vero (vedi CollectLinkHits)
+    if (sprite_state[k] == 9 && IsAreaEnemy(k) && TouchesLinkHit(k) && g_n_pending < g_pending_room) {
+      PendingAdd(k, la->head);
+      continue;
+    }
     int cx = SpriteWorldX(k) + 8, cy = SpriteWorldY(k) + 8;
-    if (cx >= ax && cx < ax + as && cy >= ay && cy < ay + as)
+    if (InSquare(cx, cy, ax, ay, as))
       continue;
     bool enemy = IsAreaEnemy(k);
-    bool in_link = cx >= bx && cx < bx + bs && cy >= by && cy < by + bs;
+    bool in_link = InSquare(cx, cy, bx, by, bs);
     // sonda invisibile con cui un soldato cerca Link (Sprite_SpawnProbeAlways):
     // si riferisce al posto del suo soldato, quindi resta in questa copia
     if (!enemy && sprite_type[k] == 0x41) {
@@ -3205,12 +3598,7 @@ static void LiveTick(LiveArea *la, int vx, int vy, const LiveLink *m) {
     }
     bool free = FreeMover(k);
     if (in_link && (!enemy || free || (was[k] && IsFollower(k, la->chase[k]))) && g_n_pending < g_pending_room) {
-      Pending *pe = &g_pending[g_n_pending++];
-      SaveFields(k, pe->rec.data);
-      SaveGfx(&pe->gfx, g_zenv.ppu);
-      pe->rec.blk = sprite_N_word[k];
-      pe->area = enemy ? la->head : 0xff;
-      sprite_state[k] = 0;
+      PendingAdd(k, enemy ? la->head : 0xff);
       continue;
     }
     // colpi e nemici che volano continuano qui (anche nell'area di Link se
@@ -3242,7 +3630,6 @@ static void LiveTick(LiveArea *la, int vx, int vy, const LiveLink *m) {
 static void GuestsFromCopies(void);
 
 void HdWorld_TickNeighbors(void) {
-  g_live_frame++;
   int medallion = g_screen_medallion;  // (messo durante il frame del gioco vero)
   g_screen_medallion = -1;
   // fuori dal mondo esterno le copie non servono piu'; nei menu restano ferme
@@ -3321,6 +3708,7 @@ void HdWorld_TickNeighbors(void) {
     g_pending_room += !sprite_state[k];
   if (g_pending_room > kMaxPending)
     g_pending_room = kMaxPending;
+  CollectLinkHits();
   uint8 owner[128];
   memcpy(owner, g_sprite_oam_owner, sizeof(owner));
   if (!SaveMain())
@@ -3331,10 +3719,7 @@ void HdWorld_TickNeighbors(void) {
       if (want_near[j] != (pass == 0))
         continue;
       LiveArea *slot = NULL;
-      bool present = false;
-      for (int i = 0; i < kMaxLive && !present; i++)
-        present = g_live[i].used && g_live[i].head == want[j];
-      if (present)
+      if (LivePresent(want[j]))
         continue;
       for (int i = 0; i < kMaxLive && !slot; i++)
         if (!g_live[i].used)
@@ -3390,27 +3775,20 @@ static void LiveRender(LiveArea *la, int width, int height) {
       return;
     }
   }
-  p->brightness = 15;  // la luminosita' del gioco si applica dopo (Dim)
-  p->forcedBlank = false;
-  PpuBeginDrawing(p, (uint8 *)la->pix, width * 4, mp->renderFlags);
+  SpritesOnlyBegin(p, la->pix, width, mp);
   p->extraLeftRight = mp->extraLeftRight;
   p->extraLeftCur = p->extraRightCur = mp->extraLeftRight;
   p->extraBottomCur = mp->extraBottomCur;
-  p->screenEnabled[0] = 0x10, p->screenEnabled[1] = 0;  // solo gli sprite
-  p->screenWindowed[0] = p->screenWindowed[1] = 0;
-  p->mathEnabled = 0, p->addSubscreen = p->subtractColor = p->halfColor = false;
-  p->clipMode = p->preventMathMode = 0;
-  p->mosaicEnabled = 0, p->mosaicSize = 1;
   p->objBiasX = 0, p->objBiasY = 1;  // vedi SetLiveCamera
   p->bgBiasX = p->bgBiasY = 0;
   p->objYValid = p->objXValid = p->objOnTop = p->windowFullSides = false;
+  p->objPrioOut = true;  // for BgHighAt in DrawLive
   p->objShadowOut = NULL;
   memset(p->objCastShadow, 0, sizeof(p->objCastShadow));
-  memset(p->objIce, 0, sizeof(p->objIce));
-  memset(p->objUnderWater, 0, sizeof(p->objUnderWater));
-  memset(p->objAsBg, 0, sizeof(p->objAsBg));
+  ClearObjEffects(p);
   memset(p->objScale, 0, sizeof(p->objScale));
-  for (int i = 0; i <= height; i++)
+  PpuObjRows(p, height, &la->pix_y0, &la->pix_y1);
+  for (int i = la->pix_y0 + 1; i <= la->pix_y1; i++)
     ppu_runLine(p, i);
   la->fresh = false;
   la->drawn = true;
@@ -3427,18 +3805,8 @@ static void DrawLive(uint8 *pixels, int pitch, int width, int height, const Over
       continue;
     if (la->fresh || la->pix_w != width || la->pix_h != height)
       LiveRender(la, width, height);
-    if (!la->drawn)
-      continue;
-    for (int y = 0; y < height; y++) {
-      uint32 *row = (uint32 *)(pixels + y * pitch);
-      const uint32 *src = la->pix + y * width;
-      for (int x = 0; x < width; x++) {
-        uint32 c = src[x], l = c >> 24, dl = row[x] >> 24;
-        if ((l != 4 && l != 6) || dl == 2 || dl == 4 || dl == 6)
-          continue;
-        row[x] = OverlayBlend(ov, Dim(c), x, y);
-      }
-    }
+    if (la->drawn)
+      PasteSprites(pixels, pitch, width, la->pix, la->pix_y0, la->pix_y1, ov);
   }
 }
 
@@ -3516,10 +3884,10 @@ static void NormalGameArrows(uint8 *pixels, int pitch, int width, int height) {
     // al chiuso: le frecce della stanza (anche col mondo continuo)
     if (!g_room_n_arrows || !ShowsRoom())
       return;
-    g_bright = ppu->forcedBlank ? 0 : ppu->brightness;
-    int ext = (width - 256) / 2;
-    DrawArrowList(pixels, pitch, width, height, (int16)BG2HOFS_copy + ppu->bgBiasX - ext,
-                  (int16)BG2VOFS_copy + ppu->bgBiasY + 1, g_room_arrows, g_room_n_arrows);
+    UpdateBright();
+    int cam_x, cam_y;
+    FrameCam(width, &cam_x, &cam_y);
+    DrawArrowList(pixels, pitch, width, height, cam_x, cam_y, g_room_arrows, g_room_n_arrows);
     return;
   }
   if (FeatureOn())
@@ -3532,10 +3900,10 @@ static void NormalGameArrows(uint8 *pixels, int pitch, int width, int height) {
   }
   if (a < 0 || !g_states[a].n_arrows || (main_module_index != 9 && !InMenuOverWorld()) || ppu->mode == 7)
     return;
-  g_bright = ppu->forcedBlank ? 0 : ppu->brightness;
-  int ext = (width - 256) / 2;
-  DrawArrows(pixels, pitch, width, height, (int16)BG2HOFS_copy + ppu->bgBiasX - ext,
-             (int16)BG2VOFS_copy + ppu->bgBiasY + 1);
+  UpdateBright();
+  int cam_x, cam_y;
+  FrameCam(width, &cam_x, &cam_y);
+  DrawArrows(pixels, pitch, width, height, cam_x, cam_y);
 }
 
 // ---------------------------------------------------------------------------
@@ -3553,38 +3921,32 @@ void HdWorld_Composite(uint8 *pixels, int pitch, int width, int height) {
     return;
   }
   Ppu *ppu = g_zenv.ppu;
-  g_bright = ppu->forcedBlank ? 0 : ppu->brightness;
+  UpdateBright();
   PreparePaletteMap();
+  // (mosaic: the whole background comes from the area images)
   bool mosaic = InMosaicTransition();
-  bool all = mosaic;
   // aspetto dei nemici, anche quando la vista coincide con quella del gioco
   if (HdFx_LiveOverworld() && PersistOn())
     CaptureEnemies(pixels, pitch, width, height);
   int ext = (width - 256) / 2;
-  int cam_x = (int16)BG2HOFS_copy + ppu->bgBiasX - ext;  // la PPU tiene solo 10 bit
-  // +1: la PPU non mostra la sua riga 0, quindi la riga 0 dello schermo e' la
-  // riga 1 del fondale
-  int cam_y = (int16)BG2VOFS_copy + ppu->bgBiasY + 1;
+  int cam_x, cam_y;
+  FrameCam(width, &cam_x, &cam_y);
   OverlayCtx ov;
   OverlayBegin(&ov, ext);
-  if (!all && g_world_dx == 0 && g_world_dy == 0 && ppu->extraLeftRight == 0) {
+  int ax, ay, as, in_x0, in_x1;
+  AreaRect(overworld_screen_index, &ax, &ay, &as);
+  LoadedColumns(ext, &in_x0, &in_x1);
+  g_bgq.cam_x = cam_x, g_bgq.cam_y = cam_y, g_bgq.in_x0 = in_x0, g_bgq.in_x1 = in_x1;
+  g_bgq.ax = ax, g_bgq.ay = ay, g_bgq.ay1 = ay + as - kHiddenRows;
+  if (!mosaic && g_world_dx == 0 && g_world_dy == 0 && ppu->extraLeftRight == 0) {
     DrawPersistent(pixels, pitch, width, height, cam_x, cam_y, &ov);
     PrefetchNeighbors();
     return;
   }
-  int ax, ay, as;
-  AreaRect(overworld_screen_index, &ax, &ay, &as);
   // La PPU ha le caselle dell'area solo attorno alla telecamera del gioco
-  // (con lo schermo largo, ext pixel in piu' per lato). Ai bordi sinistro e
-  // destro del mondo la vista si ferma piu' all'interno (HdWorld_ClampView):
-  // le colonne oltre quelle caricate vengono dall'immagine dell'area.
-  int in_x0 = (int16)BG2HOFS_copy - ext, in_x1 = (int16)BG2HOFS_copy + 256 + ext;
-  // mulinello: all'arrivo il gioco carica solo le 256 colonne normali, le
-  // altre ripetono un pezzo di mappa finche' il passaggio non e' finito
-  if (main_module_index == 9 && submodule_index == 0x2e)
-    in_x0 += ext, in_x1 -= ext;
-  if (in_x0 < ax) in_x0 = ax;
-  if (in_x1 > ax + as) in_x1 = ax + as;
+  // (LoadedColumns). Ai bordi sinistro e destro del mondo la vista si ferma
+  // piu' all'interno (HdWorld_ClampView): le colonne oltre quelle caricate
+  // vengono dall'immagine dell'area.
   // area vicina non ancora disegnata (al massimo un frame): colore di fondo
   uint32 outside = Bgr15ToPixel(HdFx_RealBg(main_palette_buffer, 0), 5);
   int last_head = -2;
@@ -3596,13 +3958,19 @@ void HdWorld_Composite(uint8 *pixels, int pitch, int width, int height) {
     int wy = cam_y + y;
     if (msz > 1)
       wy = cam_y + (y + 1) - (y + 1) % msz - 1;
+    // the columns drawn by the PPU are skipped in one go
+    bool row_in = !mosaic && wy >= ay && wy < ay + as - kHiddenRows;
+    int skip0 = row_in ? IntMax(in_x0 - cam_x, 0) : width, skip1 = row_in ? IntMin(in_x1 - cam_x, width) : 0;
     for (int x = 0; x < width; x++) {
+      if (x >= skip0 && x < skip1) {
+        x = skip1 - 1;
+        continue;
+      }
       int wx = cam_x + x - (msz > 1 ? x % msz : 0);
       bool inside = wx >= in_x0 && wx < in_x1 && wy >= ay && wy < ay + as - kHiddenRows;
-      if (inside && !all)
+      if (inside && !mosaic)
         continue;
-      uint32 l = row[x] >> 24;
-      if (l == 2 || l == 4 || l == 6)
+      if (HdFx_IsHudOrSprite(row[x]))
         continue;  // HUD e sprite restano
       int head = HeadAt(wx, wy);
       if (head < 0)
@@ -3620,12 +3988,12 @@ void HdWorld_Composite(uint8 *pixels, int pitch, int width, int height) {
       if (iy >= img->size - kHiddenRows)
         iy = img->size - kHiddenRows - 1;
       if ((unsigned)ix < (unsigned)img->size && (unsigned)iy < (unsigned)img->size) {
-        row[x] = OverlayBlend(&ov, Dim(img->pix[iy * img->size + ix]), x, y);
+        row[x] = OverlayBlend(&ov, Dim(img->pix[iy * img->size + ix] & 0x7fffffff), x, y);
       }
     }
   }
   if (!mosaic) {
-    DrawAnimatedCells(pixels, pitch, width, height, cam_x, cam_y, all, &ov);
+    DrawAnimatedCells(pixels, pitch, width, height, cam_x, cam_y, &ov);
     DrawPersistent(pixels, pitch, width, height, cam_x, cam_y, &ov);
   }
   PrefetchNeighbors();

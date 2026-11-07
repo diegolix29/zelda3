@@ -41,4 +41,7 @@ extern int g_trans_link_dx, g_trans_link_dy;
 // rispetto alla telecamera del gioco.
 bool HdTrans_Update(int prev_dx, int prev_dy, int *bias_x, int *bias_y);
 
+// After loading a quick save (zelda_rtl.c LoadSnesState)
+void HdTrans_ResetAfterLoad(void);
+
 #endif  // ZELDA3_HD_TRANS_H_

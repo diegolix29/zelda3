@@ -614,7 +614,7 @@ void Garnish_SparkleCommon(int k, uint8 shift) {
   int j = garnish_sprite[k];
   // 0xff: scintilla senza sprite (roccia incantata, GbaRock_Frame)
   uint8 f = j < 16 ? (sprite_oam_flags[j] | sprite_obj_prio[j]) & 0xf0 : 0x20;
-  SetOamPlain(oam, pt.x, pt.y, kGarnishSparkle_Char[t], f | 4, 0);
+  SetOamHelper1(oam, pt.x, pt.y, kGarnishSparkle_Char[t], f | 4, 0);
 }
 
 void Garnish_DustCommon(int k, uint8 shift) {
@@ -624,7 +624,7 @@ void Garnish_DustCommon(int k, uint8 shift) {
   if (Garnish_ReturnIfPrepFails(k, &pt))
     return;
   OamEnt *oam = GetOamCurPtr();
-  SetOamPlain(oam, pt.x, pt.y, kRunningManDust_Char[tmp_counter], 0x24, 0);
+  SetOamHelper1(oam, pt.x, pt.y, kRunningManDust_Char[tmp_counter], 0x24, 0);
 }
 
 void SpriteModule_Explode(int k) {
@@ -1145,6 +1145,12 @@ uint8 g_oam_real_f0[128];
 // (Sprite_PrepOamCoordOrDoubleRet); i pezzi che disegna si nascondono
 static uint8 g_sprite_offscreen[16];
 
+// Continuous world with a valid view this frame: enemies live in the world
+// view, not in the game camera (also in the neighbour areas' copies)
+static bool Sprite_LiveWorld(void) {
+  return g_view_valid && HdWorld_Active();
+}
+
 void Sprite_Main() {  // 868328
   if (!player_is_indoors) {
     for (int i = 0; i < kAncilla_LinkSlots; i++)
@@ -1300,10 +1306,11 @@ void Sprite_ExecuteSingle(int k) {  // 8684e2
   // mondo vivo: un nemico fermo fuori dalla vista riparte appena rientra,
   // anche se controlla la pausa prima di ricalcolare la sua posizione sullo
   // schermo (Sprite_PrepOamCoordOrDoubleRet)
-  if (st != 0 && g_view_valid && HdWorld_Active())
-    sprite_pause[k] = 0;
-  if (st != 0)
+  if (st != 0) {
+    if (Sprite_LiveWorld())
+      sprite_pause[k] = 0;
     HdWorld_SpriteFrame(k);  // chi non guarda il terreno passa da un'area all'altra
+  }
   if (st != 0)
     Sprite_TimersAndOam(k);
   kSprite_ExecuteSingle[st](k);
@@ -1601,9 +1608,7 @@ void SpriteDraw_SingleLarge(int k) {  // 86dc10
 // Mondo continuo: come SetOamHelper0, il pezzo si scrive anche sopra o sotto
 // la telecamera del gioco (ferma al bordo dell'area mentre la vista va oltre);
 // prima il sasso dell'Octorok spariva passando il bordo dell'area in alto
-static bool SpriteDraw_YVisible(uint16 y) {
-  return (uint16)(y + 0x10) < 0x100 || (g_view_valid && !g_hd_neighbor_tick);
-}
+// (SpriteDraw_YVisible, sprite.h)
 
 void Sprite_PrepAndDrawSingleLargeNoPrep(int k, PrepOamCoordsRet *info) {  // 86dc13
   OamEnt *oam = GetOamCurPtr();
@@ -1944,18 +1949,27 @@ bool Sprite_PrepOamCoordOrDoubleRet(int k, PrepOamCoordsRet *ret) {  // 86e41e
   R2 = y - sprite_z[k];
   ret->flags = sprite_oam_flags[k] ^ sprite_obj_prio[k];
   ret->r4 = 0;
-  int xt = (enhanced_features0 & kFeatures0_ExtendScreen64) ? 0x40 : 0;
+  // stesso margine dello schermo largo con cui si caricano (Sprite_WideMargin):
+  // con 0x40 fissi, in 18:9 i nemici si caricavano gia' sul limite e sparivano
+  int xt = Sprite_WideMargin();
   // Mondo continuo: il nemico sparisce quando esce dalla vista (piu' larga
   // della telecamera del gioco, che inoltre al cambio d'area salta di colpo
   // mentre la vista resta dov'e'), non dalla telecamera del gioco
   uint16 kx = x, ky = y;
-  bool live = g_view_valid && HdWorld_Active();
+  bool live = Sprite_LiveWorld();
   if (live) {
     xt = g_zenv.ppu->extraLeftRight;
     kx = cur_sprite_x - g_view_wx, ky = cur_sprite_y - g_view_wy;
   }
+  // Indoors the margin only covers the bands that show the room: in a black
+  // band (the other part of the room, out of the camera's quadrant) the sprite
+  // stays paused as on the SNES. The bomb shop clerk in the left half was
+  // active, snoring, with the right half shown
+  int xl = xt, xr = xt;
+  if (player_is_indoors)
+    xl = IntMin(xt, g_zenv.ppu->extraLeftCur), xr = IntMin(xt, g_zenv.ppu->extraRightCur);
 
-  if ((uint16)(kx + 0x40 + xt) >= (0x170 + xt * 2) ||
+  if ((uint16)(kx + 0x40 + xl) >= (0x170 + xl + xr) ||
       (uint16)(ky + 0x40) >= 0x170 && !(sprite_flags4[k] & 0x20)) {
     // mondo continuo tutto attivo: i nemici dell'area continuano a muoversi
     // anche fuori dalla vista (senza disegnarsi, vedi Sprite_Main)
@@ -3431,7 +3445,7 @@ static void Garnish17_GbaRockFlash(int k) {
   // casella e palette della roccia piccola sollevata (kThrowableScenery_Char,
   // tipo 1) con il lampeggio dei nemici colpiti (palette | hit_timer * 2)
   uint8 t = garnish_countdown[k];
-  SetOamPlain(GetOamCurPtr(), pt.x, pt.y, 0x44, 0x2c | (t * 2 & 0xe), 2);
+  SetOamHelper1(GetOamCurPtr(), pt.x, pt.y, 0x44, 0x2c | (t * 2 & 0xe), 2);
 }
 
 static void GbaRock_Hit(void) {
@@ -3615,7 +3629,7 @@ void Garnish15_ArrghusSplash(int k) {  // 89b178
   int g = (garnish_countdown[k] >> 1) & 6;
   for (int i = 1; i >= 0; i--, oam++) {
     int j = i + g;
-    SetOamPlain(oam, pt.x + kArrghusSplash_X[j], pt.y + kArrghusSplash_Y[j], kArrghusSplash_Char[j], kArrghusSplash_Flags[j], kArrghusSplash_Ext[j]);
+    SetOamHelper1(oam, pt.x + kArrghusSplash_X[j], pt.y + kArrghusSplash_Y[j], kArrghusSplash_Char[j], kArrghusSplash_Flags[j], kArrghusSplash_Ext[j]);
   }
 }
 
@@ -3655,8 +3669,8 @@ void Garnish11_WitheringGanonBatFlame(int k) {  // 89b2b2
   if (Garnish_ReturnIfPrepFails(k, &pt))
     return;
   OamEnt *oam = GetOamCurPtr();
-  SetOamPlain(oam + 0, pt.x + 0, pt.y, 0xa4, 0x22, 0);
-  SetOamPlain(oam + 1, pt.x + 8, pt.y, 0xa5, 0x22, 0);
+  SetOamHelper1(oam + 0, pt.x + 0, pt.y, 0xa4, 0x22, 0);
+  SetOamHelper1(oam + 1, pt.x + 8, pt.y, 0xa5, 0x22, 0);
 }
 
 void Garnish10_GanonBatFlame(int k) {  // 89b306
@@ -3673,7 +3687,7 @@ void Garnish10_GanonBatFlame(int k) {  // 89b306
   if (Garnish_ReturnIfPrepFails(k, &pt))
     return;
   int j = kGanonBatFlame_Idx[garnish_countdown[k] >> 3];
-  SetOamPlain(GetOamCurPtr(), pt.x, pt.y, kGanonBatFlame_Char[j], kGanonBatFlame_Flags[j] | 0x22, 2);
+  SetOamHelper1(GetOamCurPtr(), pt.x, pt.y, kGanonBatFlame_Char[j], kGanonBatFlame_Flags[j] | 0x22, 2);
   Garnish_CheckPlayerCollision(k, pt.x, pt.y);
 }
 
@@ -3687,7 +3701,7 @@ void Garnish0C_TrinexxIceBreath(int k) {  // 89b34f
   Point16U pt;
   if (Garnish_ReturnIfPrepFails(k, &pt))
     return;
-  SetOamPlain(GetOamCurPtr(), pt.x, pt.y, kTrinexxIce_Char[garnish_countdown[k] >> 4],
+  SetOamHelper1(GetOamCurPtr(), pt.x, pt.y, kTrinexxIce_Char[garnish_countdown[k] >> 4],
                kTrinexxIce_Flags[(garnish_countdown[k] >> 2) & 3] | 0x35, 2);
 }
 
@@ -3706,7 +3720,7 @@ void Garnish0A_CannonSmoke(int k) {  // 89b3ee
   if (Garnish_ReturnIfPrepFails(k, &pt))
     return;
   int j = garnish_sprite[k];
-  SetOamPlain(GetOamCurPtr(), pt.x, pt.y, kGarnish_CannonPoof_Char[garnish_countdown[k] >> 3], kGarnish_CannonPoof_Flags[j] | 4, 2);
+  SetOamHelper1(GetOamCurPtr(), pt.x, pt.y, kGarnish_CannonPoof_Char[garnish_countdown[k] >> 3], kGarnish_CannonPoof_Flags[j] | 4, 2);
 }
 
 void Garnish09_LightningTrail(int k) {  // 89b429
@@ -3716,7 +3730,7 @@ void Garnish09_LightningTrail(int k) {  // 89b429
   if (Garnish_ReturnIfPrepFails(k, &pt))
     return;
   int j = garnish_sprite[k];
-  SetOamPlain(GetOamCurPtr(), pt.x, pt.y,
+  SetOamHelper1(GetOamCurPtr(), pt.x, pt.y,
                kLightningTrail_Char[j] - (BYTE(dungeon_room_index2) == 0x20 ? 0x80 : 0),
                (frame_counter << 1) & 0xe | kLightningTrail_Flags[j], 2);
   Garnish_CheckPlayerCollision(k, pt.x, pt.y);
@@ -3726,8 +3740,10 @@ void Garnish_CheckPlayerCollision(int k, int x, int y) {  // 89b459
   if ((k ^ frame_counter) & 7 | countdown_for_blink | link_disable_sprite_damage)
     return;
 
-  if ((uint8)(link_x_coord - BG2HOFS_copy2 - x + 12) < 24 &&
-      (uint8)(link_y_coord - BG2VOFS_copy2 - y + 22) < 28) {
+  // a 16 bit: con le fasce larghe x arriva oltre 255 e a 8 bit un garnish a
+  // 256 pixel da Link lo avrebbe colpito
+  if ((uint16)(link_x_coord - BG2HOFS_copy2 - x + 12) < 24 &&
+      (uint16)(link_y_coord - BG2VOFS_copy2 - y + 22) < 28) {
     link_auxiliary_state = 1;
     link_incapacitated_timer = 16;
     link_give_damage = 16;
@@ -3743,7 +3759,7 @@ void Garnish07_BabasuFlash(int k) {  // 89b49e
   if (Garnish_ReturnIfPrepFails(k, &pt))
     return;
   int j = garnish_countdown[k] >> 3;
-  SetOamPlain(GetOamCurPtr(), pt.x, pt.y, kBabusuFlash_Char[j], kBabusuFlash_Flags[j], 2);
+  SetOamHelper1(GetOamCurPtr(), pt.x, pt.y, kBabusuFlash_Char[j], kBabusuFlash_Flags[j], 2);
 }
 
 void Garnish08_KholdstareTrail(int k) {  // 89b4c6
@@ -3755,7 +3771,7 @@ void Garnish08_KholdstareTrail(int k) {  // 89b4c6
     return;
   int i = garnish_countdown[k] >> 2;
   int j = garnish_sprite[k];
-  SetOamPlain(GetOamCurPtr(), pt.x + kGarnish_Nebule_XY[i], pt.y + kGarnish_Nebule_XY[i], kGarnish_Nebule_Char[i],
+  SetOamHelper1(GetOamCurPtr(), pt.x + kGarnish_Nebule_XY[i], pt.y + kGarnish_Nebule_XY[i], kGarnish_Nebule_Char[i],
                (sprite_oam_flags[j] | sprite_obj_prio[j]) & ~1, 0);
 }
 
@@ -3764,7 +3780,7 @@ void Garnish06_ZoroTrail(int k) {  // 89b4fb
   if (Garnish_ReturnIfPrepFails(k, &pt))
     return;
   int j = garnish_sprite[k];
-  SetOamPlain(GetOamCurPtr(), pt.x, pt.y, 0x75, sprite_oam_flags[j] | sprite_obj_prio[j], 0);
+  SetOamHelper1(GetOamCurPtr(), pt.x, pt.y, 0x75, sprite_oam_flags[j] | sprite_obj_prio[j], 0);
 }
 
 void Garnish12_Sparkle(int k) {  // 89b520
@@ -3781,7 +3797,7 @@ void Garnish0E_TrinexxFireBreath(int k) {  // 89b55d
   if (Garnish_ReturnIfPrepFails(k, &pt))
     return;
   int j = garnish_sprite[k];
-  SetOamPlain(GetOamCurPtr(), pt.x, pt.y, kTrinexxLavaBubble_Char[garnish_countdown[k] >> 3],
+  SetOamHelper1(GetOamCurPtr(), pt.x, pt.y, kTrinexxLavaBubble_Char[garnish_countdown[k] >> 3],
                (sprite_oam_flags[j] | sprite_obj_prio[j]) & 0xf0 | 0xe, 0);
 }
 
@@ -3791,7 +3807,7 @@ void Garnish0F_BlindLaserTrail(int k) {  // 89b591
   if (Garnish_ReturnIfPrepFails(k, &pt))
     return;
   int j = garnish_sprite[k];
-  SetOamPlain(GetOamCurPtr(), pt.x, pt.y, kBlindLaserTrail_Char[garnish_oam_flags[k] - 7], sprite_oam_flags[j] | sprite_obj_prio[j], 0);
+  SetOamHelper1(GetOamCurPtr(), pt.x, pt.y, kBlindLaserTrail_Char[garnish_oam_flags[k] - 7], sprite_oam_flags[j] | sprite_obj_prio[j], 0);
 }
 
 void Garnish04_LaserTrail(int k) {  // 89b5bb
@@ -3799,34 +3815,26 @@ void Garnish04_LaserTrail(int k) {  // 89b5bb
   Point16U pt;
   if (Garnish_ReturnIfPrepFails(k, &pt))
     return;
-  SetOamPlain(GetOamCurPtr(), pt.x, pt.y, kLaserBeamTrail_Char[garnish_oam_flags[k]], 0x25, 0);
+  SetOamHelper1(GetOamCurPtr(), pt.x, pt.y, kLaserBeamTrail_Char[garnish_oam_flags[k]], 0x25, 0);
+}
+
+// Regola unica dei garnish (polvere, scie, scintille, frammenti, fumo): il
+// punto del mondo (gx, gy) si vede? Col mondo continuo conta la vista (la
+// telecamera del gioco si ferma al bordo dell'area mentre la vista va oltre),
+// senza conta la telecamera con le fasce dello schermo largo (prima 256 pixel:
+// nelle fasce gli effetti sparivano). Le coordinate restano rispetto alla
+// telecamera del gioco: i disegni usano SetOamHelper1, che tiene il nono bit
+// della x, e la y vera si ricostruisce al disegno (ResolveSpritePositions)
+static bool Garnish_PointVisible(uint16 gx, uint16 gy) {
+  if (HdWorld_LiveView())  // punto nella vista con 16 pixel ai lati, sotto fino alla riga 255
+    return HdWorld_BoxInView(gx - 16, gy - 16, 33, 17, 0);
+  int ext = Sprite_WideBand();
+  return (uint16)(gx - BG2HOFS_copy2 + ext) < 256 + 2 * ext && (uint16)(gy - BG2VOFS_copy2) < 256;
 }
 
 bool Garnish_ReturnIfPrepFails(int k, Point16U *pt) {  // 89b5de
-  uint16 x = Garnish_GetX(k) - BG2HOFS_copy2;
-  uint16 y = Garnish_GetY(k) - BG2VOFS_copy2;
-
-  if (x >= 256 || y >= 256) {
-    garnish_type[k] = 0;
-    return true;
-  }
-  pt->x = x;
-  pt->y = y - 16;
-  return false;
-}
-
-// Frammenti degli oggetti lanciati: col mondo continuo la telecamera del gioco
-// si ferma al bordo dell'area mentre la vista va oltre (si vede l'area
-// accanto); un sasso che atterra oltre il bordo si rompe dove lo si vede,
-// quindi conta la vista. Le coordinate restano rispetto alla telecamera del
-// gioco: SetOamHelper1 tiene il nono bit della x e la y vera si ricostruisce
-// al disegno (ResolveSpritePositions)
-static bool Garnish_ReturnIfPrepFailsInView(int k, Point16U *pt) {
-  if (!HdWorld_LiveView())
-    return Garnish_ReturnIfPrepFails(k, pt);
   uint16 gx = Garnish_GetX(k), gy = Garnish_GetY(k);
-  // punto nella vista con 16 pixel ai lati, sotto fino alla riga 255
-  if (!HdWorld_BoxInView(gx - 16, gy - 16, 33, 17, 0)) {
+  if (!Garnish_PointVisible(gx, gy)) {
     garnish_type[k] = 0;
     return true;
   }
@@ -3845,10 +3853,9 @@ void Garnish03_FallingTile(int k) {  // 89b627
   if ((j = garnish_countdown[k]) == 0x1e && (j = (submodule_index | flag_unk1)) == 0)
     Dungeon_UpdateTileMapWithCommonTile(Garnish_GetX(k), Garnish_GetY(k) - 16, 4);
   j >>= 3;
-  uint16 x = Garnish_GetX(k) + kCrumbleTile_XY[j] - BG2HOFS_copy2;
-  uint16 y = Garnish_GetY(k) + kCrumbleTile_XY[j] - BG2VOFS_copy2;
-  if (x < 256 && y < 256)
-    SetOamPlain(GetOamCurPtr(), x, y - 16, kCrumbleTile_Char[j], kCrumbleTile_Flags[j], kCrumbleTile_Ext[j]);
+  uint16 gx = Garnish_GetX(k) + kCrumbleTile_XY[j], gy = Garnish_GetY(k) + kCrumbleTile_XY[j];
+  if (Garnish_PointVisible(gx, gy))
+    SetOamHelper1(GetOamCurPtr(), gx - BG2HOFS_copy2, gy - BG2VOFS_copy2 - 16, kCrumbleTile_Char[j], kCrumbleTile_Flags[j], kCrumbleTile_Ext[j]);
 }
 
 void Garnish01_FireSnakeTail(int k) {  // 89b6c0
@@ -3856,7 +3863,7 @@ void Garnish01_FireSnakeTail(int k) {  // 89b6c0
   if (Garnish_ReturnIfPrepFails(k, &pt))
     return;
   int j = garnish_sprite[k];
-  SetOamPlain(GetOamCurPtr(), pt.x, pt.y, 0x28, sprite_oam_flags[j] | sprite_obj_prio[j], 2);
+  SetOamHelper1(GetOamCurPtr(), pt.x, pt.y, 0x28, sprite_oam_flags[j] | sprite_obj_prio[j], 2);
 }
 
 void Garnish02_MothulaBeamTrail(int k) {  // 89b6e1
@@ -4065,13 +4072,20 @@ void Overworld_LoadSprites() {  // 89c4ac
   }
 }
 
-// Margine oltre i 256 px in cui il gioco attiva i nemici dello schermo largo.
-// In origine 0x40 fissi (pensati per il 16:10): con fasce piu' larghe (16:9 85 px,
-// 18:9 96 px) i nemici comparivano gia' dentro la fascia. Ora almeno quanto la fascia.
+// How far the wide-screen bands stick out (85 pixels in 16:9), for drawing:
+// the bands are visible even with "unchanged_sprites", so the visual fixes
+// alone count too. One measure for ancillae and garnishes
+int Sprite_WideBand(void) {
+  return (enhanced_features0 & (kFeatures0_ExtendScreen64 | kFeatures0_WidescreenVisualFixes)) ?
+      g_zenv.ppu->extraLeftRight : 0;
+}
+
+// Margin beyond the 256 pixels in which the game loads and keeps enemies with
+// the wide screen. Originally a fixed 0x40 (meant for 16:10): with wider
+// bands (16:9 85 px, 18:9 96 px) enemies appeared inside the band. Now at
+// least as wide as the band
 int Sprite_WideMargin(void) {
-  if (!(enhanced_features0 & kFeatures0_ExtendScreen64))
-    return 0;
-  return IntMax(0x40, g_zenv.ppu->extraLeftRight);
+  return (enhanced_features0 & kFeatures0_ExtendScreen64) ? IntMax(0x40, Sprite_WideBand()) : 0;
 }
 
 void Sprite_ActivateAllProxima() {  // 89c55e
@@ -4079,8 +4093,10 @@ void Sprite_ActivateAllProxima() {  // 89c55e
   uint8 bak1 = byte_7E069E[1];
   byte_7E069E[1] = 0xff;
 
+  // Sprite_ActivateWhenProximal sposta gia' la colonna di xt a sinistra: qui
+  // toglierlo di nuovo (come faceva il 16:9 di origine) lasciava fuori la
+  // fascia destra dello schermo largo all'ingresso nell'area
   int xt = Sprite_WideMargin();
-  BG2HOFS_copy2 -= xt;
   for (int i = 21 + (xt >> 3); i >= 0; i--) {
     Sprite_ActivateWhenProximal();
     BG2HOFS_copy2 += 16;
@@ -4137,19 +4153,15 @@ void Sprite_Overworld_ProximityMotivatedLoad(uint16 x, uint16 y) {  // 89c6f5
 // non solo quelli vicini alla telecamera (finche' ci sono posti liberi; i
 // generatori di nemici restano legati alla telecamera).
 // Regola fissa dei 16 posti degli sprite: i nemici caricati in anticipo ne
-// lasciano sempre kSpareSlots liberi per quello che nasce giocando (oggetti
+// lasciano sempre kHdSpareSlots liberi per quello che nasce giocando (oggetti
 // sollevati, colpi, oggetti lasciati, segreti); se servono lo stesso,
 // HdWorld_FreeSlot toglie un nemico tranquillo lontano
-enum { kSpareSlots = 4 };
 void Sprite_OverworldLoadAllEnemies(void) {
   for (int blk = 0; blk < 0x1000; blk++) {
     uint8 t = sprite_where_in_overworld[blk];
     if (!t || t >= 0xf4 || (overworld_sprite_was_loaded[blk >> 3] & (0x80 >> (blk & 7))))
       continue;
-    int n_free = 0;
-    for (int i = 0; i < 16; i++)
-      n_free += !sprite_state[i];
-    if (n_free <= kSpareSlots)
+    if (HdWorld_FreeSlotCount() <= kHdSpareSlots)
       return;
     Overworld_LoadProximaSpriteIfAlive(blk);
   }
@@ -4265,7 +4277,7 @@ void Garnish16_ThrownItemDebris(int k) {  // 89f0cb
     0x40,    0, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40,    0,    0, 0x40,    0,    0,    0,
   };
   Point16U pt;
-  if (Garnish_ReturnIfPrepFailsInView(k, &pt))
+  if (Garnish_ReturnIfPrepFails(k, &pt))
     return;
   uint8 r5 = garnish_oam_flags[k];
   if (byte_7E0FC6 >= 3)

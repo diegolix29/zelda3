@@ -180,3 +180,10 @@ bool HdTrans_Update(int prev_dx, int prev_dy, int *bias_x, int *bias_y) {
   *bias_y += Round(s.b0y * k);
   return true;
 }
+
+// After loading a quick save: no transition in progress
+void HdTrans_ResetAfterLoad(void) {
+  s.kind = kKind_None;
+  s.link_off = 0;
+  s.elapsed = 0, s.scrolling = false;
+}
