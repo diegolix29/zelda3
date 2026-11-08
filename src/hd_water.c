@@ -463,8 +463,9 @@ static void FindBridges(void) {
           continue;
         for (int r = lo; r <= hi; r++)
           for (int i = b; i < end; i++)
-            if (!IsWaterCell(CELL(r, i)))
+            if (!IsWaterCell(CELL(r, i))) {
               if (pass) g_cells[i][r] = kCellBridge; else g_cells[r][i] = kCellBridge;
+            }
       }
     }
 #undef CELL
