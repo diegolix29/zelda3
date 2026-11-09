@@ -8,6 +8,7 @@
 #include "load_gfx.h"
 #include "hud.h"
 #include "overworld.h"
+#include "hd_3d.h"
 #include "tagalong.h"
 #include "dungeon.h"
 #include "misc.h"
@@ -5998,7 +5999,11 @@ void Link_HandleVelocity() {  // 87e245
   link_actual_vel_x = link_actual_vel_y = 0;
   link_y_page_movement_delta = link_x_page_movement_delta = 0;
 
-  r0 += ((link_direction & 0xC) != 0 && (link_direction & 3) != 0);
+  uint8 diag = ((link_direction & 0xC) != 0 && (link_direction & 3) != 0);
+  r0 += diag;
+  // a plain walk (no slowdown after a hit or a pit's pull): the free walk of
+  // the third person camera can lay its straight speed along any angle
+  bool plain_walk = !link_flag_moving && !player_near_pit_state && !link_speed_modifier;
 
   if (player_near_pit_state) {
     if (player_near_pit_state == 3)
@@ -6025,6 +6030,8 @@ void Link_HandleVelocity() {  // 87e245
     link_actual_vel_x = (link_direction & 2) ? -vel : vel;
   if (link_direction & 0xC)
     link_actual_vel_y = (link_direction & 8) ? -vel : vel;
+  if (plain_walk && (link_direction & 0xf))
+    Hd3d_FreeMoveVel(kSpeedMod[r0 - diag]);
 
   link_actual_vel_z = 0xff;
   link_z_coord = 0xffff;

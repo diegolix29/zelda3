@@ -1090,6 +1090,7 @@ static void HandleGamepadAxisInput(int gamepad_id, int axis, int value) {
       last_x = last_y = 0;
     }
     *(axis == SDL_CONTROLLER_AXIS_LEFTX ? &last_x : &last_y) = value;
+    Hd3d_LeftStick(last_x, last_y);   // third person 3D camera: walk at any angle
     int buttons = 0;
     if (last_x * last_x + last_y * last_y >= 10000 * 10000) {
       // in the non deadzone part, divide the circle into eight 45 degree

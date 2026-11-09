@@ -82,6 +82,22 @@ static float g_pitch3 = 62.0f;
 static int g_stick_x, g_stick_y; // right stick
 static uint32 g_cam_ticks;
 
+// Third person free walk (as in FreeMove.lua): the left stick or d-pad,
+// turned by the camera's yaw, is a direction at any angle. The game still
+// gets the nearest d-pad bits (so its collision, ledges and pushing all
+// work), and Hd3d_FreeMoveVel then lays Link's speed along the exact angle.
+// Within kFreeSnap of a straight line the walk stays straight, which keeps
+// doorways and corridors easy to line up with.
+static const float kFreeSnap = 0.14f;   // sin(8 degrees)
+static const int kLeftDeadzone = 10000; // as the stick-to-d-pad code in main.c
+static int g_lstick_x, g_lstick_y;      // left stick
+static bool g_free_on;                  // a free walk direction this frame
+static float g_free_dx, g_free_dy;      // its world direction (x east, y south)
+static float g_carry_x, g_carry_y;      // rounding left over, in 1/16 pixel
+static bool g_heading_ok;               // g_heading is what Link's sprite shows
+static float g_heading;                 // last travel direction (yaw: 0 north, + clockwise)
+static uint8 g_heading_facing;          // the facing Hd3d_FreeMoveVel gave Link with it
+
 // 9 = overworld, 11 = special overworld (Master Sword grove, Zora's
 // waterfall, areas 0x80 and up)
 static bool IsOverworldModule(int mod) {
@@ -308,46 +324,115 @@ static void UpdateThirdCamera(void) {
   if (g_pitch3 > kThirdPitchMax) g_pitch3 = kThirdPitchMax;
 }
 
-int Hd3d_ViewFacing(int facing) {
-  if (!Hd3d_ThirdPerson() || !IsWalkingModule(main_module_index))
-    return facing;
-  static const float kYaw[4] = { 0.0f, 3.14159265f, -1.5707963f, 1.5707963f };
+// A world direction (yaw: 0 north, + clockwise) as the camera sees it, as a
+// facing (0 up, 2 down, 4 left, 6 right): 0 = walking away from the camera
+// (his back), 2 = toward it (his front), 4 / 6 = across it (his side)
+static int ViewFacingOfYaw(float dir) {
   // world direction minus the camera's, in quarter turns: 0 away from the
   // camera, 1 to its right, 2 toward it, 3 to its left
-  float rel = WrapAngle(kYaw[(facing >> 1) & 3] - g_yaw);
+  float rel = WrapAngle(dir - g_yaw);
   static const uint8 kQuarterToFacing[4] = { 0, 6, 2, 4 };
   return kQuarterToFacing[(int)floorf(rel * (2.0f / 3.14159265f) + 0.5f) & 3];
 }
 
+static const float kFacingYaw[4] = { 0.0f, 3.14159265f, -1.5707963f, 1.5707963f };
+
+int Hd3d_ViewFacing(int facing) {
+  if (!Hd3d_ThirdPerson() || !IsWalkingModule(main_module_index))
+    return facing;
+  // Link only: the free walk's own direction while the facing is still the
+  // one it set (a sword swing or a push turns Link the game's way again)
+  float dir = kFacingYaw[(facing >> 1) & 3];
+  if (g_heading_ok && facing == g_heading_facing)
+    dir = g_heading;
+  return ViewFacingOfYaw(dir);
+}
+
 int Hd3d_ViewDir(int dir) {
-  // sprite directions -> Link's facing and back
+  // a sprite keeps its own direction (the way it walks or looks); the camera
+  // only decides which side of it shows. Directions 0 right, 1 left, 2 down,
+  // 3 up; anything else is not a plain direction and stays as it is
+  if (dir < 0 || dir > 3 || !Hd3d_ThirdPerson() || !IsWalkingModule(main_module_index))
+    return dir;
   static const uint8 kDirToFacing[4] = { 6, 4, 2, 0 };
-  int f = Hd3d_ViewFacing(kDirToFacing[dir & 3]);
+  int f = ViewFacingOfYaw(kFacingYaw[kDirToFacing[dir] >> 1]);
   static const uint8 kFacingToDir[4] = { 3, 2, 1, 0 };   // up, down, left, right
   return kFacingToDir[(f >> 1) & 3];
 }
 
+int Hd3d_ViewDirNpc(int dir) {
+  // the townsfolk's order (0 up, 1 down, 2 left, 3 right) is the other one
+  // turned around: dir ^ 3 on the way in and out
+  if (dir < 0 || dir > 3)
+    return dir;
+  return Hd3d_ViewDir(dir ^ 3) ^ 3;
+}
+
+void Hd3d_LeftStick(int x, int y) {
+  g_lstick_x = x, g_lstick_y = y;
+}
+
 int Hd3d_RotateInput(int inputs) {
+  g_free_on = false;
   // only while walking around: menus and the map keep the plain d-pad
-  if (!Hd3d_ThirdPerson() || !IsWalkingModule(main_module_index))
+  if (!Hd3d_ThirdPerson() || !IsWalkingModule(main_module_index)) {
+    g_heading_ok = false;
     return inputs;
+  }
   int dirs = inputs & 0xf0;
-  if (!dirs)
+  if (!dirs) {
+    g_carry_x = g_carry_y = 0.0f;
     return inputs;
-  // up/down/left/right as seen on the screen -> the world direction under
-  // the camera's yaw, snapped to the 8 directions Link can walk
-  float side = ((dirs >> 7) & 1) - ((dirs >> 6) & 1);   // right - left
-  float fwd = ((dirs >> 4) & 1) - ((dirs >> 5) & 1);    // up - down
-  if (side == 0.0f && fwd == 0.0f)
+  }
+  // the direction as seen on the screen: the left stick's own angle when it
+  // is pushed, else the d-pad / keyboard
+  float side, fwd;
+  int sx = g_lstick_x, sy = g_lstick_y;
+  if (sx * sx + sy * sy >= kLeftDeadzone * kLeftDeadzone) {
+    side = (float)sx, fwd = (float)-sy;
+  } else {
+    side = (float)(((dirs >> 7) & 1) - ((dirs >> 6) & 1));   // right - left
+    fwd = (float)(((dirs >> 4) & 1) - ((dirs >> 5) & 1));    // up - down
+  }
+  float len = sqrtf(side * side + fwd * fwd);
+  if (len < 1e-3f)
     return inputs;
+  side /= len, fwd /= len;
+  // turned by the camera's yaw into the world
   float cs = cosf(g_yaw), sn = sinf(g_yaw);
   float wx = cs * side + sn * fwd;     // east
   float wn = -sn * side + cs * fwd;    // north
-  static const uint8 kSegmentToButtons[8] = {
-    1 << 4, 1 << 4 | 1 << 7, 1 << 7, 1 << 7 | 1 << 5, 1 << 5, 1 << 5 | 1 << 6, 1 << 6, 1 << 6 | 1 << 4,
-  };
-  int seg = (int)floorf(atan2f(wx, wn) * (4.0f / 3.14159265f) + 0.5f) & 7;
-  return (inputs & ~0xf0) | kSegmentToButtons[seg];
+  // close to a straight line: straight (the game, and the walk, go straight)
+  if (fabsf(wx) < kFreeSnap) wx = 0.0f;
+  if (fabsf(wn) < kFreeSnap) wn = 0.0f;
+  len = sqrtf(wx * wx + wn * wn);
+  wx /= len, wn /= len;
+  g_free_on = true, g_free_dx = wx, g_free_dy = -wn;
+  int buttons = (wn > 0 ? 1 << 4 : 0) | (wn < 0 ? 1 << 5 : 0) | (wx < 0 ? 1 << 6 : 0) | (wx > 0 ? 1 << 7 : 0);
+  return (inputs & ~0xf0) | buttons;
+}
+
+bool Hd3d_FreeMoveVel(int speed) {
+  if (!g_free_on || !Hd3d_ThirdPerson() || !IsWalkingModule(main_module_index))
+    return false;
+  // only when the game walks the way it was asked: its direction (8 up, 4
+  // down, 2 left, 1 right) must match the free one on both axes, else
+  // something of its own (a push, a hop, a bounce) is steering Link
+  int want = (g_free_dy < 0 ? 8 : 0) | (g_free_dy > 0 ? 4 : 0) | (g_free_dx < 0 ? 2 : 0) | (g_free_dx > 0 ? 1 : 0);
+  if ((link_direction & 0xf) != want)
+    return false;
+  float fx = g_free_dx * speed + g_carry_x, fy = g_free_dy * speed + g_carry_y;
+  float vx = roundf(fx), vy = roundf(fy);
+  g_carry_x = fx - vx, g_carry_y = fy - vy;
+  link_actual_vel_x = (uint8)(int8)vx;
+  link_actual_vel_y = (uint8)(int8)vy;
+  // the facing (sword, A, pushing) follows the larger part of the walk;
+  // the sprite follows the walk itself (Hd3d_ViewFacing)
+  uint8 facing = fabsf(g_free_dx) > fabsf(g_free_dy) ? (g_free_dx < 0 ? 4 : 6) : (g_free_dy < 0 ? 0 : 2);
+  link_direction_facing = facing;
+  g_heading = atan2f(g_free_dx, -g_free_dy);
+  g_heading_ok = true, g_heading_facing = facing;
+  return true;
 }
 
 bool Hd3d_FarSprites(int *margin_x, int *margin_top, int *margin_bottom) {

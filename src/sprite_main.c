@@ -13,6 +13,34 @@
 #include "misc.h"
 #include <time.h>
 
+// Vista 3D in terza persona: ogni sprite tiene la sua direzione (dove va o
+// guarda) e la telecamera decide solo quale lato se ne vede: di spalle se va
+// via dalla telecamera, di fronte se le viene incontro, di fianco se la
+// attraversa. Per disegnare, direzione e testa si girano come le vede la
+// telecamera (Hd3d_ViewDir) e tornano subito com'erano: la logica usa le vere
+static inline uint8 SprViewD(int k) {
+  return (uint8)Hd3d_ViewDir(sprite_D[k]);
+}
+
+typedef struct SprView { uint8 d, hd, on; } SprView;
+static int g_sprview_depth;   // un disegno dentro l'altro: si gira una volta sola
+
+static SprView SprView_Begin(int k, int npc) {
+  SprView v = { sprite_D[k], sprite_head_dir[k], g_sprview_depth == 0 };
+  g_sprview_depth++;
+  if (v.on) {
+    sprite_D[k] = (uint8)(npc ? Hd3d_ViewDirNpc(v.d) : Hd3d_ViewDir(v.d));
+    sprite_head_dir[k] = (uint8)(npc ? Hd3d_ViewDirNpc(v.hd) : Hd3d_ViewDir(v.hd));
+  }
+  return v;
+}
+
+static void SprView_End(int k, SprView v) {
+  g_sprview_depth--;
+  if (v.on)
+    sprite_D[k] = v.d, sprite_head_dir[k] = v.hd;
+}
+
 #define byte_7FFE01 (*(uint8*)(g_ram+0x1FE01))
 static const int8 kSpriteKeese_Tab2[16] = {0, 8, 11, 14, 16, 14, 11, 8, 0, -8, -11, -14, -16, -14, -11, -8};
 static const int8 kSpriteKeese_Tab3[16] = {-16, -14, -11, -8, 0, 8, 11, 14, 16, 14, 11, 8, 0, -9, -11, -14};
@@ -1405,7 +1433,14 @@ static inline uint8 ChainBallMult(uint16 a, uint8 b) {
   return (p >> 8) + (p >> 7 & 1);
 }
 
+static void ChainBallTrooper_Draw_Seen(int k);
 void ChainBallTrooper_Draw(int k) {
+  SprView v = SprView_Begin(k, 0);
+  ChainBallTrooper_Draw_Seen(k);
+  SprView_End(k, v);
+}
+
+static void ChainBallTrooper_Draw_Seen(int k) {
   PrepOamCoordsRet info;
   if (Sprite_PrepOamCoordOrDoubleRet(k, &info))
     return;
@@ -3188,7 +3223,7 @@ void Sprite_56_WalkingZora(int k) {  // 859d4a
     }
     break;
   case 2:  // Ambulating
-    sprite_graphics[k] = kSprite_Recruit_Gfx[(sprite_subtype2[k] >> 1 & 4) + sprite_D[k]];
+    sprite_graphics[k] = kSprite_Recruit_Gfx[(sprite_subtype2[k] >> 1 & 4) + SprViewD(k)];
     WalkingZora_Draw(k);
     if (Sprite_ReturnIfInactive(k))
       return;
@@ -3258,7 +3293,14 @@ void WalkingZora_AdjustShadow(int k) {  // 859edb
   sprite_anim_clock[k] = (sprite_z[k] == 0 && sprite_tiletype == 9);
 }
 
-void WalkingZora_Draw(int k) {  // 859f08
+static void WalkingZora_Draw_Seen(int k);
+void WalkingZora_Draw(int k) {
+  SprView v = SprView_Begin(k, 0);
+  WalkingZora_Draw_Seen(k);
+  SprView_End(k, v);
+}
+
+static void WalkingZora_Draw_Seen(int k) {  // 859f08
   static const uint8 kWalkingZora_Draw_Char[4] = {0xce, 0xce, 0xa4, 0xee};
   static const uint8 kWalkingZora_Draw_Flags[4] = {0x40, 0, 0, 0};
   static const uint8 kWalkingZora_Draw_Char2[8] = {0xcc, 0xec, 0xcc, 0xec, 0xe8, 0xe8, 0xca, 0xca};
@@ -3941,7 +3983,7 @@ attack_common:
 }
 
 void BallNChain_Animate(int k) {  // 85b0ab
-  sprite_graphics[k] = kFlailTrooperGfx[sprite_D[k] * 8 + (++sprite_subtype2[k] >> 2 & 7)];
+  sprite_graphics[k] = kFlailTrooperGfx[SprViewD(k) * 8 + (++sprite_subtype2[k] >> 2 & 7)];
 }
 
 void SpriteDraw_GuardHead(int k, PrepOamCoordsRet *info, int spr_offs) {  // 85b160
@@ -4339,7 +4381,7 @@ void Toppo_Draw(int k) {  // 85bbff
 }
 
 void Sprite_4B_GreenKnifeGuard(int k) {  // 85bca2
-  sprite_graphics[k] = kSprite_Recruit_Gfx[sprite_D[k] + (sprite_subtype2[k] >> 1 & 4) ];
+  sprite_graphics[k] = kSprite_Recruit_Gfx[SprViewD(k) + (sprite_subtype2[k] >> 1 & 4) ];
   Recruit_Draw(k);
   if (Sprite_ReturnIfInactive(k))
     return;
@@ -4385,7 +4427,14 @@ out:
   sprite_subtype2[k] += (sprite_delay_aux1[k] != 0) ? 2 : 1;
 }
 
-void Recruit_Draw(int k) {  // 85bd7e
+static void Recruit_Draw_Seen(int k);
+void Recruit_Draw(int k) {
+  SprView v = SprView_Begin(k, 0);
+  Recruit_Draw_Seen(k);
+  SprView_End(k, v);
+}
+
+static void Recruit_Draw_Seen(int k) {  // 85bd7e
   PrepOamCoordsRet info;
   if (Sprite_PrepOamCoordOrDoubleRet(k, &info))
     return;
@@ -4488,7 +4537,7 @@ void BombGuard(int k) {  // 85bf51
     sprite_subtype2[k] = (j >= 80);
     if (j == 32)
       BombGuard_CreateBomb(k);
-    sprite_graphics[k] = kJavelinTrooper_Tab2[(sprite_D[k] << 3 | j >> 4) + 32];
+    sprite_graphics[k] = kJavelinTrooper_Tab2[(SprViewD(k) << 3 | j >> 4) + 32];
   }
 }
 
@@ -4939,10 +4988,17 @@ void Sprite_44_BluesainBolt(int k) {  // 85cc65
     Sprite_ApplySpeedTowardsLink(k, 18);
     Guard_ApplySpeedInDirection(k);
   }
-  sprite_graphics[k] = kFlailTrooperGfx[++sprite_subtype2[k] >> 1 & 7 | sprite_D[k] << 3];
+  sprite_graphics[k] = kFlailTrooperGfx[++sprite_subtype2[k] >> 1 & 7 | SprViewD(k) << 3];
 }
 
-void PsychoTrooper_Draw(int k) {  // 85ccd5
+static void PsychoTrooper_Draw_Seen(int k);
+void PsychoTrooper_Draw(int k) {
+  SprView v = SprView_Begin(k, 0);
+  PsychoTrooper_Draw_Seen(k);
+  SprView_End(k, v);
+}
+
+static void PsychoTrooper_Draw_Seen(int k) {  // 85ccd5
   PrepOamCoordsRet info;
   if (Sprite_PrepOamCoordOrDoubleRet(k, &info))
     return;
@@ -4979,7 +5035,7 @@ void Sprite_48_RedJavelinGuard(int k) {  // 85cde1
   int j = sprite_D[k];
   if (sprite_delay_aux1[k] != 0) {
     sprite_D[k] = kSoldier_DirectionLockSettings[j];
-    sprite_graphics[k] = kJavelinTrooper_Gfx[j];
+    sprite_graphics[k] = kJavelinTrooper_Gfx[Hd3d_ViewDir(j)];
   }
   JavelinTrooper_Draw(k);
   sprite_D[k] = j;
@@ -4992,7 +5048,7 @@ void Sprite_46_BlueArcher(int k) {  // 85cdff
   int j = sprite_D[k];
   if (sprite_delay_aux1[k] != 0) {
     sprite_D[k] = kSoldier_DirectionLockSettings[j];
-    sprite_graphics[k] = kSoldier_Gfx[j];
+    sprite_graphics[k] = kSoldier_Gfx[Hd3d_ViewDir(j)];
   }
   ArcherSoldier_Draw(k);
   sprite_D[k] = j;
@@ -5055,7 +5111,7 @@ agitated_jump_to:
     sprite_subtype2[k]++;
     if (!(sprite_subtype2[k] & 0xf) && ++sprite_A[k] == 2)
       sprite_A[k] = 0;
-    sprite_graphics[k] = kSoldier_Gfx2[sprite_D[k] * 4 + sprite_A[k] + (sprite_type[k] == 0x48 ? 16 : 0)];
+    sprite_graphics[k] = kSoldier_Gfx2[SprViewD(k) * 4 + sprite_A[k] + (sprite_type[k] == 0x48 ? 16 : 0)];
     break;
   case 2:  // looking
     Sprite_ZeroVelocity_XY(k);
@@ -5112,7 +5168,7 @@ agitated_jump_to:
     sprite_subtype2[k] = (j >= 40) ? 255 : 0;
     if (j == 12)
       Guard_LaunchProjectile(k);
-    sprite_graphics[k] = kJavelinTrooper_Tab2[sprite_D[k] * 8 + (j >> 3) + (sprite_type[k] == 0x48 ? 32 : 0)];
+    sprite_graphics[k] = kJavelinTrooper_Tab2[SprViewD(k) * 8 + (j >> 3) + (sprite_type[k] == 0x48 ? 32 : 0)];
     break;
   }
 }
@@ -5144,7 +5200,14 @@ void Guard_LaunchProjectile(int k) {  // 85d0c5
     sprite_flags5[j] &= ~0x20;
 }
 
-void BushJavelinSoldier_Draw(int k) {  // 85d141
+static void BushJavelinSoldier_Draw_Seen(int k);
+void BushJavelinSoldier_Draw(int k) {
+  SprView v = SprView_Begin(k, 0);
+  BushJavelinSoldier_Draw_Seen(k);
+  SprView_End(k, v);
+}
+
+static void BushJavelinSoldier_Draw_Seen(int k) {  // 85d141
   uint8 bak0 = sprite_graphics[k];
   sprite_graphics[k] = 0;
   uint8 bak1 = sprite_oam_flags[k];
@@ -5168,7 +5231,14 @@ void BushJavelinSoldier_Draw(int k) {  // 85d141
 
 }
 
-void JavelinTrooper_Draw(int k) {  // 85d192
+static void JavelinTrooper_Draw_Seen(int k);
+void JavelinTrooper_Draw(int k) {
+  SprView v = SprView_Begin(k, 0);
+  JavelinTrooper_Draw_Seen(k);
+  SprView_End(k, v);
+}
+
+static void JavelinTrooper_Draw_Seen(int k) {  // 85d192
   PrepOamCoordsRet info;
   if (Sprite_PrepOamCoordOrDoubleRet(k, &info))
     return;
@@ -5241,7 +5311,7 @@ void Sprite_BushGuard_Main(int k) {  // 85d1d3
     sprite_A[k] = j < 40 ? 0xff : 0x00;
     if (j == 16)
       Guard_LaunchProjectile(k);
-    sprite_graphics[k] = kJavelinTrooper_Tab2[sprite_D[k] * 8 + (j >> 3) + (sprite_type[k] == 0x49 ? 32 : 0)];
+    sprite_graphics[k] = kJavelinTrooper_Tab2[SprViewD(k) * 8 + (j >> 3) + (sprite_type[k] == 0x49 ? 32 : 0)];
     break;
   case 3:
   case_3:
@@ -5286,7 +5356,14 @@ void BushSoldierCommon_Draw(int k) {  // 85d321
   }
 }
 
-void ArcherSoldier_Draw(int k) {  // 85d38c
+static void ArcherSoldier_Draw_Seen(int k);
+void ArcherSoldier_Draw(int k) {
+  SprView v = SprView_Begin(k, 0);
+  ArcherSoldier_Draw_Seen(k);
+  SprView_End(k, v);
+}
+
+static void ArcherSoldier_Draw_Seen(int k) {  // 85d38c
   static const uint8 kArcherSoldier_WeaponOamOffs[4] = {0, 0, 0, 16};
   static const uint8 kArcherSoldier_HeadOamOffs[4] = {16, 16, 16, 0};
   static const uint8 kArcherSoldier_BodyOamOffs[4] = {20, 20, 20, 4};
@@ -5815,7 +5892,14 @@ void Sprite_YoungSnitchLady(int k) {  // 85e2f2
   Sprite_OldSnitchLady(k);
 }
 
-void YoungSnitchLady_Draw(int k) {  // 85e37f
+static void YoungSnitchLady_Draw_Seen(int k);
+void YoungSnitchLady_Draw(int k) {
+  SprView v = SprView_Begin(k, 1);
+  YoungSnitchLady_Draw_Seen(k);
+  SprView_End(k, v);
+}
+
+static void YoungSnitchLady_Draw_Seen(int k) {  // 85e37f
   static const DrawMultipleData kYoungSnitchLady_Dmd[16] = {
     {0, -8, 0x0026, 2},
     {0,  0, 0x00e8, 2},
@@ -6162,7 +6246,14 @@ void Sprite_RunningMan(int k) {  // 85e8b2
   }
 }
 
-void RunningMan_Draw(int k) {  // 85ea4d
+static void RunningMan_Draw_Seen(int k);
+void RunningMan_Draw(int k) {
+  SprView v = SprView_Begin(k, 0);
+  RunningMan_Draw_Seen(k);
+  SprView_End(k, v);
+}
+
+static void RunningMan_Draw_Seen(int k) {  // 85ea4d
   static const DrawMultipleData kRunningMan_Dmd[16] = {
     {0, -8, 0x002c, 2},
     {0,  0, 0x08ee, 2},
@@ -8802,7 +8893,7 @@ void Sprite_12_Moblin(int k) {  // 8698e4
     }
     break;
   case 1:  // walk
-    sprite_graphics[k] = (sprite_subtype2[k] & 1) + kMoblin_Gfx[sprite_D[k]];
+    sprite_graphics[k] = (sprite_subtype2[k] & 1) + kMoblin_Gfx[SprViewD(k)];
     if (!sprite_wallcoll[k]) {
       if (sprite_delay_main[k]) {
         if (sign8(--sprite_E[k])) {
@@ -8864,7 +8955,14 @@ void Moblin_MaterializeSpear(int k) {  // 8699eb
   }
 }
 
-void Moblin_Draw(int k) {  // 869bc4
+static void Moblin_Draw_Seen(int k);
+void Moblin_Draw(int k) {
+  SprView v = SprView_Begin(k, 0);
+  Moblin_Draw_Seen(k);
+  SprView_End(k, v);
+}
+
+static void Moblin_Draw_Seen(int k) {  // 869bc4
   static const DrawMultipleData kMoblin_Dmd[48] = {
     {-2,   3, 0x8091, 0},
     {-2,  11, 0x8090, 0},
@@ -8942,7 +9040,7 @@ void Sprite_0E_Snapdragon(int k) {  // 869c24
   static const int8 kSnapDragon_Xvel[8] = {8, -8, 8, -8, 16, -16, 16, -16};
   static const int8 kSnapDragon_Yvel[8] = {8, 8, -8, -8, 16, 16, -16, -16};
   int j;
-  sprite_graphics[k] = sprite_B[k] + kSnapDragon_Gfx[sprite_D[k]];
+  sprite_graphics[k] = sprite_B[k] + kSnapDragon_Gfx[SprViewD(k)];
   SnapDragon_Draw(k);
   if (Sprite_ReturnIfInactive(k))
     return;
@@ -9122,7 +9220,7 @@ void Sprite_11_Hinox(int k) {  // 869f05
       Sprite_MoveXY(k);
       if (!Sprite_CheckTileCollision(k)) {
         static const uint8 kHinox_WalkGfx[4] = {6, 4, 0, 2};
-        sprite_graphics[k] = kHinox_WalkGfx[sprite_D[k]] + (sprite_subtype2[k] & 1);
+        sprite_graphics[k] = kHinox_WalkGfx[SprViewD(k)] + (sprite_subtype2[k] & 1);
         return;
       }
     }
@@ -9154,7 +9252,7 @@ void Sprite_11_Hinox(int k) {  // 869f05
       }
     } else {
       static const uint8 kHinox_Gfx[8] = {11, 10, 8, 9, 7, 5, 1, 3};
-      sprite_graphics[k] = kHinox_Gfx[sprite_D[k] + (sprite_delay_main[k] < 32 ? 4 : 0)];
+      sprite_graphics[k] = kHinox_Gfx[SprViewD(k) + (sprite_delay_main[k] < 32 ? 4 : 0)];
     }
     break;
   }
@@ -11085,7 +11183,7 @@ void Sprite_TutorialGuardOrBarrier(int k) {  // 86bffe
   if (sprite_delay_aux1[k])
     sprite_D[k] = kSoldier_DirectionLockSettings[jbak];
 
-  sprite_graphics[k] = kSprite_TutorialEntities_Tab[sprite_D[k]];
+  sprite_graphics[k] = kSprite_TutorialEntities_Tab[SprViewD(k)];
   TutorialSoldier_Draw(k);
   sprite_D[k] = jbak;
 
@@ -12074,7 +12172,7 @@ void Sprite_08_Octorok(int k) {  // 86d377
   int j = sprite_D[k];
   if (sprite_delay_aux1[k])
     sprite_D[k] = kOctorock_Dir[j];
-  sprite_oam_flags[k] = sprite_oam_flags[k] & ~0x40 | kOctorock_OamFlags[j] | (sprite_graphics[k] == 7 ? 0x40 : 0);
+  sprite_oam_flags[k] = sprite_oam_flags[k] & ~0x40 | kOctorock_OamFlags[Hd3d_ViewDir(j)] | (sprite_graphics[k] == 7 ? 0x40 : 0);
   Octorock_Draw(k);
   sprite_D[k] = j;
 
@@ -12085,7 +12183,7 @@ void Sprite_08_Octorok(int k) {  // 86d377
   Sprite_MoveXY(k);
   Sprite_CheckDamageToAndFromLink(k);
   if (!(sprite_ai_state[k] & 1)) {
-    sprite_graphics[k] = ++sprite_subtype2[k] >> 3 & 3 | (sprite_D[k] & 2) << 1;
+    sprite_graphics[k] = ++sprite_subtype2[k] >> 3 & 3 | (SprViewD(k) & 2) << 1;
     if (!sprite_delay_main[k]) {
       sprite_ai_state[k]++;
       sprite_delay_main[k] = sprite_type[k] == 8 ? 60 : 160;
@@ -12143,7 +12241,14 @@ void Octorok_FireLoogie(int k) {  // 86d4cd
   }
 }
 
-void Octorock_Draw(int k) {  // 86d54a
+static void Octorock_Draw_Seen(int k);
+void Octorock_Draw(int k) {
+  SprView v = SprView_Begin(k, 0);
+  Octorock_Draw_Seen(k);
+  SprView_End(k, v);
+}
+
+static void Octorock_Draw_Seen(int k) {  // 86d54a
   static const int8 kOctorock_Draw_X[9] = {8, 0, 4, 8, 0, 4, 9, -1, 4};
   static const int8 kOctorock_Draw_Y[9] = {6, 6, 9, 6, 6, 9, 6, 6, 9};
   static const uint8 kOctorock_Draw_Char[9] = {0xbb, 0xbb, 0xba, 0xab, 0xab, 0xaa, 0xa9, 0xa9, 0xb9};
@@ -12664,7 +12769,14 @@ void Freezor_Draw(int k) {  // 8dbfa6
   }
 }
 
-void Zazak_Draw(int k) {  // 8dc0a6
+static void Zazak_Draw_Seen(int k);
+void Zazak_Draw(int k) {
+  SprView v = SprView_Begin(k, 0);
+  Zazak_Draw_Seen(k);
+  SprView_End(k, v);
+}
+
+static void Zazak_Draw_Seen(int k) {  // 8dc0a6
   static const uint8 kZazak_Char[8] = {0x82, 0x82, 0x80, 0x84, 0x88, 0x88, 0x86, 0x84};
   static const uint8 kZazak_Flags[8] = {0x40, 0, 0, 0, 0x40, 0, 0, 0};
   static const DrawMultipleData kZazak_Dmd[24] = {
@@ -12704,7 +12816,14 @@ void Zazak_Draw(int k) {  // 8dc0a6
   SpriteDraw_Shadow(k, &info);
 }
 
-void Stalfos_Draw(int k) {  // 8dc21c
+static void Stalfos_Draw_Seen(int k);
+void Stalfos_Draw(int k) {
+  SprView v = SprView_Begin(k, 0);
+  Stalfos_Draw_Seen(k);
+  SprView_End(k, v);
+}
+
+static void Stalfos_Draw_Seen(int k) {  // 8dc21c
   static const uint8 kStalfos_Char[4] = {2, 2, 0, 4};
   static const uint8 kStalfos_Flags[4] = {0x70, 0x30, 0x30, 0x30};
   static const DrawMultipleData kStalfos_Dmd[36] = {
@@ -13141,7 +13260,14 @@ void Sprite_MazeGameGuy(int k) {  // 8dcbf2
   }
 }
 
-void MazeGameGuy_Draw(int k) {  // 8dcda7
+static void MazeGameGuy_Draw_Seen(int k);
+void MazeGameGuy_Draw(int k) {
+  SprView v = SprView_Begin(k, 1);
+  MazeGameGuy_Draw_Seen(k);
+  SprView_End(k, v);
+}
+
+static void MazeGameGuy_Draw_Seen(int k) {  // 8dcda7
   static const DrawMultipleData kMazeGameGuy_Dmd[16] = {
     {0, -10, 0x0000, 2},
     {0,   0, 0x0020, 2},
@@ -13172,7 +13298,14 @@ void CrystalMaiden_Draw(int k) {  // 8dce5f
   Sprite_DrawMultiplePlayerDeferred(k, kCrystalMaiden_SpriteData + j * 2, 2, NULL);
 }
 
-void Priest_Draw(int k) {  // 8dcf31
+static void Priest_Draw_Seen(int k);
+void Priest_Draw(int k) {
+  SprView v = SprView_Begin(k, 1);
+  Priest_Draw_Seen(k);
+  SprView_End(k, v);
+}
+
+static void Priest_Draw_Seen(int k) {  // 8dcf31
   int j = sprite_D[k] * 2 + sprite_graphics[k];
   PrepOamCoordsRet info;
   Sprite_DrawMultiplePlayerDeferred(k, kPriest_Dmd + j * 2, 2, &info);
@@ -13275,7 +13408,14 @@ void MedallionTablet_Draw(int k) {  // 8dd1e2
   Sprite_DrawMultiplePlayerDeferred(k, &kMedallionTablet_Dmd[sprite_graphics[k] * 4], 4, NULL);
 }
 
-void Uncle_Draw(int k) {  // 8dd391
+static void Uncle_Draw_Seen(int k);
+void Uncle_Draw(int k) {
+  SprView v = SprView_Begin(k, 1);
+  Uncle_Draw_Seen(k);
+  SprView_End(k, v);
+}
+
+static void Uncle_Draw_Seen(int k) {  // 8dd391
   static const DrawMultipleData kUncleDraw_Table[48] = {
     {  0, -10, 0x0e00, 2},
     {  0,   0, 0x0c06, 2},
@@ -13808,7 +13948,14 @@ void DrinkingGuy_Draw(int k) {  // 9af88c
   SpriteDraw_Shadow(k, &info);
 }
 
-void Lady_Draw(int k) {  // 9af92c
+static void Lady_Draw_Seen(int k);
+void Lady_Draw(int k) {
+  SprView v = SprView_Begin(k, 1);
+  Lady_Draw_Seen(k);
+  SprView_End(k, v);
+}
+
+static void Lady_Draw_Seen(int k) {  // 9af92c
   static const DrawMultipleData kLadyDmd[16] = {
     {0, -8, 0x00e0, 2},
     {0,  0, 0x00e8, 2},
@@ -14382,7 +14529,7 @@ void Sprite_D0_Lynel(int k) {  // 9d866a
       sprite_ai_state[k]++;
       sprite_delay_main[k] = 80;
     }
-    sprite_graphics[k] = kLynel_Gfx[sprite_subtype2[k] & 4 | sprite_D[k]];
+    sprite_graphics[k] = kLynel_Gfx[sprite_subtype2[k] & 4 | SprViewD(k)];
     break;
   case 1:  // approach
     if (sprite_delay_main[k]) {
@@ -14398,7 +14545,7 @@ void Sprite_D0_Lynel(int k) {  // 9d866a
       Sprite_MoveXY(k);
       if (Sprite_CheckTileCollision(k))
         goto incr_state;
-      sprite_graphics[k] = kLynel_Gfx[++sprite_subtype2[k] & 4 | sprite_D[k]];
+      sprite_graphics[k] = kLynel_Gfx[++sprite_subtype2[k] & 4 | SprViewD(k)];
     } else {
 incr_state:
       sprite_ai_state[k]++;
@@ -14416,7 +14563,7 @@ incr_state:
       if (j >= 0 && link_shield_type != 3)
         sprite_flags5[j] = 0;
     }
-    sprite_graphics[k] = kLynel_AttackGfx[sprite_D[k]];
+    sprite_graphics[k] = kLynel_AttackGfx[SprViewD(k)];
     Sprite_CheckTileCollision(k);
     break;
   }
@@ -17418,7 +17565,7 @@ void Sprite_C4_Thief(int k) {  // 9dc8d8
         sprite_delay_main[k] = 16;
       }
     }
-    sprite_graphics[k] = kThief_Gfx[sprite_D[k]];
+    sprite_graphics[k] = kThief_Gfx[SprViewD(k)];
     break;
   case 1:  // watch player
     Thief_CheckCollisionWithLink(k);
@@ -17430,7 +17577,7 @@ void Sprite_C4_Thief(int k) {  // 9dc8d8
 thief_common:
     if (!(frame_counter & 31))
       sprite_D[k] = sprite_head_dir[k];
-    sprite_graphics[k] = kThief_Gfx[4 + sprite_D[k] + (++sprite_subtype2[k] & 4)];
+    sprite_graphics[k] = kThief_Gfx[4 + SprViewD(k) + (++sprite_subtype2[k] & 4)];
     break;
   case 2:  // chase player
     Sprite_ApplySpeedTowardsLink(k, 18);
@@ -17456,7 +17603,7 @@ thief_common:
     j = Thief_ScanForBooty(k);
 
     if (!sprite_delay_main[k]) {
-      sprite_graphics[k] = kThief_Gfx[4 + sprite_D[k] + (++sprite_subtype2[k] & 4)];
+      sprite_graphics[k] = kThief_Gfx[4 + SprViewD(k) + (++sprite_subtype2[k] & 4)];
       if (!sprite_wallcoll[k])
         Sprite_MoveXY(k);
       Sprite_CheckTileCollision(k);
@@ -17557,7 +17704,14 @@ void Thief_SpillItems(int k) {  // 9dcb30
   } while (!sign8(--tmp_counter));
 }
 
-void Thief_Draw(int k) {  // 9dcc9e
+static void Thief_Draw_Seen(int k);
+void Thief_Draw(int k) {
+  SprView v = SprView_Begin(k, 0);
+  Thief_Draw_Seen(k);
+  SprView_End(k, v);
+}
+
+static void Thief_Draw_Seen(int k) {  // 9dcc9e
   static const DrawMultipleData kThief_Dmd[24] = {
     {0, -6, 0x0000, 2},
     {0,  0, 0x0006, 2},
@@ -19082,7 +19236,14 @@ void Toppo_Flustered(int k) {  // 9df3d4
   sprite_graphics[k] = ((++sprite_subtype2[k] & 4) >> 2) + 3;
 }
 
-void Goriya_Draw(int k) {  // 9df589
+static void Goriya_Draw_Seen(int k);
+void Goriya_Draw(int k) {
+  SprView v = SprView_Begin(k, 0);
+  Goriya_Draw_Seen(k);
+  SprView_End(k, v);
+}
+
+static void Goriya_Draw_Seen(int k) {  // 9df589
   static const DrawMultipleData kGoriya_Dmd2[3] = {
     {10, 4, 0x4077, 0},
     {-2, 4, 0x0077, 0},
@@ -20289,7 +20450,7 @@ endif_1:
     Sprite_Zazak_Main(k);
     return;
   }
-  sprite_graphics[k] = kStalfos_AnimState2[sprite_D[k]];
+  sprite_graphics[k] = kStalfos_AnimState2[SprViewD(k)];
   Stalfos_Draw(k);
   if (Sprite_ReturnIfInactive(k))
     return;
@@ -20345,7 +20506,7 @@ void Sprite_Zazak_Main(int k) {  // 9e919f
     Stalfos_ThrowBone(k);
     sprite_subtype2[k] = 1;
   }
-  sprite_graphics[k] = kStalfos_AnimState1[(sprite_subtype2[k] & 1) * 4 + sprite_D[k]];
+  sprite_graphics[k] = kStalfos_AnimState1[(sprite_subtype2[k] & 1) * 4 + SprViewD(k)];
   if (sprite_type[k] == 0xa7)
     Stalfos_Draw(k);
   else
@@ -21226,7 +21387,7 @@ void Kyameron_Draw(int k) {  // 9ea158
 
 void Sprite_99_Pengator(int k) {  // 9ea196
   static const uint8 kPengator_Gfx[4] = {5, 0, 10, 15};
-  sprite_graphics[k] = sprite_A[k] + kPengator_Gfx[sprite_D[k]];
+  sprite_graphics[k] = sprite_A[k] + kPengator_Gfx[SprViewD(k)];
   Pengator_Draw(k);
   if (sprite_F[k] || sprite_wallcoll[k] & 15) {
     sprite_ai_state[k] = 0;
@@ -22426,7 +22587,7 @@ void Sprite_8B_Gibdo(int k) {  // 9eb9a9
   case 0: {
     static const uint8 kGibdo_DirTarget[4] = {2, 6, 4, 0};
     static const uint8 kGibdo_Gfx[8] = {4, 8, 11, 10, 0, 6, 3, 7};
-    sprite_graphics[k] = kGibdo_Gfx[sprite_D[k]];
+    sprite_graphics[k] = kGibdo_Gfx[SprViewD(k)];
     if (!(frame_counter & 7)) {
       int j = sprite_A[k];
       if (sprite_D[k] - kGibdo_DirTarget[j]) {
@@ -23039,7 +23200,7 @@ void Sprite_85_YellowStalfos(int k) {  // 9ec37f
     }
     if (j == 48)
       YellowStalfos_EmancipateHead(k);
-    sprite_graphics[k] = kYellowStalfos_Gfx[j >> 2 & ~3 | sprite_D[k]];
+    sprite_graphics[k] = kYellowStalfos_Gfx[j >> 2 & ~3 | SprViewD(k)];
     j = sprite_delay_main[k] >> 2;
     sprite_B[k] = kYellowStalfos_HeadX[j];
     sprite_C[k] = kYellowStalfos_HeadY[j];
@@ -23076,7 +23237,7 @@ void Sprite_85_YellowStalfos(int k) {  // 9ec37f
 
 void YellowStalfos_Animate(int k) {  // 9ec509
   static const uint8 kYellowStalfos_Gfx2[4] = {6, 3, 1, 1};
-  sprite_graphics[k] = kYellowStalfos_Gfx2[sprite_D[k]];
+  sprite_graphics[k] = kYellowStalfos_Gfx2[SprViewD(k)];
   sprite_flags3[k] &= ~0x40;
 }
 
@@ -23133,7 +23294,7 @@ void YellowStalfos_DrawHead(int k, PrepOamCoordsRet *info) {  // 9ec69a
   OamEnt *oam = GetOamCurPtr();
   if (sprite_graphics[k] == 10 || sprite_B[k] == 0x80)
     return;
-  int j = sprite_head_dir[k];
+  int j = Hd3d_ViewDir(sprite_head_dir[k]);
   SetOamHelper0(oam, info->x + (int8)sprite_B[k], info->y - sprite_C[k],
                 kYellowStalfos_Head_Char[j],
                 kYellowStalfos_Head_Flags[j] | info->flags, 2);
@@ -23189,7 +23350,7 @@ void Sprite_83_GreenEyegore(int k) {  // 9ec79b
     Sprite_MoveXY(k);
   Sprite_CheckDamageToAndFromLink(k);
   Sprite_CheckTileCollision(k);
-  sprite_graphics[k] = kGoriya_Gfx[++sprite_subtype2[k] & 12 | sprite_D[k]];
+  sprite_graphics[k] = kGoriya_Gfx[++sprite_subtype2[k] & 12 | SprViewD(k)];
   if (sprite_type[k] == 0x84) {
     PointU8 pt;
     uint8 dir = Sprite_DirectionToFaceLink(k, &pt);
@@ -23254,7 +23415,7 @@ void Eyegore_Main(int k) {  // 9ec839
       if (!sprite_wallcoll[k])
         Sprite_MoveXY(k);
       Sprite_CheckTileCollision(k);
-      sprite_graphics[k] = kEyeGore_Chasing_Gfx[++sprite_subtype2[k] & 12 | sprite_D[k]];
+      sprite_graphics[k] = kEyeGore_Chasing_Gfx[++sprite_subtype2[k] & 12 | SprViewD(k)];
     }
     break;
   case 3:  // closing eye

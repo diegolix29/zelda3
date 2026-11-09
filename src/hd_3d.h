@@ -26,12 +26,20 @@ void Hd3d_RightStick(int axis_y, int value);
 void Hd3d_Recenter(void);
 // Joypad bits (up 0x10, down 0x20, left 0x40, right 0x80) turned by the camera
 int Hd3d_RotateInput(int inputs);
+// Left stick position (SDL axis values), for walking at any angle
+void Hd3d_LeftStick(int x, int y);
+// Third person free walk: lays `speed` (1/16 pixel a frame) along the exact
+// direction of the stick under the camera and writes link_actual_vel_x/y.
+// False (nothing changed) when the game is steering Link its own way
+bool Hd3d_FreeMoveVel(int speed);
 // Link's facing (0 up, 2 down, 4 left, 6 right) as the camera sees it, for
 // drawing him: in third person walking away from the camera shows his back
 int Hd3d_ViewFacing(int facing);
 // The same for enemies' directions (0 right, 1 left, 2 down, 3 up), for the
 // sprites whose drawing uses it (guards: Guard_HandleAllAnimation)
 int Hd3d_ViewDir(int dir);
+// The same for the townsfolk that count 0 up, 1 down, 2 left, 3 right
+int Hd3d_ViewDirNpc(int dir);
 
 // Indoor walls raised in 3D (0 = flat, 1 = on)
 void Hd3d_SetWalls(int on, const char *why);
