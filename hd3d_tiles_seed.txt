@@ -48,8 +48,8 @@
 040 floor     #   attr 00, 100%: floor 228
 041 floor     #   attr 00, 100%: floor 228
 042 floor     #   attr 00, 100%: floor 228
-043 wall      # ? attr 2a, 62%: floor 1652 wall 2769 rail 4
-044 wall      # ? attr 01, 60%: floor 1465 wall 2247
+043 wall      #   attr 2a, 99%: wall 4421 rail 4
+044 wall      #   attr 01, 100%: wall 3712
 045 wall      #   attr 20, 100%: wall 83
 046 wall      #   attr 01, 98%: wall 769 rail 13
 047 wall      #   attr 01, 100%: wall 670
@@ -64,8 +64,8 @@
 050 wall      #   attr 28, 99%: floor 8 wall 3922 rail 5
 051 wall      #   attr 28, 99%: floor 10 wall 3887 rail 5
 052 floor     #   attr 2a, 100%: floor 188
-053 wall      # ? attr 2a, 62%: floor 1641 wall 2714 rail 3
-054 wall      # ? attr 01, 59%: floor 1464 wall 2176
+053 wall      #   attr 2a, 99%: wall 4355 rail 3
+054 wall      #   attr 01, 100%: wall 3640
 055 floor     #   attr 02, 100%: floor 8
 056 wall      #   attr 01, 100%: wall 212
 057 wall      #   attr 01, 100%: wall 198
@@ -90,7 +90,7 @@
 06e floor     #   attr 08, 100%: floor 186
 06f floor     #   attr 00, 100%: floor 8
 070 wall      #   attr 04, 100%: wall 5776
-071 wall      # ? attr 04, 57%: floor 2919 wall 3947
+071 wall      #   attr 04, 100%: wall 6866
 075 door      #   attr 02, 100%: door 4
 077 door      #   attr 02, 100%: door 4
 078 door      #   attr 00, 99%: floor 2 door 416
@@ -117,35 +117,35 @@
 08d door      #   attr 01, 82%: floor 10 door 48
 08e door      #   attr 02, 82%: floor 10 door 48
 08f door      #   attr 02, 82%: floor 10 door 48
-090 wall      #   attr 01, 82%: floor 3783 wall 18505 door 79
-091 wall      #   attr 01, 82%: floor 3779 wall 18459 door 79
-092 wall      #   attr 01, 87%: floor 2679 wall 20415 door 138
-093 wall      #   attr 01, 87%: floor 2730 wall 20330 door 138
-094 floor     #   attr 01, 100%: floor 3582
+090 wall      #   attr 01, 99%: floor 94 wall 22194 door 79
+091 wall      #   attr 01, 99%: floor 96 wall 22142 door 79
+092 wall      #   attr 01, 99%: wall 23094 door 138
+093 wall      #   attr 01, 99%: wall 23060 door 138
+094 wall      #   attr 01, 100%: wall 3582
 095 wall      #   attr 01, 99%: floor 1 wall 524
-096 wall      #   attr 01, 87%: floor 2456 wall 17917 door 75
-097 wall      #   attr 01, 87%: floor 2459 wall 17897 door 75
-098 wall      #   attr 01, 92%: floor 1547 wall 19868 door 100
-099 wall      #   attr 01, 92%: floor 1553 wall 19812 door 99
+096 wall      #   attr 01, 99%: floor 2 wall 20371 door 75
+097 wall      #   attr 01, 99%: floor 1 wall 20355 door 75
+098 wall      #   attr 01, 99%: wall 21415 door 100
+099 wall      #   attr 01, 99%: wall 21365 door 99
 09a wall      #   attr 18, 100%: wall 1886
 09b wall      #   attr 10, 100%: wall 1317
 09c wall      #   attr 10, 100%: wall 435
 09d floor     #   attr 01, 100%: floor 120
-09e floor     #   attr 01, 100%: floor 3582
+09e wall      #   attr 01, 100%: wall 3582
 09f wall      #   attr 01, 100%: wall 525
-0a2 wall      #   attr 04, 92%: floor 1401 wall 17464 door 75
-0a3 wall      #   attr 04, 92%: floor 1385 wall 17434 door 75
-0a4 wall      #   attr 04, 93%: floor 1122 wall 18791 door 108
-0a5 wall      #   attr 04, 97%: floor 424 wall 19444 door 107
-0a6 floor     #   attr 04, 100%: floor 3579
+0a2 wall      #   attr 04, 99%: floor 2 wall 18863 door 75
+0a3 wall      #   attr 04, 99%: floor 1 wall 18818 door 75
+0a4 wall      #   attr 04, 99%: wall 19913 door 108
+0a5 wall      #   attr 04, 99%: wall 19868 door 107
+0a6 wall      #   attr 04, 100%: wall 3579
 0a7 wall      #   attr 04, 100%: wall 525
 0a8 door      #   attr 01, 100%: door 20
 0a9 door      #   attr 02, 100%: door 24
 0aa door      #   attr 02, 100%: door 20
 0ab wall      #   attr 00, 100%: wall 1578
 0ac wall      #   attr 00, 99%: floor 32 wall 34770
-0ad wall      #   attr 00, 94%: floor 1938 wall 32847 door 16
-0ae floor     #   attr 00, 87%: floor 2999 wall 419
+0ad wall      #   attr 00, 99%: floor 20 wall 34765 door 16
+0ae wall      #   attr 00, 100%: wall 3418
 0af wall      #   attr 00, 100%: wall 447
 0b0 door      #   attr 01, 100%: door 6
 0b1 door      #   attr 01, 100%: door 6
@@ -194,12 +194,12 @@
 0dd floor     #   attr 00, 100%: floor 65
 0de floor     #   attr 62, 100%: floor 7
 0df floor     #   attr 62, 100%: floor 7
-0e0 block     # ? attr 27, 65%: floor 224 block 432
+0e0 block     #   attr 27, 100%: block 656
 0e1 rail      #   attr 02, 97%: wall 5 ceiling 3 rail 1688 block 31
 0e2 rail      #   attr 02, 99%: wall 3 rail 3083
 0e3 rail      #   attr 02, 83%: wall 12 rail 3084 block 617
-0e4 block     # ? attr 27, 50%: floor 206 block 214
-0e5 floor     #   attr 27, 100%: floor 351
+0e4 block     #   attr 27, 99%: floor 4 block 416
+0e5 block     #   attr 27, 98%: floor 4 block 347
 0e6 tall      #   attr 01, 100%: tall 50
 0e7 tall      #   attr 00, 100%: tall 50
 0e8 door      #   attr 00, 100%: door 42
@@ -211,10 +211,10 @@
 0ee floor     #   attr 00, 99%: floor 105388 door 2
 0ef floor     #   attr 00, 99%: floor 105227 door 2
 0f0 block     #   attr 27, 100%: block 240
-0f1 block     # ? attr 27, 51%: floor 202 block 214
-0f2 floor     #   attr 27, 100%: floor 347
+0f1 block     #   attr 27, 100%: block 416
+0f2 block     #   attr 27, 100%: block 347
 0f3 block     #   attr 27, 100%: block 1108
-0f4 floor     #   attr 27, 100%: floor 347
+0f4 block     #   attr 27, 100%: block 347
 0f5 floor     #   attr 10, 100%: floor 16
 0f6 tall      #   attr 02, 100%: tall 50
 0f7 tall      #   attr 01, 100%: tall 50
@@ -248,8 +248,8 @@
 11f floor     #   attr 00, 100%: floor 108
 120 block     #   attr 27, 100%: block 22
 121 block     #   attr 27, 100%: block 22
-122 floor     # ? attr 27, 56%: floor 286 block 220
-123 floor     # ? attr 27, 56%: floor 286 block 220
+122 block     #   attr 27, 87%: floor 64 block 442
+123 block     #   attr 27, 87%: floor 64 block 442
 124 bigpot    #   attr 27, 100%: bigpot 32
 125 bigpot    #   attr 20, 100%: bigpot 32
 126 block     #   attr 02, 100%: block 22
@@ -264,8 +264,8 @@
 12f floor     #   attr 02, 100%: floor 400
 130 block     #   attr 27, 100%: block 22
 131 block     #   attr 27, 100%: block 22
-132 floor     # ? attr 27, 56%: floor 286 block 220
-133 floor     # ? attr 27, 56%: floor 286 block 220
+132 block     #   attr 27, 87%: floor 64 block 442
+133 block     #   attr 27, 87%: floor 64 block 442
 134 bigpot    #   attr 27, 100%: bigpot 32
 135 bigpot    #   attr 27, 100%: bigpot 32
 136 floor     #   attr 02, 100%: floor 18

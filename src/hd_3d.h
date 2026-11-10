@@ -95,6 +95,7 @@ void Hd3d_RoomBuildBegin(int room);
 void Hd3d_RoomPass(int pass);
 // the follower's OAM entries, world position and level (tagalong.c)
 void Hd3d_Follower(int oam_first, int n, int x, int y, bool lower);
+void Hd3d_SpritesFrame(void);   // sprite.c, each game frame
 void Hd3d_ObjBegin(void);
 void Hd3d_ObjEnd(int code, int x, int y);
 void Hd3d_RoomBuildEnd(void);

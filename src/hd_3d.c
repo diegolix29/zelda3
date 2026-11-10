@@ -110,6 +110,10 @@ static bool IsWalkingModule(int mod) {
 }
 
 static FILE *g_log;
+// dumps (keys 6 and 8) also go to zelda3_3d_dumps.log, which is only appended
+// to: zelda3_3d.log keeps two runs, and dumps taken before a restart were lost
+static FILE *g_dump_log;
+static bool g_log_keep;
 static float g_angle;            // current tilt in degrees (eases toward the target)
 static float g_radius_inv;       // current 1 / sphere radius (eases too)
 static bool g_active_last;
@@ -148,6 +152,17 @@ void Hd3d_Log(const char *fmt, ...) {
   va_end(va);
   fputc('\n', g_log);
   fflush(g_log);
+  if (g_log_keep) {
+    if (!g_dump_log)
+      g_dump_log = fopen("zelda3_3d_dumps.log", "a");
+    if (g_dump_log) {
+      va_start(va, fmt);
+      vfprintf(g_dump_log, fmt, va);
+      va_end(va);
+      fputc('\n', g_dump_log);
+      fflush(g_dump_log);
+    }
+  }
 }
 
 static float RadiusInv(int curve) {
@@ -2427,7 +2442,9 @@ static void BuildHeightMap(void) {
     g_room_dump_request = false;
     if (!objects)
       Hd3d_Log("room dump: no object info for room %d (built for %d)", dungeon_room_index, g_room_id);
+    g_log_keep = true;
     RoomDump(attr, cls);
+    g_log_keep = false;
   }
 }
 
@@ -2464,6 +2481,7 @@ static bool SmallTreeCentre(int m, int *cx, int *cy) {
 enum { kForestRim = 28, kForestDome = 16, kForestArchBot = 16, kForestUnderside = 18, kForestOverhang = 10, kForestOutlineD = 10 };
 static uint8 g_ow_cls[kGridMax * kGridMax];
 static int g_ow_cells;
+static bool g_ow_trees_only;     // outside the Lost Woods / Skull Woods: only trees stand (ForestHeightsOn)
 
 // each connected group of trunk cells: a stump if small and away from leaves
 static void ForestMassHeights(uint8 *mass_h) {
@@ -2601,7 +2619,9 @@ static void BuildForestShapes(const uint8 *mass_h) {
     for (int cx = 0; cx < kGridMax; cx++) {
       if (g_ow_cls[cy * kGridMax + cx] != kOw_Arch)
         continue;
-      for (int dir = -1; dir <= 1; dir += 2) {
+      // (hollow logs are the forests' own; elsewhere an arch is a crown's
+      // edge drawn over a walkable cell, with nothing to open under it)
+      for (int dir = -1; dir <= 1 && !g_ow_trees_only; dir += 2) {
         for (int k = 1; k <= 3; k++) {
           int ny = cy + dir * k;
           if (ny < 0 || ny >= kGridMax || g_ow_cls[ny * kGridMax + cx] != kOw_Floor)
@@ -2635,6 +2655,35 @@ static void BuildForestShapes(const uint8 *mass_h) {
       for (int y = 0; y < 8; y++)
         memset(&g_fin[(cy * 8 + y) * 1024 + cx * 8], 0, 8);
     }
+  }
+  // Outside the forests, what the flood did not reach only stands in a tree's
+  // cells and the walkable cells within 2 of them (a crown's side lobes): a
+  // house, a wall or a fence is outlined too, and stood up as a hedge
+  int cleared = 0;
+  if (g_ow_trees_only) {
+    static uint8 near_tree[kGridMax * kGridMax];
+    memset(near_tree, 0, sizeof(near_tree));
+    for (int cy = 0; cy < kGridMax; cy++)
+      for (int cx = 0; cx < kGridMax; cx++) {
+        if (g_ow_cls[cy * kGridMax + cx] == kOw_Floor)
+          continue;
+        for (int dy = -2; dy <= 2; dy++)
+          for (int dx = -2; dx <= 2; dx++) {
+            int nx = cx + dx, ny = cy + dy;
+            if ((unsigned)nx < kGridMax && (unsigned)ny < kGridMax)
+              near_tree[ny * kGridMax + nx] = 1;
+          }
+      }
+    for (int cy = 0; cy < kGridMax; cy++)
+      for (int cx = 0; cx < kGridMax; cx++) {
+        if (near_tree[cy * kGridMax + cx])
+          continue;
+        for (int y = 0; y < 8; y++) {
+          uint8 *row = &g_fin[(cy * 8 + y) * 1024 + cx * 8];
+          for (int x = 0; x < 8; x++)
+            cleared += row[x] != 0, row[x] = 0;
+        }
+      }
   }
   // the regions inside the outlines
   memset(g_fcrown, 0, sizeof(g_fcrown));
@@ -2738,8 +2787,8 @@ static void BuildForestShapes(const uint8 *mass_h) {
         d = crown_dist[i];
         g_ftop[i] = (uint8)(kForestRim + kForestDome * ForestRound(d, 24));
         // near an arch: the wall of a hollow log, down to the ground
-        bool log = k == kOw_Arch;
-        for (int s = 1; s <= 3 && !log; s++)
+        bool log = k == kOw_Arch && !g_ow_trees_only;
+        for (int s = 1; s <= 3 && !log && !g_ow_trees_only; s++)
           log = (cx >= s && g_ow_cls[cy * kGridMax + cx - s] == kOw_Arch) ||
                 (cx + s < kGridMax && g_ow_cls[cy * kGridMax + cx + s] == kOw_Arch);
         // a crown overhangs its edge; the middle is the trunk
@@ -2783,14 +2832,25 @@ static void BuildForestShapes(const uint8 *mass_h) {
     }
   }
   Hd3d_Log("forest shapes built: area 0x%02x, %d raised cells, tallest %d, %d clean floor cells, %d fill cells, standing pixels %d, crowns %d, "
-           "%d walkable cells flattened",
-           (uint8)overworld_area_index, g_ow_cells, g_hmax, seeds, sealed, kept, crowns, flattened);
+           "%d walkable cells flattened, %s (%d pixels away from trees left flat)",
+           (uint8)overworld_area_index, g_ow_cells, g_hmax, seeds, sealed, kept, crowns, flattened,
+           g_ow_trees_only ? "trees only" : "whole forest", cleared);
+}
+
+// The Lost Woods and Skull Woods: everything solid stands (crowns, hedges,
+// roots, stumps). Every other overworld area (phase 1 of the overworld plan):
+// only the trees, the same shapes, found the same way: crowns (solid tiles
+// drawn over Link), the roots and trunks just under them, the bushes. Walls,
+// houses, cliffs and rocks stay flat there for now (g_ow_trees_only)
+
+static bool IsForestArea(void) {
+  uint8 area = (uint8)overworld_area_index;
+  return area == 0x00 || area == 0x40;
 }
 
 static bool ForestHeightsOn(void) {
   int mod = main_module_index == 14 ? saved_module_for_menu : main_module_index;
-  uint8 area = (uint8)overworld_area_index;
-  return !player_is_indoors && mod == 9 && overworld_screen_index < 0x80 && (area == 0x00 || area == 0x40);
+  return !player_is_indoors && mod == 9 && overworld_screen_index < 0x80;
 }
 
 // the map16 at world pixel (px, py) of the current area, -1 = outside it
@@ -2839,7 +2899,10 @@ static void ForestDump(void) {
 static void BuildForestHeights(void) {
   g_gmask = kGridMax - 1, g_gshift = 7, g_grid_out = true;
   g_raised = false, g_holes_room = false;
-  g_gx0 = overworld_offset_base_x, g_gy0 = overworld_offset_base_y >> 3;
+  // the grid starts at the 1024 pixel block holding the area (a small area is
+  // 512 pixels, not on a 1024 boundary), so its cells index as y * 128 + x
+  g_gx0 = overworld_offset_base_x & ~(kGridMax - 1), g_gy0 = (overworld_offset_base_y >> 3) & ~(kGridMax - 1);
+  g_ow_trees_only = !IsForestArea();
   // the tiles change when a bush is lifted or a tree burns
   uint32 hash = 2166136261u ^ g_gx0 ^ (uint32)g_gy0 << 8 ^ (uint32)overworld_area_index << 16;
   for (int i = 0; i < 64 * 64; i++)
@@ -2869,6 +2932,27 @@ static void BuildForestHeights(void) {
         g_ow_cls[GridCell(wcx, wcy)] = (uint8)k;
       }
     }
+    // outside the forests: solid cells without priority are a tree's only
+    // when they are its roots (1-3 cells under a crown) or beside one; walls,
+    // houses, cliffs and fences stay flat
+    if (g_ow_trees_only) {
+      static uint8 keep[kGridMax * kGridMax];
+      memset(keep, 0, sizeof(keep));
+      for (int cy = 0; cy < kGridMax; cy++)
+        for (int cx = 0; cx < kGridMax; cx++) {
+          if (g_ow_cls[cy * kGridMax + cx] != kOw_Canopy)
+            continue;
+          for (int dy = -1; dy <= 3; dy++)
+            for (int dx = -1; dx <= 1; dx++) {
+              int nx = cx + dx, ny = cy + dy;
+              if ((unsigned)nx < kGridMax && (unsigned)ny < kGridMax)
+                keep[ny * kGridMax + nx] = 1;
+            }
+        }
+      for (int i = 0; i < kGridMax * kGridMax; i++)
+        if (g_ow_cls[i] == kOw_Trunk && !keep[i])
+          g_ow_cls[i] = kOw_Floor;
+    }
     // a gap one cell wide between solid cells is too narrow for Link: part of
     // the tree around it (the middle of a small tree's drawing)
     #define SOLID_AT(xx, yy) ((unsigned)(xx) < kGridMax && (unsigned)(yy) < kGridMax && \
@@ -2894,9 +2978,11 @@ static void BuildForestHeights(void) {
     BuildForestShapes(mass_h);
   }
   g_stat_wall_cells += g_ow_cells;
-  if (g_room_dump_request) {
+  if (g_room_dump_request && !g_ow_trees_only) {
     g_room_dump_request = false;
+    g_log_keep = true;
     ForestDump();
+    g_log_keep = false;
   }
 }
 
@@ -3623,7 +3709,18 @@ enum { kKey_Follower = 17 };
 static int g_fol_first, g_fol_n, g_fol_x, g_fol_y;
 static bool g_fol_lower, g_fol_live;
 
+// Sprite_Main, at the start of each game frame: the follower is gone until
+// Tagalong_Draw draws it again. Not at the end of each picture: with
+// HighRefreshInterpolation a picture can come without a game frame, and then
+// the follower was a loose drawing on every other picture (standing elsewhere:
+// it flickered between two places)
+void Hd3d_SpritesFrame(void) {
+  g_fol_live = false;
+}
+
 void Hd3d_Follower(int oam_first, int n, int x, int y, bool lower) {
+  if (g_hd_neighbor_tick)
+    return;
   g_fol_first = oam_first, g_fol_n = n, g_fol_x = x, g_fol_y = y, g_fol_lower = lower, g_fol_live = true;
 }
 
@@ -4009,6 +4106,7 @@ static int DrawSprites(uint32 *out, int pitch_px, const Cam *cm, Ppu *ppu) {
 
   bool dump = g_dump_request;
   g_dump_request = false;
+  g_log_keep = dump;
   int captured[128];   // pixels the PPU drew for each OAM entry (dump only)
   if (dump)
     memset(captured, 0, sizeof(captured));
@@ -4317,11 +4415,13 @@ void Hd3d_EndFrame(uint8 *pixels, int pitch, int width, int height) {
   uint32 *out = (uint32 *)pixels;
   bool forest = g_view3d_walls && ForestHeightsOn();
   // the outdoor grid (phase 0: classes and the key 8 dump, nothing stands yet)
-  if (outdoors && !forest && g_view3d_walls) {
+  if (outdoors && g_view3d_walls && !(forest && IsForestArea())) {
     BuildOutdoorGrid();
     if (g_room_dump_request) {
       g_room_dump_request = false;
+      g_log_keep = true;
       OutdoorDump();
+      g_log_keep = false;
     }
   }
   bool walls = forest || (g_view3d_walls && player_is_indoors);
@@ -4336,7 +4436,7 @@ void Hd3d_EndFrame(uint8 *pixels, int pitch, int width, int height) {
   }
   g_depth_valid = walls;
   int groups = DrawSprites(out, pitch_px, &cm, g_zenv.ppu);
-  g_fol_live = false;   // until Tagalong_Draw draws it again
+  g_log_keep = false;
   // the HD light and forest fog ran on the 2D frame: the ground past it and
   // the sprites (drawn from the side buffer) get them now, at the 2D point
   // they show

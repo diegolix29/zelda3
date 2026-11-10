@@ -1,0 +1,335 @@
+# Every room object id used by the game: its class in the 3D view (ObjectClass in
+# hd_3d.c), uses, tiles drawn, and how many of those are solid for the game.
+# CHECK = flat class but mostly solid tiles (it probably should stand), or a
+# standing class with no solid tile at all (it probably should be flat).
+T1        0x00 ceiling   uses 1627 tiles 187702 solid 100%
+T1        0x01 wall      uses  865 tiles 109947 solid  74%
+T1        0x02 wall      uses  842 tiles 110336 solid  74%
+T1        0x03 wall      uses  227 tiles  19258 solid  49%
+T1        0x04 wall      uses  222 tiles  18774 solid  49%
+T1        0x05 wall      uses   46 tiles   1136 solid  75%
+T1        0x06 wall      uses   35 tiles   1000 solid  75%
+T1        0x07 wall      uses   69 tiles   1436 solid   0%  CHECK
+T1        0x08 wall      uses   45 tiles   1146 solid   0%  CHECK
+T1        0x09 wall      uses    5 tiles    300 solid  80%
+T1        0x0a wall      uses    9 tiles    455 solid  80%
+T1        0x0b wall      uses    5 tiles    240 solid  80%
+T1        0x0c wall      uses    4 tiles    180 solid  80%
+T1        0x0d wall      uses   69 tiles   3015 solid  80%
+T1        0x0e wall      uses   70 tiles   3115 solid  80%
+T1        0x0f wall      uses   61 tiles   2485 solid  80%
+T1        0x10 wall      uses   62 tiles   2790 solid  80%
+T1        0x19 wall      uses   13 tiles   1300 solid  80%
+T1        0x1a wall      uses   18 tiles   1570 solid  80%
+T1        0x1b wall      uses   13 tiles   1090 solid  80%
+T1        0x1c wall      uses   13 tiles   1100 solid  80%
+T1        0x21 floor     uses    4 tiles     84 solid  28%
+T1        0x22 rail      uses  569 tiles   3642 solid 100%
+T1        0x27 floor     uses   61 tiles    456 solid   0%
+T1        0x28 floor     uses   59 tiles    476 solid   0%
+T1        0x29 floor     uses   24 tiles    209 solid   0%
+T1        0x2a floor     uses   25 tiles    230 solid   0%
+T1        0x2b floor     uses   17 tiles    106 solid   0%
+T1        0x2c floor     uses   11 tiles     62 solid   0%
+T1        0x2d floor     uses   17 tiles    118 solid   0%
+T1        0x2e floor     uses   14 tiles     77 solid   0%
+T1        0x2f rail      uses    3 tiles    108 solid  55%
+T1        0x30 rail      uses    2 tiles     60 solid  56%
+T1        0x31 floor     uses    1 tiles      0 solid   0%
+T1        0x32 floor     uses    1 tiles      0 solid   0%
+T1        0x33 floor     uses   52 tiles   2756 solid   0%
+T1        0x34 floor     uses   92 tiles    846 solid   0%
+T1        0x36 wall      uses   18 tiles    320 solid  50%
+T1        0x38 tall      uses   71 tiles    456 solid 100%
+T1        0x39 tall      uses   15 tiles    128 solid  75%
+T1        0x3a wall      uses   43 tiles    852 solid 100%
+T1        0x3b wall      uses   45 tiles    840 solid 100%
+T1        0x3c chair     uses   15 tiles    200 solid  50%
+T1        0x3d tall      uses  105 tiles   1024 solid  75%
+T1        0x3e wall      uses   16 tiles     84 solid 100%
+T1        0x3f floor     uses   52 tiles    537 solid   0%
+T1        0x40 floor     uses   49 tiles    504 solid   0%
+T1        0x41 floor     uses    9 tiles     84 solid   0%
+T1        0x42 floor     uses   12 tiles    135 solid   0%
+T1        0x43 floor     uses   15 tiles    136 solid   0%
+T1        0x44 floor     uses   11 tiles     93 solid   0%
+T1        0x45 floor     uses    8 tiles     61 solid   0%
+T1        0x46 floor     uses    9 tiles     81 solid   0%
+T1        0x4b wall      uses    7 tiles     36 solid 100%
+T1        0x4c floor     uses    9 tiles    294 solid   6%
+T1        0x4f floor     uses   13 tiles    312 solid  75%  CHECK
+T1        0x50 floor     uses   47 tiles    467 solid 100%  CHECK
+T1        0x51 wall      uses    6 tiles     84 solid 100%
+T1        0x52 wall      uses    6 tiles     84 solid 100%
+T1        0x53 wall      uses   19 tiles    384 solid 100%
+T1        0x55 wall      uses   44 tiles    552 solid 100%
+T1        0x56 wall      uses   32 tiles    440 solid 100%
+T1        0x5d block     uses   68 tiles   1755 solid 100%
+T1        0x5e block     uses  124 tiles    976 solid 100%
+T1        0x5f rail      uses   12 tiles    355 solid 100%
+T1        0x60 ceiling   uses 1239 tiles 119132 solid 100%
+T1        0x61 wall      uses  987 tiles 119406 solid  75%
+T1        0x62 wall      uses  973 tiles 118062 solid  75%
+T1        0x63 wall      uses  223 tiles  19546 solid  49%
+T1        0x64 wall      uses  214 tiles  20166 solid  49%
+T1        0x65 wall      uses   22 tiles    552 solid  75%
+T1        0x66 wall      uses   24 tiles    616 solid  75%
+T1        0x67 wall      uses   47 tiles   1376 solid   0%  CHECK
+T1        0x68 wall      uses   41 tiles   1420 solid   0%  CHECK
+T1        0x69 rail      uses  517 tiles   3768 solid 100%
+T1        0x6a floor     uses  105 tiles    691 solid   0%
+T1        0x6b floor     uses  113 tiles    708 solid   0%
+T1        0x6c rail      uses    2 tiles     96 solid  54%
+T1        0x6d rail      uses    2 tiles     98 solid  54%
+T1        0x70 floor     uses   50 tiles   3506 solid   0%
+T1        0x71 floor     uses  132 tiles   1290 solid   0%
+T1        0x73 wall      uses   10 tiles    272 solid  50%
+T1        0x74 wall      uses    9 tiles    288 solid  50%
+T1        0x75 tall      uses    5 tiles     72 solid  75%
+T1        0x76 wall      uses   26 tiles    564 solid 100%
+T1        0x77 wall      uses   25 tiles    504 solid 100%
+T1        0x78 wall      uses   23 tiles    152 solid 100%
+T1        0x79 floor     uses   81 tiles    634 solid   0%
+T1        0x7a floor     uses   80 tiles    631 solid   0%
+T1        0x7b wall      uses   21 tiles    136 solid 100%
+T1        0x7c floor     uses   49 tiles    479 solid 100%  CHECK
+T1        0x7d floor     uses   21 tiles    424 solid 100%  CHECK
+T1        0x7f wall      uses   22 tiles    304 solid 100%
+T1        0x80 wall      uses   19 tiles    304 solid 100%
+T1        0x81 wall      uses    1 tiles     48 solid 100%
+T1        0x82 wall      uses    1 tiles     48 solid 100%
+T1        0x83 wall      uses    1 tiles     48 solid   0%  CHECK
+T1        0x84 wall      uses    1 tiles     48 solid   0%  CHECK
+T1        0x85 wall      uses    4 tiles     48 solid 100%
+T1        0x86 wall      uses    4 tiles     48 solid 100%
+T1        0x87 tall      uses   10 tiles    176 solid  75%
+T1        0x88 block     uses  120 tiles   2232 solid 100%
+T1        0x89 block     uses   55 tiles    664 solid 100%
+T1        0x8a block     uses   25 tiles    666 solid 100%
+T1        0x8b floor     uses    9 tiles     97 solid   0%
+T1        0x8c floor     uses   11 tiles    117 solid   0%
+T1        0x8d floor     uses   19 tiles    124 solid   0%
+T1        0x8e floor     uses   17 tiles    116 solid   0%
+T1        0x8f floor     uses    1 tiles     30 solid  93%  CHECK
+T1        0x90 wall      uses   10 tiles    276 solid  33%
+T1        0x91 wall      uses    8 tiles    222 solid  33%
+T1        0x92 block     uses   56 tiles    552 solid   0%  CHECK
+T1        0x93 block     uses   45 tiles    552 solid   0%  CHECK
+T1        0x94 floor     uses   15 tiles    464 solid   0%
+T1        0xa0 ceiling   uses   74 tiles   2544 solid 100%
+T1        0xa1 ceiling   uses   81 tiles   2665 solid 100%
+T1        0xa2 ceiling   uses   69 tiles   1635 solid 100%
+T1        0xa3 ceiling   uses   66 tiles   2231 solid 100%
+T1        0xa4 floor     uses   62 tiles   1228 solid   0%
+T1        0xa5 ceiling   uses    2 tiles     20 solid   0%
+T1        0xa7 ceiling   uses    2 tiles     20 solid   0%
+T1        0xa9 ceiling   uses    5 tiles    143 solid   0%
+T1        0xaa ceiling   uses    6 tiles    162 solid   0%
+T1        0xab ceiling   uses    4 tiles    147 solid   0%
+T1        0xac ceiling   uses    6 tiles    162 solid   0%
+T1        0xb0 floor     uses    5 tiles     40 solid   0%
+T1        0xb1 floor     uses    8 tiles     64 solid   0%
+T1        0xb2 floor     uses   31 tiles   1512 solid   0%
+T1        0xb3 floor     uses   19 tiles    233 solid   0%
+T1        0xb4 floor     uses   19 tiles    233 solid   0%
+T1        0xb5 floor     uses    1 tiles     88 solid  75%  CHECK
+T1        0xb6 wall      uses    9 tiles    219 solid   0%  CHECK
+T1        0xb7 wall      uses    6 tiles    114 solid   0%  CHECK
+T1        0xb8 block     uses   50 tiles    532 solid   0%  CHECK
+T1        0xb9 block     uses   50 tiles    476 solid   0%  CHECK
+T1        0xba floor     uses   14 tiles    448 solid   0%
+T1        0xbb floor     uses    7 tiles     92 solid   0%
+T1        0xc0 ceiling   uses  955 tiles  97616 solid 100%
+T1        0xc1 small     uses    4 tiles    636 solid  54%
+T1        0xc2 ceiling   uses  327 tiles  30024 solid   0%
+T1        0xc3 floor     uses   82 tiles   2809 solid   0%
+T1        0xc4 floor     uses  132 tiles   5180 solid   0%
+T1        0xc5 floor     uses   49 tiles   2904 solid   0%
+T1        0xc6 floor     uses  416 tiles  39741 solid   0%
+T1        0xc8 floor     uses  134 tiles   8388 solid   0%
+T1        0xc9 floor     uses   20 tiles   1432 solid   0%
+T1        0xca floor     uses   24 tiles   5376 solid 100%  CHECK
+T1        0xcd wall      uses    1 tiles    214 solid 100%
+T1        0xce wall      uses    2 tiles    976 solid 100%
+T1        0xd1 floor     uses   32 tiles   3428 solid   0%
+T1        0xd2 floor     uses   26 tiles   2360 solid   0%
+T1        0xd7 floor     uses    1 tiles    108 solid   0%
+T1        0xd8 floor     uses    1 tiles    192 solid   0%
+T1        0xd9 floor     uses   27 tiles   2912 solid 100%  CHECK
+T1        0xda floor     uses    2 tiles    288 solid   0%
+T1        0xdb floor     uses   93 tiles   7628 solid   0%
+T1        0xdc small     uses   12 tiles   1460 solid  22%
+T1        0xdd furniture uses   55 tiles   1472 solid 100%
+T1        0xde block     uses   99 tiles    900 solid 100%
+T1        0xdf floor     uses   73 tiles   3030 solid 100%  CHECK
+T1        0xe0 floor     uses   19 tiles   1958 solid   0%
+T1        0xe1 floor     uses    6 tiles    440 solid   0%
+T1        0xe2 floor     uses   17 tiles   1848 solid   0%
+T1        0xe3 floor     uses   33 tiles   1616 solid   0%
+T1        0xe4 floor     uses   36 tiles   1832 solid   0%
+T1        0xe5 floor     uses   23 tiles   1136 solid 100%  CHECK
+T1        0xe6 floor     uses   24 tiles    760 solid 100%  CHECK
+T1        0xe7 floor     uses    8 tiles    728 solid 100%  CHECK
+T1        0xe8 floor     uses   10 tiles    760 solid 100%  CHECK
+T3        0x00 wall      uses    5 tiles     60 solid 100%
+T3        0x01 wall      uses    5 tiles    100 solid 100%
+T3        0x02 wall      uses   17 tiles    476 solid 100%
+T3        0x03 floor     uses   11 tiles     11 solid 100%  CHECK
+T3        0x04 floor     uses    8 tiles      8 solid 100%  CHECK
+T3        0x05 floor     uses   10 tiles     10 solid 100%  CHECK
+T3        0x06 floor     uses   12 tiles     12 solid 100%  CHECK
+T3        0x07 floor     uses    9 tiles      9 solid 100%  CHECK
+T3        0x08 floor     uses   11 tiles     11 solid 100%  CHECK
+T3        0x09 floor     uses   14 tiles     14 solid 100%  CHECK
+T3        0x0a floor     uses   10 tiles     10 solid 100%  CHECK
+T3        0x0b floor     uses   13 tiles     13 solid 100%  CHECK
+T3        0x0c floor     uses   13 tiles     13 solid 100%  CHECK
+T3        0x0e floor     uses    9 tiles      9 solid   0%
+T3        0x0f floor     uses   15 tiles     15 solid   0%
+T3        0x10 floor     uses    9 tiles     36 solid 100%  CHECK
+T3        0x11 floor     uses    9 tiles     36 solid 100%  CHECK
+T3        0x12 small     uses   22 tiles    306 solid   0%  CHECK
+T3        0x13 floor     uses   18 tiles     72 solid 100%  CHECK
+T3        0x14 floor     uses    2 tiles     24 solid  66%  CHECK
+T3        0x15 floor     uses    1 tiles     76 solid  86%  CHECK
+T3        0x16 block     uses   42 tiles    168 solid   0%  CHECK
+T3        0x17 wall      uses    5 tiles    240 solid 100%
+T3        0x18 wall      uses    4 tiles     16 solid 100%
+T3        0x19 small     uses  149 tiles    516 solid   1%
+T3        0x1c floor     uses   27 tiles    864 solid  62%  CHECK
+T3        0x1d floor     uses   16 tiles    256 solid  62%  CHECK
+T3        0x1e floor     uses    3 tiles     48 solid  50%  CHECK
+T3        0x1f floor     uses    2 tiles     32 solid  50%  CHECK
+T3        0x20 floor     uses    2 tiles     28 solid  57%  CHECK
+T3        0x21 floor     uses    2 tiles     24 solid  66%  CHECK
+T3        0x22 floor     uses    2 tiles      8 solid  25%
+T3        0x23 floor     uses    2 tiles      7 solid  28%
+T3        0x24 floor     uses    1 tiles      4 solid  25%
+T3        0x25 floor     uses    3 tiles     12 solid  25%
+T3        0x29 floor     uses    1 tiles     23 solid  65%  CHECK
+T3        0x2a floor     uses   20 tiles   9920 solid  82%  CHECK
+T3        0x2c block     uses    7 tiles    112 solid 100%
+T3        0x2d furniture uses    1 tiles    196 solid  45%
+T3        0x2e floor     uses    2 tiles    640 solid  55%  CHECK
+T3        0x2f small     uses  834 tiles   3336 solid 100%
+T3        0x31 block     uses   11 tiles    132 solid 100%
+T3        0x33 floor     uses    5 tiles     80 solid  62%  CHECK
+T3        0x3a floor     uses    6 tiles    144 solid  83%  CHECK
+T3        0x3b floor     uses    2 tiles     48 solid  83%  CHECK
+T3        0x3c floor     uses    3 tiles     72 solid  91%  CHECK
+T3        0x3d floor     uses    3 tiles     72 solid  91%  CHECK
+T3        0x3e floor     uses    6 tiles     23 solid 100%  CHECK
+T3        0x3f floor     uses    8 tiles     28 solid 100%  CHECK
+T3        0x40 floor     uses    6 tiles     23 solid 100%  CHECK
+T3        0x41 floor     uses    8 tiles     29 solid 100%  CHECK
+T3        0x42 floor     uses    2 tiles      6 solid 100%  CHECK
+T3        0x43 floor     uses    2 tiles      4 solid 100%  CHECK
+T3        0x44 floor     uses    2 tiles      8 solid 100%  CHECK
+T3        0x45 floor     uses    2 tiles      6 solid 100%  CHECK
+T3        0x46 floor     uses    9 tiles     36 solid 100%  CHECK
+T3        0x47 floor     uses    7 tiles    112 solid   0%
+T3        0x48 floor     uses   12 tiles    192 solid   0%
+T3        0x4a floor     uses   28 tiles    112 solid 100%  CHECK
+T3        0x4b floor     uses    1 tiles     21 solid 100%  CHECK
+T3        0x4c floor     uses    1 tiles     48 solid 100%  CHECK
+T3        0x4d furniture uses    1 tiles     18 solid 100%
+T3        0x4e floor     uses    1 tiles     12 solid 100%  CHECK
+T3        0x4f floor     uses   27 tiles    108 solid   0%
+T3        0x50 floor     uses   12 tiles     48 solid 100%  CHECK
+T3        0x54 floor     uses    2 tiles    232 solid  81%  CHECK
+T3        0x58 floor     uses    1 tiles      2 solid 100%  CHECK
+T3        0x59 floor     uses    1 tiles      3 solid  33%
+T3        0x5a small     uses   11 tiles     68 solid  35%
+T3        0x5b floor     uses    6 tiles     90 solid 100%  CHECK
+T3        0x5c floor     uses   15 tiles    360 solid 100%  CHECK
+T3        0x5d furniture uses    6 tiles    108 solid 100%
+T3        0x5e floor     uses    8 tiles     32 solid 100%  CHECK
+T3        0x5f floor     uses   11 tiles     44 solid 100%  CHECK
+T3        0x60 floor     uses    1 tiles     18 solid  55%  CHECK
+T3        0x61 floor     uses    1 tiles     18 solid  55%  CHECK
+T3        0x62 floor     uses    1 tiles    248 solid  91%  CHECK
+T3        0x63 floor     uses    6 tiles     24 solid   0%
+T3        0x64 floor     uses   42 tiles    168 solid 100%  CHECK
+T3        0x65 floor     uses   16 tiles     64 solid 100%  CHECK
+T3        0x66 floor     uses   47 tiles    736 solid   0%
+T3        0x67 floor     uses    3 tiles     20 solid 100%  CHECK
+T3        0x68 floor     uses    7 tiles     28 solid 100%  CHECK
+T3        0x69 wall      uses    2 tiles      8 solid 100%
+T3        0x6a wall      uses    3 tiles     28 solid 100%
+T3        0x6b floor     uses   61 tiles    976 solid 100%  CHECK
+T3        0x6c floor     uses    2 tiles     24 solid  16%
+T3        0x6d floor     uses    7 tiles     84 solid  16%
+T3        0x6e wall      uses    2 tiles     24 solid  16%
+T3        0x6f wall      uses    1 tiles     12 solid  16%
+T3        0x70 floor     uses    9 tiles    360 solid  90%  CHECK
+T3        0x71 floor     uses    1 tiles      0 solid   0%
+T3        0x72 floor     uses    1 tiles     76 solid  60%  CHECK
+T3        0x73 floor     uses   21 tiles  15981 solid   0%
+T3        0x74 floor     uses    9 tiles    540 solid  40%
+T3        0x75 floor     uses   22 tiles     88 solid   0%
+T3        0x76 floor     uses    1 tiles     24 solid 100%  CHECK
+T3        0x77 floor     uses    2 tiles     48 solid 100%  CHECK
+T3        0x78 floor     uses    1 tiles     30 solid  46%
+T3        0x79 floor     uses    6 tiles     72 solid 100%  CHECK
+T3        0x7a floor     uses    5 tiles     40 solid   0%
+T3        0x7b floor     uses    1 tiles    160 solid 100%  CHECK
+T3        0x7c floor     uses    1 tiles      4 solid 100%  CHECK
+T3        0x7d floor     uses    1 tiles      4 solid 100%  CHECK
+T3        0x7e floor     uses    1 tiles      4 solid 100%  CHECK
+T2        0x00 wall      uses 1108 tiles  11190 solid  90%
+T2        0x01 wall      uses 1094 tiles  13265 solid  91%
+T2        0x02 wall      uses 1096 tiles  11005 solid  90%
+T2        0x03 wall      uses 1113 tiles  13521 solid  91%
+T2        0x04 wall      uses  137 tiles   2168 solid  56%
+T2        0x05 wall      uses  126 tiles   1966 solid  56%
+T2        0x06 wall      uses  126 tiles   1998 solid  56%
+T2        0x07 wall      uses  136 tiles   2147 solid  56%
+T2        0x08 wall      uses  133 tiles   4124 solid  55%
+T2        0x09 wall      uses  130 tiles   3918 solid  55%
+T2        0x0a wall      uses  126 tiles   3912 solid  55%
+T2        0x0b wall      uses  136 tiles   4046 solid  55%
+T2        0x0c wall      uses   44 tiles   1324 solid  55%
+T2        0x0d wall      uses   41 tiles   1252 solid  55%
+T2        0x0e wall      uses   35 tiles   1066 solid  55%
+T2        0x0f wall      uses   45 tiles   1398 solid  55%
+T2        0x10 wall      uses    1 tiles     18 solid  55%
+T2        0x12 wall      uses    2 tiles     36 solid  55%
+T2        0x13 wall      uses    1 tiles     18 solid  55%
+T2        0x14 wall      uses    2 tiles     36 solid  55%
+T2        0x15 wall      uses    2 tiles     36 solid  55%
+T2        0x16 wall      uses    2 tiles     36 solid  55%
+T2        0x17 wall      uses    2 tiles     36 solid  55%
+T2        0x18 wall      uses   22 tiles     78 solid   0%  CHECK
+T2        0x19 wall      uses   23 tiles     80 solid   0%  CHECK
+T2        0x1a wall      uses   21 tiles     75 solid   0%  CHECK
+T2        0x1b wall      uses   22 tiles     77 solid   0%  CHECK
+T2        0x1c bigpot    uses   16 tiles    256 solid  75%
+T2        0x1d tall      uses    3 tiles     18 solid 100%
+T2        0x1e floor     uses   20 tiles     80 solid 100%  CHECK
+T2        0x1f floor     uses   25 tiles    100 solid 100%  CHECK
+T2        0x20 torch     uses   31 tiles    124 solid 100%
+T2        0x21 tall      uses   61 tiles    366 solid 100%
+T2        0x23 furniture uses    7 tiles     84 solid 100%
+T2        0x24 chair     uses   14 tiles    224 solid 100%
+T2        0x27 floor     uses   23 tiles     92 solid  50%  CHECK
+T2        0x28 furniture uses   17 tiles    340 solid 100%
+T2        0x29 floor     uses    8 tiles    128 solid 100%  CHECK
+T2        0x2a wall      uses    4 tiles     32 solid  25%
+T2        0x2d floor     uses    4 tiles     64 solid  75%  CHECK
+T2        0x2e floor     uses    3 tiles     48 solid  50%  CHECK
+T2        0x2f floor     uses    1 tiles     16 solid  50%  CHECK
+T2        0x31 floor     uses   27 tiles    864 solid  62%  CHECK
+T2        0x32 floor     uses   18 tiles    288 solid  62%  CHECK
+T2        0x33 floor     uses    3 tiles     48 solid  62%  CHECK
+T2        0x34 floor     uses   64 tiles    256 solid 100%  CHECK
+T2        0x35 floor     uses    7 tiles     56 solid 100%  CHECK
+T2        0x37 floor     uses    1 tiles     34 solid  64%  CHECK
+T2        0x38 floor     uses   61 tiles    854 solid  71%  CHECK
+T2        0x39 floor     uses   52 tiles    728 solid  71%  CHECK
+T2        0x3b floor     uses    9 tiles    126 solid  57%  CHECK
+T2        0x3c wall      uses    1 tiles    132 solid  69%
+T2        0x3e furniture uses    6 tiles    108 solid 100%
+T2        0x3f floor     uses    1 tiles     56 solid 100%  CHECK
+door      0x00 door      uses  697 tiles  12592 solid  72%
+pushblock 0x00 block     uses   99 tiles    396 solid 100%
+torch     0x01 torch     uses   86 tiles    344 solid 100%

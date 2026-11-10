@@ -1154,6 +1154,8 @@ void Sprite_Main() {  // 868328
     drag_player_x = drag_player_y = 0;
   Oam_ResetRegionBases();
   Garnish_ExecuteUpperSlots();
+  if (!g_hd_neighbor_tick)
+    Hd3d_SpritesFrame();   // vista 3D: il seguace si ridichiara in Tagalong_Draw
   Follower_Main();
   byte_7E0FB2 = flag_is_sprite_to_pick_up;
   flag_is_sprite_to_pick_up = 0;
