@@ -20,6 +20,7 @@
 #include <math.h>
 #include <string.h>
 #include "hd_world.h"
+#include "hd_3d.h"
 #include "zelda_rtl.h"
 #include "config.h"
 #include "variables.h"
@@ -2462,6 +2463,11 @@ void HdWorld_BeforeRender(int width, int height) {
   // soldato che segue Link, respinto da una freccia oltre il bordo). I pezzi
   // che sporgono oltre il bordo si disegnano a parte, sopra alle immagini.
   // (non nel menu: i suoi sprite vanno sopra all'HUD)
+  // Vista 3D: gli sprite si alzano dal buffer laterale e dall'OAM, e la
+  // priorita' dello sfondo non li nasconde (Hd3d_CaptureLine). Nascosti qui e
+  // disegnati a parte finivano piatti sul terreno vicino al confine
+  if (Hd3d_Active())
+    return;
   if (main_module_index != 9 || InMosaicTransition() || !mp->objXValid || !mp->objYValid ||
       (g_world_dx == 0 && g_world_dy == 0 && mp->extraLeftRight == 0))
     return;

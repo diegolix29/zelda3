@@ -21,6 +21,7 @@ extern int g_view3d, g_view3d_curve, g_view3d_dist, g_view3d_walls, g_view3d_cam
 void Hd3d_SetCamera(int cam, const char *why);
 void Hd3d_ToggleCamera(void);
 const char *Hd3d_CameraName(int cam);
+bool Hd3d_Active(void);        // the 3D view was drawn last frame
 bool Hd3d_ThirdPerson(void);   // third person and the 3D view was drawn last frame
 void Hd3d_RightStick(int axis_y, int value);
 void Hd3d_Recenter(void);

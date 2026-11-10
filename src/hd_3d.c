@@ -288,6 +288,10 @@ void Hd3d_ToggleCamera(void) {
   Hd3d_SetCamera(g_view3d_cam + 1, "hotkey");
 }
 
+bool Hd3d_Active(void) {
+  return g_active_last;
+}
+
 bool Hd3d_ThirdPerson(void) {
   return g_active_last && g_view3d_cam == kHd3d_CamThird;
 }
@@ -2516,6 +2520,17 @@ static void ForestMassHeights(uint8 *mass_h) {
 }
 
 static int ForestMap16(int px, int py);
+static int OgMap16(int px, int py);
+// The map16 of each cell of the forest window, window-relative (y * 128 + x),
+// 0xffff = none. The window is 1024 pixels around Link, filled from the
+// current area and the continuous world's other areas (OgMap16), so the
+// neighbouring areas stand too; the build works window-relative, and its
+// results are then turned to world positions & 1023 (what the ray caster reads)
+static uint16 g_ow_m16[kGridMax * kGridMax];
+// 1 = a solid cell drawn over Link that is not a tree (tile 0x40 and up: house
+// roofs, the Kakariko gate's posts): it stands like a crown, but on the
+// ground, with no overhang (the gate's posts floated 18 pixels up)
+static uint8 g_ow_built[kGridMax * kGridMax];
 
 // a rounded profile: 0 at the edge, 1 from `r` pixels in
 static float ForestRound(int dist, int r) {
@@ -2568,8 +2583,8 @@ static void BuildForestShapes(const uint8 *mass_h) {
   // the area sits on a 1024 pixel boundary: cells are in area coordinates
   for (int cy = 0; cy < kGridMax; cy++) {
     for (int cx = 0; cx < kGridMax; cx++) {
-      int wcx = g_gx0 + cx, wcy = g_gy0 + cy, m = ForestMap16(wcx * 8, wcy * 8);
-      uint16 w = m >= 0 ? map8[m * 4 + (wcy & 1) * 2 + (wcx & 1)] : 0;
+      int wcx = g_gx0 + cx, wcy = g_gy0 + cy, m = g_ow_m16[cy * kGridMax + cx];
+      uint16 w = m != 0xffff ? map8[m * 4 + (wcy & 1) * 2 + (wcx & 1)] : 0;
       bool outline = false;
       for (int y = 0; y < 8; y++) {
         for (int x = 0; x < 8; x++) {
@@ -2772,8 +2787,8 @@ static void BuildForestShapes(const uint8 *mass_h) {
         continue;
       int cx = x >> 3, cy = y >> 3, k = g_ow_cls[cy * kGridMax + cx], d = dist[i];
       int tx, ty, wpx = g_gx0 * 8 + x, wpy = g_gy0 * 8 + y;
-      int tm = ForestMap16(wpx, wpy);
-      if (tm >= 0 && SmallTreeCentre(tm, &tx, &ty)) {
+      int tm = g_ow_m16[(y >> 3) * kGridMax + (x >> 3)];
+      if (tm != 0xffff && SmallTreeCentre(tm, &tx, &ty)) {
         // round whatever its neighbours are: inside a hedge it has no edge of
         // its own for the distance to find
         float dx = (float)((wpx & 15) - tx) + 0.5f, dy = (float)((wpy & 15) - ty) + 0.5f;
@@ -2794,7 +2809,8 @@ static void BuildForestShapes(const uint8 *mass_h) {
           log = (cx >= s && g_ow_cls[cy * kGridMax + cx - s] == kOw_Arch) ||
                 (cx + s < kGridMax && g_ow_cls[cy * kGridMax + cx + s] == kOw_Arch);
         // a crown overhangs its edge; the middle is the trunk
-        g_fbot[i] = k == kOw_Arch ? kForestArchBot : !log && d < kForestOverhang ? kForestUnderside : 0;
+        g_fbot[i] = k == kOw_Arch ? kForestArchBot :
+                    !log && !g_ow_built[cy * kGridMax + cx] && d < kForestOverhang ? kForestUnderside : 0;
       } else if (k == kOw_Small) {
         g_ftop[i] = (uint8)(4 + 8 * ForestRound(d, 6));
         g_fband[i] = 5;
@@ -2885,7 +2901,7 @@ static void ForestDump(void) {
     char row[512];
     int n = snprintf(row, sizeof(row), "  y%3d:", cy);
     for (int cx = (lx >> 3) - 7; cx <= (lx >> 3) + 7 && n < (int)sizeof(row) - 32; cx++) {
-      int m = ForestMap16(cx * 8, cy * 8), c = GridCell(cx, cy);
+      int m = OgMap16(cx * 8, cy * 8), c = GridCell(cx, cy);
       if (m < 0) {
         n += snprintf(row + n, sizeof(row) - n, " ---");
         continue;
@@ -2901,14 +2917,23 @@ static void ForestDump(void) {
 static void BuildForestHeights(void) {
   g_gmask = kGridMax - 1, g_gshift = 7, g_grid_out = true;
   g_raised = false, g_holes_room = false;
-  // the grid starts at the 1024 pixel block holding the area (a small area is
-  // 512 pixels, not on a 1024 boundary), so its cells index as y * 128 + x
-  g_gx0 = overworld_offset_base_x & ~(kGridMax - 1), g_gy0 = (overworld_offset_base_y >> 3) & ~(kGridMax - 1);
+  // The window: 1024 pixels around Link, moved in steps of 64 pixels when he
+  // is more than 256 pixels from its middle (each move is a rebuild)
+  static int wx0 = -1 << 20, wy0;
+  int lcx = (link_x_coord + 8) >> 3, lcy = (link_y_coord + 16) >> 3;
+  if (abs(lcx - (wx0 + kGridMax / 2)) > 32 || abs(lcy - (wy0 + kGridMax / 2)) > 32)
+    wx0 = (lcx - kGridMax / 2) & ~7, wy0 = (lcy - kGridMax / 2) & ~7;
+  g_gx0 = wx0, g_gy0 = wy0;
   g_ow_trees_only = !IsForestArea();
-  // the tiles change when a bush is lifted or a tree burns
-  uint32 hash = 2166136261u ^ g_gx0 ^ (uint32)g_gy0 << 8 ^ (uint32)overworld_area_index << 16;
-  for (int i = 0; i < 64 * 64; i++)
-    hash = (hash ^ overworld_tileattr[i]) * 16777619u;
+  // the tiles change when a bush is lifted or a tree burns, or the window moves
+  uint32 hash = 2166136261u ^ (uint32)g_gx0 ^ (uint32)g_gy0 << 12 ^ (uint32)g_ow_trees_only << 31;
+  static uint16 m16[(kGridMax / 2) * (kGridMax / 2)];
+  for (int j = 0; j < kGridMax / 2; j++)
+    for (int i = 0; i < kGridMax / 2; i++) {
+      int m = OgMap16((g_gx0 + i * 2) * 8, (g_gy0 + j * 2) * 8);
+      m16[j * (kGridMax / 2) + i] = (uint16)m;
+      hash = (hash ^ (uint16)m) * 16777619u;
+    }
   // and again half a second later: the area's graphics may still be loading
   static int again;
   bool build = hash != g_mask_hash;
@@ -2922,22 +2947,28 @@ static void BuildForestHeights(void) {
     static uint8 floor_open[kGridMax * kGridMax], g_ow_gap[kGridMax * kGridMax], mass_h[kGridMax * kGridMax];
     memset(floor_open, 0, sizeof(floor_open));
     memset(g_ow_gap, 0, sizeof(g_ow_gap));
+    memset(g_ow_built, 0, sizeof(g_ow_built));
+    for (int cy = 0; cy < kGridMax; cy++)
+      for (int cx = 0; cx < kGridMax; cx++)
+        g_ow_m16[cy * kGridMax + cx] = m16[(cy >> 1) * (kGridMax / 2) + (cx >> 1)];
     for (int cy = 0; cy < kGridMax; cy++) {
       for (int cx = 0; cx < kGridMax; cx++) {
-        int wcx = g_gx0 + cx, wcy = g_gy0 + cy, m = ForestMap16(wcx * 8, wcy * 8), k = kOw_Floor;
-        if (m >= 0) {
+        int wcx = g_gx0 + cx, wcy = g_gy0 + cy, m = g_ow_m16[cy * kGridMax + cx], k = kOw_Floor;
+        if (m != 0xffff && m < 0x2000) {
           uint16 w = map8[m * 4 + (wcy & 1) * 2 + (wcx & 1)];
           k = ForestClass(attrs[w & 0x1ff], (w >> 13 & 1) != 0);
           // outside the forests: house roofs (solid, priority, tiles from
-          // 0c0) stand like crowns, which the user liked; but walkable
-          // priority tiles from 100 are no crown's edge: Kakariko's
-          // weathervane (10d-12f, 1de) stood up as a tree
-          if (g_ow_trees_only && k == kOw_Arch && (w & 0x3ff) >= 0x100)
+          // 0c0) stand like crowns, which the user liked, and so does the
+          // Kakariko gate's beam (14b-16d); Kakariko's weathervane (10d-12f,
+          // 1de, walkable with priority) stood up as a tree: flat for now
+          int tn = w & 0x3ff;
+          if (g_ow_trees_only && k == kOw_Arch && ((tn >= 0x10d && tn <= 0x12f) || tn == 0x1de))
             k = kOw_Floor;
+          g_ow_built[cy * kGridMax + cx] = g_ow_trees_only && k == kOw_Canopy && tn >= 0x40;
           uint8 a = attrs[w & 0x1ff];
-          floor_open[GridCell(wcx, wcy)] = a == 0x00 || a == 0x48;
+          floor_open[cy * kGridMax + cx] = a == 0x00 || a == 0x48;
         }
-        g_ow_cls[GridCell(wcx, wcy)] = (uint8)k;
+        g_ow_cls[cy * kGridMax + cx] = (uint8)k;
       }
     }
     // outside the forests: solid cells without priority are a tree's only
@@ -2960,7 +2991,7 @@ static void BuildForestHeights(void) {
       int tx, ty;
       for (int i = 0; i < kGridMax * kGridMax; i++)
         if (g_ow_cls[i] == kOw_Trunk && !keep[i] &&
-            !SmallTreeCentre(ForestMap16((g_gx0 + (i & (kGridMax - 1))) * 8, (g_gy0 + (i >> 7)) * 8), &tx, &ty))
+            !(g_ow_m16[i] != 0xffff && SmallTreeCentre(g_ow_m16[i], &tx, &ty)))
           g_ow_cls[i] = kOw_Floor;   // (small trees are their own trunk)
     }
     // a gap one cell wide between solid cells is too narrow for Link: part of
@@ -2985,7 +3016,29 @@ static void BuildForestHeights(void) {
     memset(g_hfloor, 0, sizeof(g_hfloor));
     memset(g_hbot, 0, sizeof(g_hbot));
     memset(g_partial, 0, sizeof(g_partial));
+    uint64 t0 = SDL_GetPerformanceCounter();
     BuildForestShapes(mass_h);
+    Hd3d_Log("  (built in %.1f ms, window at cell %d, %d)", (SDL_GetPerformanceCounter() - t0) * 1000.0 / SDL_GetPerformanceFrequency(), g_gx0, g_gy0);
+    // window-relative -> world positions & 1023 (& 127 for cells), as the
+    // ray caster and the dump read them
+    int ox = (g_gx0 * 8) & 1023, oy = (g_gy0 * 8) & 1023;
+    if (ox | oy) {
+      static uint8 tmp[1024 * 1024];
+      uint8 *arrs[4] = { g_ftop, g_fbot, g_fdown, g_fband };
+      for (int a = 0; a < 4; a++) {
+        memcpy(tmp, arrs[a], sizeof(tmp));
+        for (int y = 0; y < 1024; y++) {
+          uint8 *dst = arrs[a] + ((y + oy) & 1023) * 1024;
+          const uint8 *src = tmp + y * 1024;
+          memcpy(dst + ox, src, 1024 - ox);
+          memcpy(dst, src + 1024 - ox, ox);
+        }
+      }
+      static uint8 ctmp[kGridMax * kGridMax];
+      memcpy(ctmp, g_ow_cls, sizeof(ctmp));
+      for (int i = 0; i < kGridMax * kGridMax; i++)
+        g_ow_cls[GridCell(g_gx0 + (i & (kGridMax - 1)), g_gy0 + (i >> 7))] = ctmp[i];
+    }
   }
   g_stat_wall_cells += g_ow_cells;
   if (g_room_dump_request && !g_ow_trees_only) {

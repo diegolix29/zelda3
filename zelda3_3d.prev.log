@@ -1,36 +1,283 @@
 [   0.000] 3D view init: View3D=5 (75 deg), View3DCurve=1 (Light), View3DDrawDistance=2 (3x), View3DWalls=1, View3DCamera=1 (Third person), NewRenderer=1, OutputMethod=2, ExtendedAspectRatio=0, ContinuousWorld=1, shader='shaders/foursword/foursword.glslp'
-[   0.337] not gameplay (module=0 sub=1 saved=0 mode=1 tilt=75.0)
-[   9.818] 3D on (module=9 sub=0 saved=9 mode=1 tilt=75.0)
-[   9.818] buffers 256x224
-[   9.827] ground past the screen: world pictures (module=9 area=0x00 indoors=0)
-[   9.861] forest shapes built: area 0x00, 12673 raised cells, tallest 44, 3443 clean floor cells, 6710 fill cells, standing pixels 776641, crowns 489324, 151 walkable cells flattened, whole forest (0 pixels away from trees left flat)
-[   9.874] ray caster: 7 worker threads
-[  10.373] forest shapes built: area 0x00, 12673 raised cells, tallest 44, 3443 clean floor cells, 6710 fill cells, standing pixels 776641, crowns 489324, 151 walkable cells flattened, whole forest (0 pixels away from trees left flat)
-[  16.459] stats: 300 frames, 3D compose 2.963 ms/frame, sprite groups avg 7.1 max 8, tilt 75.0, camera Third person (yaw 109 pitch 62), curve R=3000, past-screen px/frame 1832 (missing 0), source world pictures, far sprites avg 6.1 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 12673), frame 256x224, module=9 area=0x00
-[  19.958] forest shapes built: area 0x11, 2624 raised cells, tallest 44, 1168 clean floor cells, 1257 fill cells, standing pixels 122150, crowns 86770, 321 walkable cells flattened, trees only (112368 pixels away from trees left flat)
-[  20.388] forest shapes built: area 0x11, 2624 raised cells, tallest 44, 1168 clean floor cells, 1257 fill cells, standing pixels 122150, crowns 86770, 321 walkable cells flattened, trees only (112368 pixels away from trees left flat)
-[  20.768] forest shapes built: area 0x11, 2569 raised cells, tallest 44, 1565 clean floor cells, 1282 fill cells, standing pixels 125243, crowns 94604, 110 walkable cells flattened, trees only (110354 pixels away from trees left flat)
-[  20.931] stats: 300 frames, 3D compose 2.450 ms/frame, sprite groups avg 6.0 max 7, tilt 75.0, camera Third person (yaw 177 pitch 58), curve R=3000, past-screen px/frame 5391 (missing 0), source world pictures, far sprites avg 5.0 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 10625), frame 256x224, module=9 area=0x11
-[  21.000] forest shapes built: area 0x11, 2569 raised cells, tallest 44, 1565 clean floor cells, 1282 fill cells, standing pixels 125243, crowns 94604, 110 walkable cells flattened, trees only (110354 pixels away from trees left flat)
-[  23.432] stats: 300 frames, 3D compose 1.987 ms/frame, sprite groups avg 3.9 max 4, tilt 75.0, camera Third person (yaw -143 pitch 62), curve R=3000, past-screen px/frame 15252 (missing 0), source world pictures, far sprites avg 2.3 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 2569), frame 256x224, module=9 area=0x11
-[  25.683] stats: 300 frames, 3D compose 2.005 ms/frame, sprite groups avg 3.8 max 4, tilt 75.0, camera Third person (yaw -121 pitch 62), curve R=3000, past-screen px/frame 16079 (missing 0), source world pictures, far sprites avg 1.0 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 2569), frame 256x224, module=9 area=0x11
-[  27.936] stats: 300 frames, 3D compose 2.022 ms/frame, sprite groups avg 4.0 max 4, tilt 75.0, camera Third person (yaw -155 pitch 63), curve R=3000, past-screen px/frame 14209 (missing 0), source world pictures, far sprites avg 1.9 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 2569), frame 256x224, module=9 area=0x11
-[  28.390] forest shapes built: area 0x18, 2054 raised cells, tallest 44, 4951 clean floor cells, 799 fill cells, standing pixels 101681, crowns 63215, 941 walkable cells flattened, trees only (80135 pixels away from trees left flat)
-[  28.657] forest shapes built: area 0x18, 2054 raised cells, tallest 44, 4951 clean floor cells, 799 fill cells, standing pixels 101681, crowns 63215, 941 walkable cells flattened, trees only (80501 pixels away from trees left flat)
-[  30.221] stats: 300 frames, 3D compose 1.543 ms/frame, sprite groups avg 6.0 max 8, tilt 75.0, camera Third person (yaw -163 pitch 63), curve R=3000, past-screen px/frame 15662 (missing 0), source world pictures, far sprites avg 5.1 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 2141), frame 256x224, module=9 area=0x18
-[  32.465] stats: 300 frames, 3D compose 1.712 ms/frame, sprite groups avg 8.9 max 9, tilt 75.0, camera Third person (yaw -106 pitch 64), curve R=3000, past-screen px/frame 15309 (missing 0), source world pictures, far sprites avg 7.9 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 2054), frame 256x224, module=9 area=0x18
-[  34.599] stats: 300 frames, 3D compose 1.969 ms/frame, sprite groups avg 9.0 max 9, tilt 75.0, camera Third person (yaw -54 pitch 65), curve R=3000, past-screen px/frame 10953 (missing 0), source world pictures, far sprites avg 7.7 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 2054), frame 256x224, module=9 area=0x18
-[  36.854] stats: 300 frames, 3D compose 2.220 ms/frame, sprite groups avg 9.0 max 9, tilt 75.0, camera Third person (yaw -29 pitch 71), curve R=3000, past-screen px/frame 9387 (missing 0), source world pictures, far sprites avg 7.0 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 2054), frame 256x224, module=9 area=0x18
-[  40.528] stats: 300 frames, 3D compose 2.249 ms/frame, sprite groups avg 8.8 max 9, tilt 75.0, camera Third person (yaw -24 pitch 72), curve R=3000, past-screen px/frame 8000 (missing 0), source world pictures, far sprites avg 7.1 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 2054), frame 256x224, module=9 area=0x18
-[  44.187] stats: 300 frames, 3D compose 2.629 ms/frame, sprite groups avg 8.8 max 9, tilt 75.0, camera Third person (yaw -29 pitch 74), curve R=3000, past-screen px/frame 8161 (missing 0), source world pictures, far sprites avg 7.8 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 2054), frame 256x224, module=9 area=0x18
-[  47.456] stats: 300 frames, 3D compose 2.532 ms/frame, sprite groups avg 8.4 max 9, tilt 75.0, camera Third person (yaw -29 pitch 74), curve R=3000, past-screen px/frame 7961 (missing 0), source world pictures, far sprites avg 7.4 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 2054), frame 256x224, module=9 area=0x18
-[  50.809] stats: 300 frames, 3D compose 2.552 ms/frame, sprite groups avg 8.8 max 9, tilt 75.0, camera Third person (yaw -29 pitch 74), curve R=3000, past-screen px/frame 7961 (missing 0), source world pictures, far sprites avg 7.8 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 2054), frame 256x224, module=9 area=0x18
-[  54.191] stats: 300 frames, 3D compose 2.553 ms/frame, sprite groups avg 8.6 max 9, tilt 75.0, camera Third person (yaw -29 pitch 74), curve R=3000, past-screen px/frame 7961 (missing 0), source world pictures, far sprites avg 7.6 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 2054), frame 256x224, module=9 area=0x18
-[  57.961] stats: 300 frames, 3D compose 2.472 ms/frame, sprite groups avg 8.5 max 9, tilt 75.0, camera Third person (yaw -29 pitch 74), curve R=3000, past-screen px/frame 7961 (missing 0), source world pictures, far sprites avg 7.5 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 2054), frame 256x224, module=9 area=0x18
-[  61.695] stats: 300 frames, 3D compose 2.490 ms/frame, sprite groups avg 8.8 max 9, tilt 75.0, camera Third person (yaw -29 pitch 74), curve R=3000, past-screen px/frame 7961 (missing 0), source world pictures, far sprites avg 7.8 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 2054), frame 256x224, module=9 area=0x18
-[  65.152] stats: 300 frames, 3D compose 2.550 ms/frame, sprite groups avg 8.7 max 9, tilt 75.0, camera Third person (yaw -29 pitch 74), curve R=3000, past-screen px/frame 7961 (missing 0), source world pictures, far sprites avg 7.7 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 2054), frame 256x224, module=9 area=0x18
-[  68.697] stats: 300 frames, 3D compose 2.534 ms/frame, sprite groups avg 8.5 max 9, tilt 75.0, camera Third person (yaw -29 pitch 74), curve R=3000, past-screen px/frame 7961 (missing 0), source world pictures, far sprites avg 7.5 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 2054), frame 256x224, module=9 area=0x18
-[  72.641] stats: 300 frames, 3D compose 2.508 ms/frame, sprite groups avg 8.8 max 9, tilt 75.0, camera Third person (yaw -29 pitch 74), curve R=3000, past-screen px/frame 7961 (missing 0), source world pictures, far sprites avg 7.8 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 2054), frame 256x224, module=9 area=0x18
-[  76.669] stats: 300 frames, 3D compose 2.478 ms/frame, sprite groups avg 8.8 max 9, tilt 75.0, camera Third person (yaw -29 pitch 74), curve R=3000, past-screen px/frame 7961 (missing 0), source world pictures, far sprites avg 7.8 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 2054), frame 256x224, module=9 area=0x18
-[  80.690] stats: 300 frames, 3D compose 2.472 ms/frame, sprite groups avg 8.5 max 9, tilt 75.0, camera Third person (yaw -29 pitch 74), curve R=3000, past-screen px/frame 7961 (missing 0), source world pictures, far sprites avg 7.5 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 2054), frame 256x224, module=9 area=0x18
-[  84.287] stats: 300 frames, 3D compose 2.713 ms/frame, sprite groups avg 8.5 max 9, tilt 75.0, camera Third person (yaw -29 pitch 74), curve R=3000, past-screen px/frame 7961 (missing 0), source world pictures, far sprites avg 7.5 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 2054), frame 256x224, module=9 area=0x18
+[   0.372] not gameplay (module=0 sub=1 saved=0 mode=1 tilt=75.0)
+[   6.987] 3D on (module=9 sub=0 saved=9 mode=1 tilt=75.0)
+[   6.987] buffers 256x224
+[   6.997] ground past the screen: world pictures (module=9 area=0x00 indoors=0)
+[   7.030] forest shapes built: area 0x00, 10502 raised cells, tallest 44, 5691 clean floor cells, 5551 fill cells, standing pixels 623836, crowns 459569, 61 walkable cells flattened, whole forest (0 pixels away from trees left flat)
+[   7.031]   (built in 33.4 ms, window at cell 48, 40)
+[   7.045] ray caster: 7 worker threads
+[   7.763] forest shapes built: area 0x00, 10502 raised cells, tallest 44, 5691 clean floor cells, 5551 fill cells, standing pixels 623608, crowns 459569, 61 walkable cells flattened, whole forest (0 pixels away from trees left flat)
+[   7.763]   (built in 30.1 ms, window at cell 48, 40)
+[  11.648] stats: 300 frames, 3D compose 3.528 ms/frame, sprite groups avg 6.7 max 7, tilt 75.0, camera Third person (yaw -173 pitch 62), curve R=3000, past-screen px/frame 5938 (missing 0), source world pictures, far sprites avg 5.7 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 10502), frame 256x224, module=9 area=0x00
+[  15.133] forest shapes built: area 0x11, 9285 raised cells, tallest 44, 6202 clean floor cells, 4771 fill cells, standing pixels 543772, crowns 437202, 168 walkable cells flattened, trees only (10863 pixels away from trees left flat)
+[  15.133]   (built in 28.3 ms, window at cell 48, 40)
+[  15.213] stats: 300 frames, 3D compose 2.461 ms/frame, sprite groups avg 5.6 max 6, tilt 75.0, camera Third person (yaw 178 pitch 61), curve R=3000, past-screen px/frame 5396 (missing 0), source world pictures, far sprites avg 5.0 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 10469), frame 256x224, module=9 area=0x11
+[  15.499] forest shapes built: area 0x11, 9285 raised cells, tallest 44, 6202 clean floor cells, 4771 fill cells, standing pixels 543772, crowns 437202, 168 walkable cells flattened, trees only (11285 pixels away from trees left flat)
+[  15.499]   (built in 28.6 ms, window at cell 48, 40)
+[  15.944] forest shapes built: area 0x11, 9149 raised cells, tallest 44, 6167 clean floor cells, 4362 fill cells, standing pixels 514048, crowns 399766, 338 walkable cells flattened, trees only (10306 pixels away from trees left flat)
+[  15.944]   (built in 27.7 ms, window at cell 48, 40)
+[  16.180] forest shapes built: area 0x11, 9149 raised cells, tallest 44, 6167 clean floor cells, 4362 fill cells, standing pixels 514048, crowns 399766, 338 walkable cells flattened, trees only (10034 pixels away from trees left flat)
+[  16.180]   (built in 28.1 ms, window at cell 48, 40)
+[  17.243] forest shapes built: area 0x11, 9014 raised cells, tallest 44, 6464 clean floor cells, 4584 fill cells, standing pixels 529783, crowns 420228, 300 walkable cells flattened, trees only (8038 pixels away from trees left flat)
+[  17.243]   (built in 27.1 ms, window at cell 48, 72)
+[  17.589] forest shapes built: area 0x11, 9014 raised cells, tallest 44, 6464 clean floor cells, 4584 fill cells, standing pixels 529783, crowns 420228, 300 walkable cells flattened, trees only (7766 pixels away from trees left flat)
+[  17.589]   (built in 27.4 ms, window at cell 48, 72)
+[  18.503] stats: 300 frames, 3D compose 2.638 ms/frame, sprite groups avg 4.2 max 6, tilt 75.0, camera Third person (yaw -161 pitch 61), curve R=3000, past-screen px/frame 14897 (missing 0), source world pictures, far sprites avg 2.8 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 9109), frame 256x224, module=9 area=0x11
+[  20.742] forest shapes built: area 0x11, 8216 raised cells, tallest 44, 7007 clean floor cells, 4165 fill cells, standing pixels 495564, crowns 390958, 439 walkable cells flattened, trees only (8819 pixels away from trees left flat)
+[  20.742]   (built in 26.3 ms, window at cell 40, 104)
+[  20.822] stats: 300 frames, 3D compose 2.216 ms/frame, sprite groups avg 3.8 max 4, tilt 75.0, camera Third person (yaw -150 pitch 63), curve R=3000, past-screen px/frame 15934 (missing 0), source world pictures, far sprites avg 1.0 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 8990), frame 256x224, module=9 area=0x11
+[  21.087] forest shapes built: area 0x11, 8216 raised cells, tallest 44, 7007 clean floor cells, 4165 fill cells, standing pixels 495564, crowns 390958, 439 walkable cells flattened, trees only (8819 pixels away from trees left flat)
+[  21.087]   (built in 26.6 ms, window at cell 40, 104)
+[  23.334] stats: 300 frames, 3D compose 1.868 ms/frame, sprite groups avg 4.0 max 4, tilt 75.0, camera Third person (yaw -46 pitch 52), curve R=3000, past-screen px/frame 7953 (missing 0), source world pictures, far sprites avg 2.2 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 8216), frame 256x224, module=9 area=0x11
+[  24.540] forest shapes built: area 0x18, 6360 raised cells, tallest 44, 8321 clean floor cells, 2983 fill cells, standing pixels 383685, crowns 286541, 901 walkable cells flattened, trees only (10087 pixels away from trees left flat)
+[  24.540]   (built in 25.5 ms, window at cell 32, 136)
+[  24.828] forest shapes built: area 0x18, 6360 raised cells, tallest 44, 8321 clean floor cells, 2983 fill cells, standing pixels 383775, crowns 286541, 901 walkable cells flattened, trees only (11250 pixels away from trees left flat)
+[  24.828]   (built in 24.5 ms, window at cell 32, 136)
+[  25.927] stats: 300 frames, 3D compose 1.978 ms/frame, sprite groups avg 6.5 max 9, tilt 75.0, camera Third person (yaw 167 pitch 64), curve R=3000, past-screen px/frame 10317 (missing 0), source world pictures, far sprites avg 5.5 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 7213), frame 256x224, module=9 area=0x18
+[  28.166] forest shapes built: area 0x18, 5893 raised cells, tallest 44, 8517 clean floor cells, 2547 fill cells, standing pixels 353875, crowns 254985, 1212 walkable cells flattened, trees only (9914 pixels away from trees left flat)
+[  28.166]   (built in 24.1 ms, window at cell 48, 168)
+[  28.463] forest shapes built: area 0x18, 5893 raised cells, tallest 44, 8517 clean floor cells, 2547 fill cells, standing pixels 353965, crowns 254985, 1212 walkable cells flattened, trees only (11002 pixels away from trees left flat)
+[  28.464]   (built in 24.6 ms, window at cell 48, 168)
+[  29.011] stats: 300 frames, 3D compose 1.991 ms/frame, sprite groups avg 9.0 max 9, tilt 75.0, camera Third person (yaw 177 pitch 64), curve R=3000, past-screen px/frame 15953 (missing 0), source world pictures, far sprites avg 8.0 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 6237), frame 256x224, module=9 area=0x18
+[  31.068] forest shapes built: area 0x18, 6138 raised cells, tallest 44, 8045 clean floor cells, 2732 fill cells, standing pixels 371427, crowns 274218, 1437 walkable cells flattened, trees only (10410 pixels away from trees left flat)
+[  31.068]   (built in 24.6 ms, window at cell 48, 200)
+[  31.466] forest shapes built: area 0x18, 6138 raised cells, tallest 44, 8045 clean floor cells, 2732 fill cells, standing pixels 371427, crowns 274218, 1437 walkable cells flattened, trees only (10410 pixels away from trees left flat)
+[  31.466]   (built in 25.3 ms, window at cell 48, 200)
+[  32.481] stats: 300 frames, 3D compose 1.825 ms/frame, sprite groups avg 8.3 max 9, tilt 75.0, camera Third person (yaw 156 pitch 64), curve R=3000, past-screen px/frame 17204 (missing 0), source world pictures, far sprites avg 6.7 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 5992), frame 256x224, module=9 area=0x18
+[  34.311] forest shapes built: area 0x18, 6967 raised cells, tallest 44, 7571 clean floor cells, 3320 fill cells, standing pixels 423568, crowns 322601, 1240 walkable cells flattened, trees only (9380 pixels away from trees left flat)
+[  34.311]   (built in 25.4 ms, window at cell 48, 232)
+[  34.656] forest shapes built: area 0x18, 6967 raised cells, tallest 44, 7571 clean floor cells, 3320 fill cells, standing pixels 423505, crowns 322601, 1240 walkable cells flattened, trees only (8969 pixels away from trees left flat)
+[  34.656]   (built in 25.7 ms, window at cell 48, 232)
+[  35.598] stats: 300 frames, 3D compose 1.996 ms/frame, sprite groups avg 8.6 max 9, tilt 75.0, camera Third person (yaw 178 pitch 60), curve R=3000, past-screen px/frame 12919 (missing 0), source world pictures, far sprites avg 7.6 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 6538), frame 256x224, module=9 area=0x18
+[  38.559] stats: 300 frames, 3D compose 1.851 ms/frame, sprite groups avg 5.4 max 9, tilt 75.0, camera Third person (yaw 180 pitch 67), curve R=3000, past-screen px/frame 14479 (missing 0), source world pictures, far sprites avg 4.6 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 6967), frame 256x224, module=9 area=0x18
+[  41.907] stats: 300 frames, 3D compose 2.120 ms/frame, sprite groups avg 8.0 max 8, tilt 75.0, camera Third person (yaw 15 pitch 66), curve R=3000, past-screen px/frame 8134 (missing 0), source world pictures, far sprites avg 8.0 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 6967), frame 256x224, module=9 area=0x18
+[  43.173] room dump requested (key 8)
+[  43.178] === outdoor dump: area 0x18 (screen 0x18), module 9, Link at (883, 2555), window at cell (40, 248), continuous world on
+[  43.178]   cells: floor(.) 3217 solid(W) 2133 canopy(C) 2813 arch(A) 609 small(b) 628 grave(g) 2 post(p) 2749 water(~) 147 ledge(L) 262 slope(/) 143 hole(O) 4 grass(n) 76 dig(d) 3569 other(?) 32
+[  43.178]   each cell: map16/8x8 tile, collision, class letter; [ ] = Link. Letters: - none . floor W solid C canopy A arch b small r rock g grave s sign p post ~ water L ledge / slope S stairs O hole D door n grass d dig ? other
+[  43.178]   y 311:  3e9/10c 00 .   3e9/10c 00 .   5c4/10c 00 .   5c4/0ed 00 .   5e1/0aa 48 d   5e1/145 01 C   5e2/145 01 C   5e2/0aa 48 d   5e3/0aa 48 d   5e3/0aa 48 d   5e4/0aa 48 d   5e4/0aa 48 d   5e5/0aa 48 d   5e5/145 01 C   5e6/145 01 C   5e6/0aa 48 d   0b0/01f 00 A 
+[  43.178]   y 312:  5c8/10c 00 .   5c8/10c 00 .   5e7/10c 00 .   5e7/0ed 00 .   5e8/0aa 48 d   5e8/15a 02 W   5e9/15a 02 W   5e9/0ac 00 .   5ea/0ac 00 .   5ea/0ac 00 .   5ea/0ac 00 .   5ea/0ac 00 .   5eb/0ac 00 .   5eb/15a 02 W   5ec/15a 02 W   5ec/0aa 48 d   089/02f 00 A 
+[  43.178]   y 313:  5c8/0ed 00 .   5c8/0ed 00 .   5e7/0ed 00 .   5e7/0ed 00 .   5e8/0aa 48 d   5e8/0aa 48 d   5e9/0aa 48 d   5e9/0aa 48 d   5ea/0aa 48 d   5ea/0aa 48 d   5ea/0aa 48 d   5ea/0aa 48 d   5eb/0aa 48 d   5eb/0aa 48 d   5ec/0aa 48 d   5ec/0aa 48 d   089/03f 00 A 
+[  43.178]   y 314:  026/03e 00 A   026/03e 00 A   078/03d 00 A   078/03c 00 A   079/0aa 48 d   079/0aa 48 d   034/0aa 48 d   034/0aa 48 d   09e/0aa 48 d   09e/08c 00 .   17c/08c 00 .   17c/0aa 48 d   0b5/0aa 48 d   0b5/0aa 48 d   0b6/03c 00 A   0b6/03d 00 A   026/03e 00 A 
+[  43.178]   y 315:  026/002 27 p   026/002 27 p   078/001 27 p   078/000 27 p   079/00e 00 A   079/0aa 48 d   034/0aa 48 d   034/0aa 48 d   09e/08c 00 .   09e/09c 00 .   17c/09c 00 .   17c/08c 00 .   0b5/0aa 48 d   0b5/00e 00 A   0b6/000 27 p   0b6/001 27 p   026/002 27 p 
+[  43.178]   y 316:  012/012 01 C   012/012 01 C   013/011 01 C   013/010 27 p   07b/00f 00 A   07b/0aa 48 d   034/0aa 48 d   034/0aa 48 d   0a9/08e 00 .   0a9/0ba 00 .   179/0ba 00 .   179/08e 00 .   0b9/0aa 48 d   0b9/00f 00 A   011/010 27 p   011/011 01 C   012/012 01 C 
+[  43.178]   y 317:  012/022 01 C   012/022 01 C   013/021 01 C   013/020 27 p   07b/01f 00 A   07b/0aa 48 d   034/0aa 48 d   034/0aa 48 d   0a9/08e 00 .   0a9/0ba 00 .   179/0ba 00 .   179/08e 00 .   0b9/0aa 48 d   0b9/01f 00 A   011/020 27 p   011/021 01 C   012/022 01 C 
+[  43.178]   y 318:  002/032 01 C   002/032 01 C   000/031 01 C   000/030 27 p   07c/02f 00 A   07c/0aa 48 d   034/0aa 48 d   034/0aa 48 d   0a9/08e 00 .   0a9/0ba 00 .   179/0ba 00 .   179/08e 00 .   0be/0aa 48 d   0be/02f 00 A   001/030 27 p   001/031 01 C   002/032 01 C 
+[  43.178]   y 319:  002/005 27 p   002/005 27 p   000/004 27 p   000/003 27 p   07c/03f 00 A   07c/0aa 48 d   034/0aa 48 d   034/0aa 48 d  [0a9/08e 00 .]  0a9/0ba 00 .   179/0ba 00 .   179/08e 00 .   0be/0aa 48 d   0be/03f 00 A   001/003 27 p   001/004 27 p   002/005 27 p 
+[  43.178]   y 320:  00d/013 01 C   00d/00a 01 C   082/009 01 C   082/008 01 C   0e8/01d 00 .   0e8/0aa 48 d   034/0aa 48 d   034/0aa 48 d   0a9/08e 00 .   0a9/0ba 00 .   179/0ba 00 .   179/08e 00 .   0e7/0aa 48 d   0e7/01d 00 .   083/008 01 C   083/009 01 C   044/00a 01 C 
+[  43.178]   y 321:  00d/000 27 p   00d/007 02 W   082/019 27 p   082/018 27 p   0e8/01e 00 .   0e8/0aa 48 d   034/0aa 48 d   034/0aa 48 d   0a9/08e 00 .   0a9/0ba 00 .   179/0ba 00 .   179/08e 00 .   0e7/0aa 48 d   0e7/01e 00 .   083/018 27 p   083/019 27 p   044/007 02 W 
+[  43.178]   y 322:  017/010 27 p   017/017 02 C   086/029 27 p   086/028 27 p   034/0aa 48 d   034/0aa 48 d   09e/0aa 48 d   09e/08c 00 .   0a3/09c 00 .   0a3/0ba 00 .   179/0ba 00 .   179/08e 00 .   034/0aa 48 d   034/0aa 48 d   087/028 27 p   087/029 27 p   053/017 02 C 
+[  43.178]   y 323:  017/020 27 p   017/01f 00 A   086/00d 00 .   086/0aa 48 d   034/0aa 48 d   034/0aa 48 d   09e/08c 00 .   09e/09c 00 .   0a3/0ba 00 .   0a3/0bb 00 .   179/0ba 00 .   179/08e 00 .   034/0aa 48 d   034/0aa 48 d   087/0aa 48 d   087/00d 00 .   053/01f 00 A 
+[  43.179]   y 324:  076/030 27 p   076/02f 00 A   071/08b 48 d   071/08b 48 d   09e/0aa 48 d   09e/08c 00 .   0a3/09c 00 .   0a3/0ba 00 .   1a5/0ba 00 .   1a5/0ba 00 .   179/0ba 00 .   179/08e 00 .   034/0aa 48 d   034/0aa 48 d   034/0aa 48 d   034/0aa 48 d   089/02f 00 A 
+[  43.179]   y 325:  076/003 27 p   076/03f 00 A   071/0aa 48 d   071/0aa 48 d   09e/08c 00 .   09e/09c 00 .   0a3/0ba 00 .   0a3/0bb 00 .   1a5/0ba 00 .   1a5/0ba 00 .   179/0ba 00 .   179/08e 00 .   034/0aa 48 d   034/0aa 48 d   034/0aa 48 d   034/0aa 48 d   089/03f 00 A 
+[  43.179]   y 326:  0d9/008 01 C   0d9/01d 00 .   034/0aa 48 d   034/0aa 48 d   0ad/08c 00 .   0ad/09c 00 .   0a5/0ba 00 .   0a5/0ba 00 .   0a5/0ba 00 .   0a5/0ba 00 .   0ac/09c 00 .   0ac/08c 00 .   2ac/0aa 48 d   2ac/083 00 .   16d/06b 00 .   16d/0aa 48 d   0f1/01d 00 . 
+[  43.179]   y 327:  0d9/018 27 p   0d9/01e 00 .   034/0aa 48 d   034/0aa 48 d   0ad/0aa 48 d   0ad/08c 00 .   0a5/08f 00 .   0a5/08f 00 .   0a5/08f 00 .   0a5/08f 00 .   0ac/08c 00 .   0ac/0aa 48 d   2ac/0aa 48 d   2ac/093 00 .   16d/07b 00 .   16d/06b 00 .   0f1/01e 00 . 
+[  43.179]   map16s in the window (not all floor), most used first: map16 xN, four 8x8 tiles as tile/collision (* = priority), classes
+[  43.179]     034 x587  0aa/48  0aa/48  0aa/48  0aa/48   dddd
+[  43.179]     036 x154  180/50  180/50  190/50  190/50   bbbb
+[  43.179]     0c9 x74   040/01  041/01  050/01  051/01   WWWW
+[  43.179]     334 x62   188/27  188/27  198/27  198/27   pppp
+[  43.179]     014 x57   011/01* 012/01* 021/01* 022/01*  CCCC
+[  43.179]     015 x57   012/01* 011/01* 022/01* 021/01*  CCCC
+[  43.179]     01c x57   031/01* 032/01* 004/27* 005/27*  CCpp
+[  43.179]     01d x57   032/01* 031/01* 005/27* 004/27*  CCpp
+[  43.179]     0e3 x57   060/01  061/01  0b0/02  0b1/02   WWWW
+[  43.179]     16c x57   06d/00  06d/00  05c/29  05c/29   ..LL
+[  43.179]     3f6 x54   176/01  176/01  176/01  176/01   WWWW
+[  43.179]     001 x45   030/27* 031/01* 003/27* 004/27*  pCpp
+[  43.179]     011 x45   010/27* 011/01* 020/27* 021/01*  pCpC
+[  43.179]     3d0 x45   171/01  171/01  101/02  101/02   WWWW
+[  43.179]     002 x44   032/01* 032/01* 005/27* 005/27*  CCpp
+[  43.179]     012 x44   012/01* 012/01* 022/01* 022/01*  CCCC
+[  43.179]     0da x44   08b/48  08b/48  08b/48  08b/48   dddd
+[  43.179]     000 x42   031/01* 030/27* 004/27* 003/27*  Cppp
+[  43.179]     013 x42   011/01* 010/27* 021/01* 020/27*  CpCp
+[  43.179]     016 x40   010/27* 010/27* 020/27* 020/27*  pppp
+[  43.179]     01e x40   030/27* 030/27* 003/27* 003/27*  pppp
+[  43.179]     3cc x35   11c/00  11c/00  161/01  161/01   ..WW
+[  43.179]     00a x34   014/01* 015/01* 001/27* 002/27*  CCpp
+[  43.179]     00b x34   015/01* 014/01* 002/27* 001/27*  CCpp
+[  43.179]     007 x32   013/01* 014/01* 000/27* 001/27*  CCpp
+[  43.179]     0e1 x30   1db/48  08b/48  08b/48  1db/48   dddd
+[  43.179]     29d x30   0aa/48  18a/27  0aa/48  19a/27   dpdp
+[  43.179]     00c x29   013/01* 013/01* 000/27* 000/27*  CCpp
+[  43.179]     009 x28   014/01* 013/01* 001/27* 000/27*  CCpp
+[  43.179]     0f0 x28   0ae/00  0aa/48  0ae/00  0aa/48   .d.d
+[  43.179]     008 x26   015/01* 015/01* 002/27* 002/27*  CCpp
+[  43.179]     035 x26   0aa/48  0aa/48  08b/48  08b/48   dddd
+[  43.179]     2cd x22   1fe/08  1fe/08  1fe/08  1fe/08   ~~~~
+[  43.179]     04f x20   00a/01* 009/01* 01a/27  019/27   CCpp
+[  43.179]     078 x20   03d/00* 03c/00* 001/27* 000/27*  AApp
+[  43.179]     0b6 x20   03c/00* 03d/00* 000/27* 001/27*  AApp
+[  43.179]     3fe x20   0e2/01* 0e2/01* 0e2/01* 0e2/01*  CCCC
+[  43.179]     026 x19   03e/00* 03e/00* 002/27* 002/27*  AApp
+[  43.179]     04e x19   009/01* 00a/01* 019/27  01a/27   CCpp
+[  43.179]     37e x19   18c/40  18d/40  19c/40  19d/40   nnnn
+[  43.179]     089 x18   02f/00* 030/27* 03f/00* 003/27*  ApAp
+[  43.179]     131 x18   064/01  1f2/02  074/01  1f2/02   WWWW
+[  43.180]     2c5 x18   1c1/02  1d1/08  1c1/02  1d1/08   W~W~
+[  43.180]     07e x17   03e/00* 03d/00* 002/27* 001/27*  AApp
+[  43.180]     338 x17   188/27  189/27  198/27  199/27   pppp
+[  43.180]     076 x16   030/27* 02f/00* 003/27* 03f/00*  pApA
+[  43.180]     0af x16   03d/00* 03e/00* 001/27* 002/27*  AApp
+[  43.180]     0e2 x16   1db/48  0aa/48  08b/48  08b/48   dddd
+[  43.180]     09b x15   029/27  02a/27  00d/00  02d/00   pp..
+[  43.180]     09c x15   02a/27  029/27  02d/00  00d/00   pp..
+[  43.180]     0f1 x15   01d/00  008/01* 01e/00  018/27   .C.p
+[  43.180]     1e7 x15   0aa/48  06b/00  06b/00  07b/00   d...
+[  43.180]     0d6 x14   008/01* 008/01* 018/27  018/27   CCpp
+[  43.180]     1ed x14   06a/00  04f/2b  06a/00  04f/2b   .L.L
+[  43.180]     0b0 x12   00f/00* 010/27* 01f/00* 020/27*  ApAp
+[  43.180]     0c8 x12   053/18  042/01  063/01  052/18   /WW/
+[  43.180]     186 x12   062/01  0a1/10  0a0/10  0aa/48   W//d
+[  43.180]     1eb x12   07b/00  05d/2f  05d/2f  043/01   .LLW
+[  43.180]     3f9 x12   0dd/00* 0dd/00* 0e2/01* 0e2/01*  AACC
+[  43.180]     404 x12   0c3/01* 0c3/01* 0d2/01* 0d2/01*  CCCC
+[  43.180]     40b x12   0d2/01* 0d2/01* 0f1/01* 0f1/01*  CCCC
+[  43.180]     5b3 x12   0e2/01* 0e2/01* 0e2/01* 0e2/01*  CCCC
+[  43.180]     083 x11   008/01* 009/01* 018/27  019/27   CCpp
+[  43.180]     087 x11   028/27  029/27  0aa/48  00d/00   ppd.
+[  43.180]     09a x11   0aa/48  028/27  0aa/48  0aa/48   dpdd
+[  43.180]     09d x11   028/27  028/27  0aa/48  0aa/48   ppdd
+[  43.180]     0a8 x11   010/27* 00f/00* 020/27* 01f/00*  pApA
+[  43.180]     10b x11   189/27  188/27  199/27  198/27   pppp
+[  43.180]     153 x11   042/01  053/18  052/18  063/01   W//W
+[  43.180]     07f x10   03c/00* 0aa/48  000/27* 00e/00*  AdpA
+[  43.180]     0d7 x10   009/01* 00a/01* 019/27  007/02   CCpW
+[  43.180]     0d9 x10   008/01* 01d/00  018/27  01e/00   C.p.
+[  43.180]     0ec x10   0aa/48  0aa/48  0bd/00  0aa/48   dd.d
+[  43.180]     0fb x10   0e8/02  0e9/02  0f8/02  0f9/02   WWWW
+[  43.180]     0fc x10   0e9/02  0e8/02  0fa/02  0f8/02   WWWW
+[  43.180]     0ff x10   0ae/00  0aa/48  0bd/00  0aa/48   .d.d
+[  43.180]     176 x10   05b/2d  07b/00  043/01  05b/2d   L.WL
+[  43.180]     3cf x10   170/01  171/01  100/02  101/02   WWWW
+[  43.180]     3d1 x10   171/01  170/01  101/02  100/02   WWWW
+[  43.180]     427 x10   0aa/48  0aa/48  161/01  161/01   ddWW
+[  43.180]     435 x10   0ca/02  0ca/02  0da/02  0da/02   WWWW
+[  43.180]     07c x9    02f/00* 0aa/48  03f/00* 0aa/48   AdAd
+[  43.180]     095 x9    028/27  0aa/48  0aa/48  0aa/48   pddd
+[  43.180]     09e x9    0aa/48  08c/00  08c/00  09c/00   d...
+[  43.180]     0ae x9    0aa/48  03c/00* 00e/00* 000/27*  dAAp
+[  43.180]     0be x9    0aa/48  02f/00* 0aa/48  03f/00*  dAdA
+[  43.180]     124 x9    04e/2a  0a4/01  04e/2a  0b4/01   LWLW
+[  43.180]     082 x8    009/01* 008/01* 019/27  018/27   CCpp
+[  43.180]     086 x8    029/27  028/27  00d/00  0aa/48   pp.d
+[  43.180]     0c4 x8    065/01  064/01  075/01  074/01   WWWW
+[  43.180]     0db x8    0a1/10  062/01  0aa/48  0a0/10   /Wd/
+[  43.180]     0ee x8    0f3/01* 0f3/01* 0f3/01* 0f3/01*  CCCC
+[  43.180]     10a x8    0aa/48  188/27  0aa/48  198/27   dpdp
+[  43.180]     204 x8    156/01  156/01  166/01  166/01   WWWW
+[  43.181]     5b1 x8    0c0/01* 0d2/01* 0c0/01* 0d2/01*  CCCC
+[  43.181]     5b5 x8    0d2/01* 0c0/01* 0d2/01* 0c0/01*  CCCC
+[  43.181]     5be x8    0d2/01* 0d2/01* 0f1/01* 0f1/01*  CCCC
+[  43.181]     5d7 x8    16b/00  16b/00  0aa/48  0aa/48   ..dd
+[  43.181]     0ac x7    09c/00  08c/00  08c/00  0aa/48   ...d
+[  43.181]     0b1 x7    03c/00* 03c/00* 000/27* 000/27*  AApp
+[  43.181]     0e7 x7    0aa/48  01d/00  0aa/48  01e/00   d.d.
+[  43.181]     17c x7    08c/00  0aa/48  09c/00  08c/00   .d..
+[  43.181]     044 x6    00a/01* 013/01* 007/02  000/27*  CCWp
+[  43.181]     053 x6    017/02* 010/27* 01f/00* 020/27*  CpAp
+[  43.181]     071 x6    08b/48  08b/48  0aa/48  0aa/48   dddd
+[  43.181]     0de x6    029/27  017/02* 00d/00  01f/00*  pC.A
+[  43.181]     0f2 x6    18a/27  0aa/48  19a/27  0aa/48   pdpd
+[  43.181]     16d x6    06b/00  0aa/48  07b/00  06b/00   .d..
+[  43.181]     3a7 x6    188/27  0aa/48  198/27  188/27   pdpp
+[  43.181]     3cd x6    11c/00  11c/00  161/01  160/01   ..WW
+[  43.181]     5ba x6    0c3/01* 0c3/01* 0d2/01* 0d2/01*  CCCC
+[  43.181]     5f5 x6    06b/00  198/27  07b/00  06b/00   .p..
+[  43.181]     00d x5    013/01* 00a/01* 000/27* 007/02   CCpW
+[  43.181]     017 x5    010/27* 017/02* 020/27* 01f/00*  pCpA
+[  43.181]     05a x5    015/01* 03e/00* 002/27* 002/27*  CApp
+[  43.181]     079 x5    0aa/48  0aa/48  00e/00* 0aa/48   ddAd
+[  43.181]     094 x5    017/02* 029/27  01f/00* 00d/00   CpA.
+[  43.181]     0ad x5    08c/00  09c/00  0aa/48  08c/00   ..d.
+[  43.181]     0d8 x5    00a/01* 009/01* 007/02  019/27   CCWp
+[  43.181]     0e8 x5    01d/00  0aa/48  01e/00  0aa/48   .d.d
+[  43.181]     0f9 x5    0c7/02  0c8/02  0d7/02  0d8/02   WWWW
+[  43.181]     0fa x5    0c9/02  0c8/02  0d9/02  0d8/02   WWWW
+[  43.181]     0fd x5    0c8/02  0c9/02  0d8/02  0d9/02   WWWW
+[  43.181]     0fe x5    0c8/02  0e7/02  0d8/02  0f7/02   WWWW
+[  43.181]     108 x5    188/27  0aa/48  198/27  0aa/48   pdpd
+[  43.181]     127 x5    0a4/01  04f/2b  0b4/01  04f/2b   WLWL
+[  43.181]     12d x5    1f2/02  064/01  1f2/02  074/01   WWWW
+[  43.181]     2ce x5    1d1/08  1c1/02  1d1/08  1c1/02   ~W~W
+[  43.181]     3cb x5    11c/00  11c/00  160/01  161/01   ..WW
+[  43.181]     3d7 x5    029/27  02a/27  088/02  089/02   ppWW
+[  43.181]     3e7 x5    160/01  160/01  176/01  176/01   WWWW
+[  43.181]     3ea x5    170/01  170/01  100/02  100/02   WWWW
+[  43.181]     422 x5    106/02  107/02  138/02  139/02   WWWW
+[  43.181]     423 x5    107/02  106/02  139/02  138/02   WWWW
+[  43.181]     025 x4    00a/01* 00a/01* 01a/27  01a/27   CCpp
+[  43.181]     07b x4    00f/00* 0aa/48  01f/00* 0aa/48   AdAd
+[  43.181]     088 x4    02a/27  02a/27  02d/00  02d/00   pp..
+[  43.181]     0b5 x4    0aa/48  0aa/48  0aa/48  00e/00*  dddA
+[  43.181]     0ea x4    0df/00* 0df/00* 0f3/01* 0f3/01*  AACC
+[  43.181]     0ed x4    0f2/01* 0f3/01* 0f2/01* 0f3/01*  CCCC
+[  43.181]     0ef x4    0f3/01* 0f2/01* 0f3/01* 0f2/01*  CCCC
+[  43.181]     184 x4    07e/02  07f/22  07e/02  07f/22   W?W?
+[  43.181]     185 x4    07f/22  07e/02  07f/22  07e/02   ?W?W
+[  43.181]     335 x4    0aa/48  0aa/48  188/27  0aa/48   ddpd
+[  43.181]     3a3 x4    03e/00* 034/01* 002/27* 001/27*  ACpp
+[  43.181]     3d5 x4    02a/27  029/27  089/02  088/02   ppWW
+[  43.181]     442 x4    0aa/48  0aa/48  160/01  161/01   ddWW
+[  43.181]     5ac x4    0cd/00* 0ce/00* 0c0/01* 0d2/01*  AACC
+[  43.181]     5ae x4    0dd/00* 0dd/00* 0e2/01* 0e2/01*  AACC
+[  43.181]     5b0 x4    0ce/00* 0cd/00* 0d2/01* 0c0/01*  AACC
+[  43.181]     5b2 x4    0d3/01* 0e2/01* 0d3/01* 0e2/01*  CCCC
+[  43.181]     5b4 x4    0e2/01* 0d3/01* 0e2/01* 0d3/01*  CCCC
+[  43.181]     5b8 x4    0c0/01* 0c1/01* 0d0/01* 0d1/01*  CCCC
+[  43.182]     5b9 x4    0c2/01* 0c3/01* 0d2/01* 0d2/01*  CCCC
+[  43.182]     5bb x4    0c3/01* 0c2/01* 0d2/01* 0d2/01*  CCCC
+[  43.182]     5bc x4    0c1/01* 0c0/01* 0d1/01* 0d0/01*  CCCC
+[  43.182]     5bd x4    0e0/01* 0e1/01* 0f0/01* 0f1/01*  CCCC
+[  43.182]     5bf x4    0d4/01* 0d5/01* 0c4/01* 0c5/01*  CCCC
+[  43.182]     5c0 x4    0d5/01* 0d4/01* 0c5/01* 0c4/01*  CCCC
+[  43.182]     5c1 x4    0e1/01* 0e0/01* 0f1/01* 0f0/01*  CCCC
+[  45.161] stats: 300 frames, 3D compose 2.783 ms/frame, sprite groups avg 8.0 max 8, tilt 75.0, camera Third person (yaw 15 pitch 66), curve R=3000, past-screen px/frame 4732 (missing 0), source world pictures, far sprites avg 8.0 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 6967), frame 256x224, module=9 area=0x18
+[  48.489] stats: 300 frames, 3D compose 2.893 ms/frame, sprite groups avg 8.0 max 8, tilt 75.0, camera Third person (yaw 15 pitch 66), curve R=3000, past-screen px/frame 4732 (missing 0), source world pictures, far sprites avg 8.0 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 6967), frame 256x224, module=9 area=0x18
+[  51.849] stats: 300 frames, 3D compose 2.850 ms/frame, sprite groups avg 8.0 max 8, tilt 75.0, camera Third person (yaw 15 pitch 66), curve R=3000, past-screen px/frame 4732 (missing 0), source world pictures, far sprites avg 8.0 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 6967), frame 256x224, module=9 area=0x18
+[  55.237] stats: 300 frames, 3D compose 2.765 ms/frame, sprite groups avg 8.0 max 8, tilt 75.0, camera Third person (yaw 15 pitch 66), curve R=3000, past-screen px/frame 4732 (missing 0), source world pictures, far sprites avg 8.0 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 6967), frame 256x224, module=9 area=0x18
+[  58.636] stats: 300 frames, 3D compose 2.737 ms/frame, sprite groups avg 8.0 max 8, tilt 75.0, camera Third person (yaw 15 pitch 66), curve R=3000, past-screen px/frame 4732 (missing 0), source world pictures, far sprites avg 8.0 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 6967), frame 256x224, module=9 area=0x18
+[  62.080] stats: 300 frames, 3D compose 2.737 ms/frame, sprite groups avg 8.0 max 8, tilt 75.0, camera Third person (yaw 15 pitch 66), curve R=3000, past-screen px/frame 4732 (missing 0), source world pictures, far sprites avg 8.0 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 6967), frame 256x224, module=9 area=0x18
+[  65.538] stats: 300 frames, 3D compose 2.736 ms/frame, sprite groups avg 8.0 max 8, tilt 75.0, camera Third person (yaw 15 pitch 66), curve R=3000, past-screen px/frame 4732 (missing 0), source world pictures, far sprites avg 8.0 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 6967), frame 256x224, module=9 area=0x18
+[  68.895] stats: 300 frames, 3D compose 2.756 ms/frame, sprite groups avg 8.0 max 8, tilt 75.0, camera Third person (yaw 15 pitch 66), curve R=3000, past-screen px/frame 4732 (missing 0), source world pictures, far sprites avg 8.0 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 6967), frame 256x224, module=9 area=0x18
+[  72.319] stats: 300 frames, 3D compose 2.748 ms/frame, sprite groups avg 8.0 max 8, tilt 75.0, camera Third person (yaw 15 pitch 66), curve R=3000, past-screen px/frame 4732 (missing 0), source world pictures, far sprites avg 8.0 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 6967), frame 256x224, module=9 area=0x18
+[  75.691] stats: 300 frames, 3D compose 2.896 ms/frame, sprite groups avg 8.0 max 8, tilt 75.0, camera Third person (yaw 15 pitch 66), curve R=3000, past-screen px/frame 4732 (missing 0), source world pictures, far sprites avg 8.0 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 6967), frame 256x224, module=9 area=0x18
+[  79.541] stats: 300 frames, 3D compose 2.779 ms/frame, sprite groups avg 8.0 max 8, tilt 75.0, camera Third person (yaw 15 pitch 66), curve R=3000, past-screen px/frame 4732 (missing 0), source world pictures, far sprites avg 8.0 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 6967), frame 256x224, module=9 area=0x18
+[  82.860] stats: 300 frames, 3D compose 2.885 ms/frame, sprite groups avg 8.0 max 8, tilt 75.0, camera Third person (yaw 15 pitch 66), curve R=3000, past-screen px/frame 4732 (missing 0), source world pictures, far sprites avg 8.0 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 6967), frame 256x224, module=9 area=0x18
+[  86.086] stats: 300 frames, 3D compose 2.817 ms/frame, sprite groups avg 8.0 max 8, tilt 75.0, camera Third person (yaw 15 pitch 66), curve R=3000, past-screen px/frame 4732 (missing 0), source world pictures, far sprites avg 8.0 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 6967), frame 256x224, module=9 area=0x18
+[  89.489] stats: 300 frames, 3D compose 2.761 ms/frame, sprite groups avg 7.8 max 8, tilt 75.0, camera Third person (yaw 15 pitch 66), curve R=3000, past-screen px/frame 4732 (missing 0), source world pictures, far sprites avg 7.8 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 6967), frame 256x224, module=9 area=0x18
+[  92.777] stats: 300 frames, 3D compose 2.812 ms/frame, sprite groups avg 7.1 max 8, tilt 75.0, camera Third person (yaw 15 pitch 66), curve R=3000, past-screen px/frame 4732 (missing 0), source world pictures, far sprites avg 7.1 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 6967), frame 256x224, module=9 area=0x18
+[  96.078] stats: 300 frames, 3D compose 2.789 ms/frame, sprite groups avg 7.4 max 8, tilt 75.0, camera Third person (yaw 15 pitch 66), curve R=3000, past-screen px/frame 4732 (missing 0), source world pictures, far sprites avg 7.4 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 6967), frame 256x224, module=9 area=0x18
+[  99.154] stats: 300 frames, 3D compose 2.767 ms/frame, sprite groups avg 7.8 max 8, tilt 75.0, camera Third person (yaw 15 pitch 66), curve R=3000, past-screen px/frame 4732 (missing 0), source world pictures, far sprites avg 7.8 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 6967), frame 256x224, module=9 area=0x18
+[ 102.586] stats: 300 frames, 3D compose 2.753 ms/frame, sprite groups avg 8.0 max 8, tilt 75.0, camera Third person (yaw 15 pitch 66), curve R=3000, past-screen px/frame 4732 (missing 0), source world pictures, far sprites avg 8.0 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 6967), frame 256x224, module=9 area=0x18
+[ 105.878] stats: 300 frames, 3D compose 2.811 ms/frame, sprite groups avg 8.0 max 8, tilt 75.0, camera Third person (yaw 15 pitch 66), curve R=3000, past-screen px/frame 4732 (missing 0), source world pictures, far sprites avg 8.0 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 6967), frame 256x224, module=9 area=0x18
+[ 109.210] stats: 300 frames, 3D compose 2.750 ms/frame, sprite groups avg 8.0 max 8, tilt 75.0, camera Third person (yaw 15 pitch 66), curve R=3000, past-screen px/frame 4732 (missing 0), source world pictures, far sprites avg 8.0 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 6967), frame 256x224, module=9 area=0x18
+[ 112.807] stats: 300 frames, 3D compose 2.822 ms/frame, sprite groups avg 8.0 max 8, tilt 75.0, camera Third person (yaw 15 pitch 66), curve R=3000, past-screen px/frame 4732 (missing 0), source world pictures, far sprites avg 8.0 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 6967), frame 256x224, module=9 area=0x18
+[ 115.838] stats: 300 frames, 3D compose 2.481 ms/frame, sprite groups avg 8.6 max 9, tilt 75.0, camera Third person (yaw 61 pitch 43), curve R=3000, past-screen px/frame 4372 (missing 0), source world pictures, far sprites avg 8.0 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 6967), frame 256x224, module=9 area=0x18
+[ 118.093] stats: 300 frames, 3D compose 1.294 ms/frame, sprite groups avg 9.0 max 9, tilt 75.0, camera Third person (yaw 2 pitch 52), curve R=3000, past-screen px/frame 6997 (missing 0), source world pictures, far sprites avg 8.0 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 6967), frame 256x224, module=9 area=0x18
+[ 120.405] stats: 300 frames, 3D compose 1.294 ms/frame, sprite groups avg 9.0 max 9, tilt 75.0, camera Third person (yaw 29 pitch 38), curve R=3000, past-screen px/frame 6307 (missing 0), source world pictures, far sprites avg 8.0 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 6967), frame 256x224, module=9 area=0x18
+[ 122.616] stats: 300 frames, 3D compose 1.119 ms/frame, sprite groups avg 9.0 max 9, tilt 75.0, camera Third person (yaw 26 pitch 35), curve R=3000, past-screen px/frame 961 (missing 0), source world pictures, far sprites avg 8.0 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 6967), frame 256x224, module=9 area=0x18
+[ 124.852] stats: 300 frames, 3D compose 1.124 ms/frame, sprite groups avg 9.0 max 9, tilt 75.0, camera Third person (yaw 26 pitch 35), curve R=3000, past-screen px/frame 955 (missing 0), source world pictures, far sprites avg 8.0 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 6967), frame 256x224, module=9 area=0x18
+[ 127.010] stats: 300 frames, 3D compose 1.138 ms/frame, sprite groups avg 9.0 max 9, tilt 75.0, camera Third person (yaw 26 pitch 35), curve R=3000, past-screen px/frame 955 (missing 0), source world pictures, far sprites avg 8.0 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 6967), frame 256x224, module=9 area=0x18
+[ 129.199] stats: 300 frames, 3D compose 1.126 ms/frame, sprite groups avg 9.0 max 9, tilt 75.0, camera Third person (yaw 26 pitch 35), curve R=3000, past-screen px/frame 955 (missing 0), source world pictures, far sprites avg 8.0 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 6967), frame 256x224, module=9 area=0x18
+[ 131.351] stats: 300 frames, 3D compose 1.103 ms/frame, sprite groups avg 9.0 max 9, tilt 75.0, camera Third person (yaw 26 pitch 35), curve R=3000, past-screen px/frame 955 (missing 0), source world pictures, far sprites avg 8.0 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 6967), frame 256x224, module=9 area=0x18
+[ 133.495] stats: 300 frames, 3D compose 1.115 ms/frame, sprite groups avg 9.0 max 9, tilt 75.0, camera Third person (yaw 26 pitch 35), curve R=3000, past-screen px/frame 955 (missing 0), source world pictures, far sprites avg 8.0 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 6967), frame 256x224, module=9 area=0x18
+[ 135.615] stats: 300 frames, 3D compose 1.104 ms/frame, sprite groups avg 9.0 max 9, tilt 75.0, camera Third person (yaw 26 pitch 35), curve R=3000, past-screen px/frame 955 (missing 0), source world pictures, far sprites avg 8.0 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 6967), frame 256x224, module=9 area=0x18
+[ 137.786] stats: 300 frames, 3D compose 1.122 ms/frame, sprite groups avg 9.0 max 9, tilt 75.0, camera Third person (yaw 26 pitch 35), curve R=3000, past-screen px/frame 955 (missing 0), source world pictures, far sprites avg 8.0 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 6967), frame 256x224, module=9 area=0x18
+[ 139.920] stats: 300 frames, 3D compose 1.107 ms/frame, sprite groups avg 9.0 max 9, tilt 75.0, camera Third person (yaw 26 pitch 35), curve R=3000, past-screen px/frame 955 (missing 0), source world pictures, far sprites avg 8.0 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 6967), frame 256x224, module=9 area=0x18
+[ 142.067] stats: 300 frames, 3D compose 1.119 ms/frame, sprite groups avg 9.0 max 9, tilt 75.0, camera Third person (yaw 26 pitch 35), curve R=3000, past-screen px/frame 955 (missing 0), source world pictures, far sprites avg 8.0 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 6967), frame 256x224, module=9 area=0x18
+[ 144.224] stats: 300 frames, 3D compose 1.122 ms/frame, sprite groups avg 9.0 max 9, tilt 75.0, camera Third person (yaw 26 pitch 35), curve R=3000, past-screen px/frame 955 (missing 0), source world pictures, far sprites avg 8.0 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 6967), frame 256x224, module=9 area=0x18
+[ 146.411] stats: 300 frames, 3D compose 1.145 ms/frame, sprite groups avg 9.0 max 9, tilt 75.0, camera Third person (yaw 26 pitch 35), curve R=3000, past-screen px/frame 955 (missing 0), source world pictures, far sprites avg 8.0 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 6967), frame 256x224, module=9 area=0x18
+[ 148.566] stats: 300 frames, 3D compose 1.106 ms/frame, sprite groups avg 9.0 max 9, tilt 75.0, camera Third person (yaw 26 pitch 35), curve R=3000, past-screen px/frame 955 (missing 0), source world pictures, far sprites avg 8.0 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 6967), frame 256x224, module=9 area=0x18
+[ 150.841] stats: 300 frames, 3D compose 1.109 ms/frame, sprite groups avg 9.0 max 9, tilt 75.0, camera Third person (yaw -0 pitch 37), curve R=3000, past-screen px/frame 952 (missing 0), source world pictures, far sprites avg 8.0 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 6967), frame 256x224, module=9 area=0x18
+[ 154.270] stats: 300 frames, 3D compose 2.468 ms/frame, sprite groups avg 1.9 max 9, tilt 75.0, camera Third person (yaw 22 pitch 67), curve R=3000, past-screen px/frame 3206 (missing 0), source world pictures, far sprites avg 1.8 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 6967), frame 256x224, module=9 area=0x29
+[ 157.693] stats: 300 frames, 3D compose 3.655 ms/frame, sprite groups avg 0.0 max 0, tilt 75.0, camera Third person (yaw 22 pitch 67), curve R=3000, past-screen px/frame 3318 (missing 0), source world pictures, far sprites avg 0.0 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 6967), frame 256x224, module=9 area=0x29
+[ 161.206] stats: 300 frames, 3D compose 3.556 ms/frame, sprite groups avg 0.0 max 0, tilt 75.0, camera Third person (yaw 22 pitch 67), curve R=3000, past-screen px/frame 3318 (missing 0), source world pictures, far sprites avg 0.0 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 6967), frame 256x224, module=9 area=0x29
+[ 165.051] stats: 300 frames, 3D compose 3.611 ms/frame, sprite groups avg 0.0 max 0, tilt 75.0, camera Third person (yaw 22 pitch 67), curve R=3000, past-screen px/frame 3318 (missing 0), source world pictures, far sprites avg 0.0 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 6967), frame 256x224, module=9 area=0x29
+[ 168.712] stats: 300 frames, 3D compose 3.538 ms/frame, sprite groups avg 0.0 max 0, tilt 75.0, camera Third person (yaw 22 pitch 67), curve R=3000, past-screen px/frame 3318 (missing 0), source world pictures, far sprites avg 0.0 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 6967), frame 256x224, module=9 area=0x29
+[ 172.442] stats: 300 frames, 3D compose 3.509 ms/frame, sprite groups avg 0.0 max 0, tilt 75.0, camera Third person (yaw 22 pitch 67), curve R=3000, past-screen px/frame 3318 (missing 0), source world pictures, far sprites avg 0.0 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 6967), frame 256x224, module=9 area=0x29
+[ 176.074] stats: 300 frames, 3D compose 3.528 ms/frame, sprite groups avg 0.0 max 0, tilt 75.0, camera Third person (yaw 22 pitch 67), curve R=3000, past-screen px/frame 3318 (missing 0), source world pictures, far sprites avg 0.0 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 6967), frame 256x224, module=9 area=0x29
+[ 179.729] stats: 300 frames, 3D compose 3.539 ms/frame, sprite groups avg 0.0 max 0, tilt 75.0, camera Third person (yaw 22 pitch 67), curve R=3000, past-screen px/frame 3318 (missing 0), source world pictures, far sprites avg 0.0 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 6967), frame 256x224, module=9 area=0x29
+[ 183.344] stats: 300 frames, 3D compose 3.574 ms/frame, sprite groups avg 0.0 max 0, tilt 75.0, camera Third person (yaw 22 pitch 67), curve R=3000, past-screen px/frame 3318 (missing 0), source world pictures, far sprites avg 0.0 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 6967), frame 256x224, module=9 area=0x29
+[ 187.090] stats: 300 frames, 3D compose 3.680 ms/frame, sprite groups avg 0.0 max 0, tilt 75.0, camera Third person (yaw 22 pitch 67), curve R=3000, past-screen px/frame 3318 (missing 0), source world pictures, far sprites avg 0.0 (draw distance 3x, ok), walls on (indoors and the forest) (wall tiles avg 6967), frame 256x224, module=9 area=0x29
