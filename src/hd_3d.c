@@ -1102,6 +1102,9 @@ static int g_gx0, g_gy0;
 // surface height, height of the open underside, rows down to the column's
 // front, rows of art on a face (0 = a crown, shaded as leaves)
 static uint8 g_ftop[1024 * 1024], g_fbot[1024 * 1024], g_fdown[1024 * 1024], g_fband[1024 * 1024];
+// ground covered by the floor this many 16 pixel steps to the side (a statue's
+// drawing stood up: its flat copy on the ground is hidden), 0 = none
+static int8 g_fcov[1024 * 1024];
 static inline int GridCell(int cx, int cy) {
   return ((cy & g_gmask) << g_gshift) + (cx & g_gmask);
 }
@@ -2469,6 +2472,7 @@ enum { kOw_Floor, kOw_Trunk, kOw_Small, kOw_Canopy, kOw_Arch };
 enum { kForestTreeH = 24, kForestMassH = 32, kForestTreeCells = 40 };   // kinds of trunk mass; one this small is a stump
 static const char kOwLetters[] = ".TbCA";
 enum { kForestPlainFace = 255 };   // g_fband: sides of plain fill, top its own art (a hedge)
+enum { kForestStatue = 253 };      // g_fband: a drawing stood up whole: every face shows art row front - z
 enum { kForestSmallTree = 254 };   // g_fband: a small tree's dome; below its rim, the roots' art
 enum { kSmallTreeR = 16, kSmallTreeRim = 14, kSmallTreeDome = 12, kSmallTreeTrunkR = 10 };
 // a small tree is four map16s around its centre, in a 32 pixel block: where the
@@ -2572,6 +2576,83 @@ static void ForestDistance(uint8 *dist, const uint8 *in) {
 static inline bool ForestLeafCell(int x, int y) {
   int k = g_ow_cls[(y >> 3) * kGridMax + (x >> 3)];
   return k == kOw_Canopy || k == kOw_Arch;
+}
+
+// A drawing on a pedestal stood up whole (window-relative pixels): the art
+// x0..x0+w, y0..y0+ah above a pedestal ph pixels deep under it. The pedestal
+// is a block kStatueBase high; the drawing's silhouette (what a flood from the
+// art's edge does not reach through non-outline pixels) stands as a 2 pixel
+// slab at the pedestal's middle, each column from its lowest to its highest
+// art pixel, open below where the column does not reach down (the bird above
+// the pole's sides). Its flat copy on the ground is covered (g_fcov).
+enum { kStatueBase = 8 };
+static void ForestStatue(int x0, int y0, int w, int ah, int ph) {
+  Ppu *ppu = g_zenv.ppu;
+  const uint16 *map8 = GetMap16toMap8Table();
+  int base = y0 + ah + ph / 2 - 4;   // the foot of the pole, inside the pedestal's round top
+  int H = ah;   // the drawing's own rows: the pedestal's art below them is not part of the slab
+  static uint8 sil[64 * 64];         // 0 open, 1 art, 2 outline, 3 reached
+  if (w > 64 || H > 64 || base <= y0 + ah)
+    return;
+  for (int r = 0; r < H; r++)
+    for (int c = 0; c < w; c++) {
+      int x = x0 + c, y = y0 + r, m = g_ow_m16[(y >> 3) * kGridMax + (x >> 3)];
+      uint16 wd = m != 0xffff && m < 0x2000 ? map8[m * 4 + ((g_gy0 + (y >> 3)) & 1) * 2 + ((g_gx0 + (x >> 3)) & 1)] : 0;
+      sil[r * 64 + c] = (TileWordPixel(ppu, 1, wd, x & 7, y & 7) & 7) == 1 ? 2 : 1;
+    }
+  // flood from the top and side edges through non-outline pixels
+  static uint16 q[64 * 64];
+  int qn = 0;
+  for (int r = 0; r < H; r++)
+    for (int c = 0; c < w; c++)
+      if ((r == 0 || c == 0 || c == w - 1) && sil[r * 64 + c] == 1)
+        sil[r * 64 + c] = 3, q[qn++] = (uint16)(r * 64 + c);
+  while (qn) {
+    int i = q[--qn], r = i >> 6, c = i & 63;
+    static const int kDr[4] = { -1, 1, 0, 0 }, kDc[4] = { 0, 0, -1, 1 };
+    for (int d = 0; d < 4; d++) {
+      int nr = r + kDr[d], nc = c + kDc[d];
+      if (nr >= 0 && nr < H && nc >= 0 && nc < w && sil[nr * 64 + nc] == 1)
+        sil[nr * 64 + nc] = 3, q[qn++] = (uint16)(nr * 64 + nc);
+    }
+  }
+  // the pedestal
+  for (int y = y0 + ah; y < y0 + ah + ph; y++)
+    for (int x = x0; x < x0 + w; x++) {
+      int i = y * 1024 + x;
+      g_ftop[i] = kStatueBase, g_fbot[i] = 0, g_fband[i] = kStatueBase;
+      g_fdown[i] = (uint8)(y0 + ah + ph - y - 1);
+    }
+  // the slab, and the cover over the drawing's flat copy
+  for (int c = 0; c < w; c++) {
+    int rmin = -1, rmax = -1;
+    for (int r = 0; r < H; r++)
+      if (sil[r * 64 + c] != 3) {
+        if (rmin < 0) rmin = r;
+        rmax = r;
+        if (y0 + r < y0 + ah)
+          g_fcov[(y0 + r) * 1024 + x0 + c] = -2;   // 32 pixels west: the ground beside it
+      }
+    if (rmin < 0)
+      continue;
+    // a column that reaches the drawing's bottom is the pole: down to the pedestal
+    int top = kStatueBase + base - (y0 + rmin), bot = rmax >= H - 2 ? 0 : kStatueBase + base - (y0 + rmax) - 1;
+    for (int y = base - 2; y < base; y++) {
+      int i = y * 1024 + x0 + c;
+      g_ftop[i] = (uint8)IntMin(top, 255), g_fbot[i] = (uint8)bot, g_fband[i] = kForestStatue;
+      g_fdown[i] = (uint8)(base + kStatueBase - y - 1);   // front - z = the art row z - base above the foot
+    }
+  }
+  for (int y = y0; y < y0 + ah + ph; y++)
+    for (int x = x0; x < x0 + w; x++) {
+      int i = y * 1024 + x;
+      if (!g_ftop[i])
+        continue;
+      int cc = GridCell(g_gx0 + (x >> 3), g_gy0 + (y >> 3));
+      g_ow_cells += !g_hmap[cc];
+      g_hmap[cc] = (uint8)IntMax(g_hmap[cc], g_ftop[i]);
+      g_hmax = IntMax(g_hmax, g_ftop[i]);
+    }
 }
 
 static void BuildForestShapes(const uint8 *mass_h) {
@@ -2778,6 +2859,7 @@ static void BuildForestShapes(const uint8 *mass_h) {
   ForestDistance(crown_dist, mask);
   ForestDistance(dist, g_fin);
   memset(g_ftop, 0, sizeof(g_ftop));
+  memset(g_fcov, 0, sizeof(g_fcov));
   memset(g_fbot, 0, sizeof(g_fbot));
   memset(g_fband, 0, sizeof(g_fband));
   for (int y = 0; y < 1024; y++) {
@@ -2849,10 +2931,29 @@ static void BuildForestShapes(const uint8 *mass_h) {
       }
     }
   }
+  // Kakariko's weathervane: tiles 10d-12f and 1de (the bird and its pole,
+  // walkable, drawn over Link) above a 32 pixel stone pedestal (144-164,
+  // 116-117). The pedestal is a low block; the bird and the pole stand up as
+  // a thin cutout of their own drawing on its middle, and their flat copy on
+  // the ground is covered with the ground beside it
+  int vanes = 0;
+  for (int c = 0; c < kGridMax * kGridMax && g_ow_trees_only; c++) {
+    int m = g_ow_m16[c];
+    if (m == 0xffff || m >= 0x2000)
+      continue;
+    int cx = c & (kGridMax - 1), cy = c >> 7;
+    uint16 w = GetMap16toMap8Table()[m * 4 + ((g_gy0 + cy) & 1) * 2 + ((g_gx0 + cx) & 1)];
+    if ((w & 0x3ff) != 0x10d || cx + 4 > kGridMax || cy + 7 > kGridMax)
+      continue;
+    ForestStatue(cx * 8, cy * 8, 32, 24, 32);
+    vanes++;
+  }
   Hd3d_Log("forest shapes built: area 0x%02x, %d raised cells, tallest %d, %d clean floor cells, %d fill cells, standing pixels %d, crowns %d, "
            "%d walkable cells flattened, %s (%d pixels away from trees left flat)",
            (uint8)overworld_area_index, g_ow_cells, g_hmax, seeds, sealed, kept, crowns, flattened,
            g_ow_trees_only ? "trees only" : "whole forest", cleared);
+  if (vanes)
+    Hd3d_Log("  %d weathervane(s) stood up", vanes);
 }
 
 // The Lost Woods and Skull Woods: everything solid stands (crowns, hedges,
@@ -3024,8 +3125,8 @@ static void BuildForestHeights(void) {
     int ox = (g_gx0 * 8) & 1023, oy = (g_gy0 * 8) & 1023;
     if (ox | oy) {
       static uint8 tmp[1024 * 1024];
-      uint8 *arrs[4] = { g_ftop, g_fbot, g_fdown, g_fband };
-      for (int a = 0; a < 4; a++) {
+      uint8 *arrs[5] = { g_ftop, g_fbot, g_fdown, g_fband, (uint8 *)g_fcov };
+      for (int a = 0; a < 5; a++) {
         memcpy(tmp, arrs[a], sizeof(tmp));
         for (int y = 0; y < 1024; y++) {
           uint8 *dst = arrs[a] + ((y + oy) & 1023) * 1024;
@@ -3473,6 +3574,9 @@ static bool ShadeWall(const Ground *gr, const WallHit *h, uint32 *out, float *fu
       }
       if (!band && z < kForestRim)
         shade = shade * 7 / 16;
+    } else if (band == kForestStatue) {
+      av = front - 0.5f - (h->face == kFace_Top ? top : z);
+      shade = h->face == kFace_North ? 170 : h->face == kFace_East || h->face == kFace_West ? 200 : 256;
     } else if (band == kForestPlainFace) {
       // the fill a little way in: the art of the edge itself, a scalloped
       // outline running along the rows, stretched up into stripes
@@ -3703,6 +3807,9 @@ static void DrawTerrainRow(void *ctx, int y) {
       int pi = (wy & 511) * 512 + (wx & 511);
       if (!g_grid_out && g_partial[GridCell(wx >> 3, wy >> 3)] && g_pcover[pi])
         u += g_pcover[pi] * 16;
+      else if (g_grid_out && (unsigned)(wx - g_gx0 * 8) < 1024 && (unsigned)(wy - g_gy0 * 8) < 1024 &&
+               g_fcov[(wy & 1023) * 1024 + (wx & 1023)])
+        u += g_fcov[(wy & 1023) * 1024 + (wx & 1023)] * 16;
       ok = Ground_InRoom(gr, wx, wy) && SampleSurface(gr, u, v, &px);
       // under an overhang: its own drawing is on this ground, in shadow
       if (ok && g_grid_out && (unsigned)(wx - g_gx0 * 8) < 1024 && (unsigned)(wy - g_gy0 * 8) < 1024 &&
