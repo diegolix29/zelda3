@@ -2129,6 +2129,21 @@ static void BuildHeightMap(void) {
     // flat; the wall around them still stands
     if (IsWallClass(cls[i]) && (attr[i] >= 0x80 && attr[i] <= 0x8f || attr[i] >= 0xf0))
       cls[i] = kCls_Floor;
+    // The fortune teller's table (T3 0x54: curtain, counter and crystal ball,
+    // room 290): its counter tiles are seeded wall (16 px) and the ball block
+    // (24 px), and she sits right behind them: only her hat showed. In 2D the
+    // counter is a low 3/4 drawing she shows above: a 12 px counter, a 10 px ball
+    for (int l = 0; l < 2 && objects; l++) {
+      int o = g_tile_obj[l][i], t = (l ? dung_bg1 : dung_bg2)[i] & 0x3ff;
+      if (!o || g_room_objs[o - 1].code != (kHd3d_ObjSubtype3 | 0x54) || g_tile_override[t])
+        continue;
+      if (t == 0x0e4 || t == 0x0e5)
+        cls[i] = kCls_Small, g_hlayer[i] = (uint8)l;
+      else if ((t >= 0x16b && t <= 0x16c) || (t >= 0x17b && t <= 0x17d) || (t >= 0x18b && t <= 0x18d) ||
+               t == 0x1b2 || t == 0x140 || t == 0x141)
+        cls[i] = kCls_Furniture, g_hlayer[i] = (uint8)l;
+      break;
+    }
   }
   // Chest platforms (T1 0xdc, also the throne room's dais): the rectangle of
   // the tiles it drew is raised kPlatformH. Its rim and corner trims are its

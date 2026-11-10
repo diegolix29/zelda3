@@ -332,16 +332,16 @@
 173 floor     #   attr 00, 100%: floor 2060
 174 floor     #   attr 00, 100%: floor 21
 175 floor     #   attr 00, 100%: floor 21
-176 floor     #   attr 00, 88%: floor 193 furniture 24
-177 floor     #   attr 00, 80%: floor 193 furniture 48
-178 floor     #   attr 00, 99%: floor 205 door 2
-179 floor     #   attr 00, 99%: floor 205 door 2
+176 floor     #   attr 02, 88%: floor 193 furniture 24
+177 floor     #   attr 02, 80%: floor 193 furniture 48
+178 floor     #   attr 02, 99%: floor 205 door 2
+179 floor     #   attr 02, 99%: floor 205 door 2
 17a floor     #   attr 02, 83%: floor 140 chair 28
 17b floor     #   attr 02, 83%: floor 138 chair 28
-17c door      # ? attr 00, 61%: floor 4 door 42 small 22
-17d door      # ? attr 00, 61%: floor 4 door 42 small 22
+17c door      # ? attr 02, 61%: floor 4 door 42 small 22
+17d door      # ? attr 02, 61%: floor 4 door 42 small 22
 17e wall      # ? attr 02, 51%: floor 21 wall 140 door 110
-17f floor     # ? attr 00, 65%: floor 79 door 42
+17f floor     # ? attr 02, 65%: floor 79 door 42
 180 wall      # ? attr 01, 72%: floor 168 wall 453 door 2
 181 wall      # ? attr 01, 73%: floor 70 wall 196 door 2
 182 floor     # ? attr 01, 71%: floor 46 wall 16 furniture 2
@@ -378,7 +378,7 @@
 1a1 floor     # ? attr 02, 47%: floor 36 wall 32 door 2 furniture 6
 1a2 floor     # ? attr 02, 65%: floor 50 wall 22 furniture 4
 1a3 floor     # ? attr 02, 54%: floor 34 wall 22 furniture 6
-1a4 floor     #   attr 00, 100%: floor 65
+1a4 floor     #   attr 18, 100%: floor 65
 1a5 floor     # ? attr 00, 75%: floor 43 small 14
 1a6 floor     #   attr 00, 97%: floor 2427 small 70
 1a7 floor     #   attr 00, 90%: floor 290 small 30
@@ -390,8 +390,8 @@
 1ad floor     # ? attr 02, 52%: floor 9 small 8
 1ae wall      # ? attr 02, 59%: floor 31 wall 70 small 16
 1af wall      # ? attr 02, 41%: floor 55 wall 70 small 44
-1b0 floor     #   attr 6b, 100%: floor 1047
-1b1 floor     #   attr 6a, 100%: floor 1395
+1b0 floor     #   attr 02, 100%: floor 1047
+1b1 floor     #   attr 02, 100%: floor 1395
 1b2 wall      #   attr 02, 84%: floor 8 wall 44
 1b3 wall      #   attr 01, 94%: floor 8 wall 144
 1b4 floor     #   attr 02, 100%: floor 8
@@ -404,8 +404,8 @@
 1bb floor     #   attr 09, 100%: floor 2189
 1bc floor     #   attr 09, 100%: floor 2225
 1bd floor     #   attr 09, 100%: floor 2220
-1be floor     #   attr 68, 100%: floor 1424
-1bf floor     #   attr 69, 100%: floor 1572
+1be floor     #   attr 09, 100%: floor 1424
+1bf floor     #   attr 09, 100%: floor 1572
 1c0 torch     #   attr 27, 100%: torch 58
 1c1 torch     #   attr 27, 100%: torch 58
 1c2 tall      #   attr 00, 100%: tall 300
