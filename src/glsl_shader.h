@@ -32,6 +32,7 @@ typedef struct GlslUniforms {
   int MirrorWarp;
   int LinearFilter;
   int MirrorDx;
+  int GroundUv, GroundUvOn;
   int LUTTexCoord;
   int VertexCoord;
   GlslTextureUniform Orig;
@@ -95,6 +96,8 @@ typedef struct GlslShader {
   uint frame_count;
   int max_prev_frame;
   GlTextureWithSize prev_frame[8];
+  uint gl_ground_uv;       // 3D view: ground point per pixel (Hd3d_ShaderGroundUv)
+  bool ground_uv_on;
 } GlslShader;
 
 GlslShader *GlslShader_CreateFromFile(const char *filename, bool opengl_es);

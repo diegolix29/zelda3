@@ -135,6 +135,12 @@ static uint32 *g_uv;             // 2D frame pixel shown at each screen pixel (w
 // (light, forest fog): those only reached the ground inside the SNES screen
 enum { kKind_Sky, kKind_Frame, kKind_Outside, kKind_Sprite };
 static uint8 *g_kind;
+// The ground point each screen pixel shows, in 2D frame pixels (u, v pairs,
+// not rounded), for the shader: its cloud shadows are laid on the world, and
+// in 3D a screen pixel is not a world pixel. kWuvNone = sky
+static float *g_wuv;
+static bool g_wuv_ready;
+#define kWuvNone -1.0e6f
 #define PackUv(u, v) ((uint32)(uint16)(int16)(u) | (uint32)(uint16)(int16)(v) << 16)
 
 // stats for the log
@@ -290,6 +296,13 @@ void Hd3d_ToggleCamera(void) {
 
 bool Hd3d_Active(void) {
   return g_active_last;
+}
+
+const float *Hd3d_ShaderGroundUv(int *width, int *height) {
+  if (!g_active_last || !g_wuv_ready)
+    return NULL;
+  *width = g_w, *height = g_h;
+  return g_wuv;
 }
 
 bool Hd3d_ThirdPerson(void) {
@@ -494,7 +507,7 @@ static bool IsGameplayModule(void) {
 static bool EnsureBuffers(int w, int h) {
   if (w == g_w && h == g_h && g_side)
     return true;
-  free(g_side), free(g_owner), free(g_floor), free(g_group_map), free(g_depth), free(g_uv), free(g_kind);
+  free(g_side), free(g_owner), free(g_floor), free(g_group_map), free(g_depth), free(g_uv), free(g_kind), free(g_wuv);
   g_side = (uint32 *)malloc(sizeof(uint32) * w * h);
   g_owner = (uint8 *)malloc(w * h);
   g_floor = (uint32 *)malloc(sizeof(uint32) * w * h);
@@ -502,7 +515,8 @@ static bool EnsureBuffers(int w, int h) {
   g_depth = (float *)malloc(sizeof(float) * w * h);
   g_uv = (uint32 *)malloc(sizeof(uint32) * w * h);
   g_kind = (uint8 *)malloc(w * h);
-  if (!g_side || !g_owner || !g_floor || !g_group_map || !g_depth || !g_uv || !g_kind) {
+  g_wuv = (float *)malloc(sizeof(float) * 2 * w * h);
+  if (!g_side || !g_owner || !g_floor || !g_group_map || !g_depth || !g_uv || !g_kind || !g_wuv) {
     Hd3d_Log("ERROR: out of memory for %dx%d buffers", w, h);
     g_w = g_h = 0;
     return false;
@@ -1046,6 +1060,7 @@ static void DrawGround(uint32 *out, int pitch_px, const Cam *cm, const Ground *g
       }
       int ui = (int)floorf(u), vi = (int)floorf(v);
       uv[x] = PackUv(ui, vi);
+      g_wuv[(y * w + x) * 2] = u, g_wuv[(y * w + x) * 2 + 1] = v;
       uint32 px;
       if (!Ground_InRoom(gr, gr->org_x + ui, gr->org_y + vi)) {
         dst[x] = fog;
@@ -3840,6 +3855,7 @@ static void DrawTerrainRow(void *ctx, int y) {
     outside += !in_frame;
     g_depth[i] = depth;
     g_uv[i] = PackUv(su, sv);
+    g_wuv[i * 2] = u, g_wuv[i * 2 + 1] = v;
     if (!ok) {
       missing++;
       dst[x] = fog, g_kind[i] = kKind_Sky;
@@ -4567,6 +4583,7 @@ static void DrawOverlay(uint32 *out, int pitch_px) {
 }
 
 void Hd3d_EndFrame(uint8 *pixels, int pitch, int width, int height) {
+  g_wuv_ready = false;
   if (!g_active_last || width != g_w || height != g_h)
     return;
   uint64 t0 = SDL_GetPerformanceCounter();
@@ -4622,6 +4639,17 @@ void Hd3d_EndFrame(uint8 *pixels, int pitch, int width, int height) {
   g_depth_valid = walls;
   int groups = DrawSprites(out, pitch_px, &cm, g_zenv.ppu);
   g_log_keep = false;
+  // the ground point under each screen pixel, for the shader (sprites: the 2D
+  // point they were drawn at; sky and fog: none)
+  for (int i = 0, n = width * height; i < n; i++) {
+    if (g_kind[i] == kKind_Sky) {
+      g_wuv[i * 2] = g_wuv[i * 2 + 1] = kWuvNone;
+    } else if (g_kind[i] == kKind_Sprite) {
+      g_wuv[i * 2] = (int16)g_uv[i] + 0.5f;
+      g_wuv[i * 2 + 1] = (int16)(g_uv[i] >> 16) + 0.5f;
+    }
+  }
+  g_wuv_ready = true;
   // the HD light and forest fog ran on the 2D frame: the ground past it and
   // the sprites (drawn from the side buffer) get them now, at the 2D point
   // they show

@@ -41,6 +41,12 @@ uniform COMPAT_PRECISION float MirrorDx[240];
 // 1 = "Filtro lineare" attivo nelle impostazioni (LinearFiltering): pixel
 // morbidi come senza shader invece che nitidi
 uniform COMPAT_PRECISION float LinearFilter;
+// Vista 3D: per ogni pixel il punto del terreno che mostra, in pixel del
+// fotogramma 2D (rg; sotto -1e5 = cielo). Lo schermo inclinato o girato non
+// coincide piu' con il mondo, quindi le nuvole si posano su questo punto.
+// GroundUvOn = 1 quando la texture e' valida (vista 3D accesa)
+uniform sampler2D GroundUv;
+uniform COMPAT_PRECISION float GroundUvOn;
 
 #ifdef PARAMETER_UNIFORM
 uniform COMPAT_PRECISION float FSA_PIXEL_SHARP;
@@ -360,7 +366,16 @@ void main()
 
     // --- Ombre di nuvole (solo all'aperto) -------------------------------
     float t = float(FrameCount) / 60.0;
-    float cloud = Sunny > 0.5 ? cloud_shadow(world, t) : 0.0;
+    vec2 cloud_world = world;
+    float cloud_on = step(0.5, Sunny);
+    if (GroundUvOn > 0.5) {
+        // vista 3D: il punto del terreno sotto il pixel, fermo quando la
+        // telecamera gira; niente ombre sul cielo
+        vec2 g = COMPAT_TEXTURE(GroundUv, uv).rg;
+        cloud_on *= step(-1.0e5, g.x);
+        cloud_world = g + ScrollOffset;
+    }
+    float cloud = cloud_on > 0.5 ? cloud_shadow(cloud_world, t) : 0.0;
     color *= 1.0 - FSA_CLOUDS * cloud * (1.0 - hud);
 
     // --- Pennellate di Four Swords -------------------------------------------

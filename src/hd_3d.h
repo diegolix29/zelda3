@@ -23,6 +23,10 @@ void Hd3d_ToggleCamera(void);
 const char *Hd3d_CameraName(int cam);
 bool Hd3d_Active(void);        // the 3D view was drawn last frame
 bool Hd3d_ThirdPerson(void);   // third person and the 3D view was drawn last frame
+// The ground point each pixel of the last 3D picture shows, in 2D frame pixels
+// (u, v float pairs, width x height; u or v below -1e5 = sky). NULL when the
+// last picture was not drawn in 3D. The shader lays its cloud shadows on it
+const float *Hd3d_ShaderGroundUv(int *width, int *height);
 void Hd3d_RightStick(int axis_y, int value);
 void Hd3d_Recenter(void);
 // Joypad bits (up 0x10, down 0x20, left 0x40, right 0x80) turned by the camera

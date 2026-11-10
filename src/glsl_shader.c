@@ -3,6 +3,7 @@
 #include "glsl_shader.h"
 #include "hd_fx.h"
 #include "hd_world.h"
+#include "hd_3d.h"
 #include "util.h"
 #include "config.h"
 #include <stdio.h>
@@ -372,6 +373,8 @@ static void GlslShader_GetUniforms(GlslShader *gs) {
     p->unif.MirrorWarp = glGetUniformLocation(program, "MirrorWarp");
     p->unif.LinearFilter = glGetUniformLocation(program, "LinearFilter");
     p->unif.MirrorDx = glGetUniformLocation(program, "MirrorDx");
+    p->unif.GroundUv = glGetUniformLocation(program, "GroundUv");
+    p->unif.GroundUvOn = glGetUniformLocation(program, "GroundUvOn");
     p->unif.LUTTexCoord = glGetAttribLocation(program, "LUTTexCoord");
     p->unif.VertexCoord = glGetAttribLocation(program, "VertexCoord");
     GlslTextureUniform_Read(program, "Orig", -1, &p->unif.Orig);
@@ -526,6 +529,8 @@ void GlslShader_Destroy(GlslShader *gs) {
   }
   for (int i = 0; i < 8; i++)
     glDeleteTextures(1, &gs->prev_frame[i].gl_texture);
+  if (gs->gl_ground_uv)
+    glDeleteTextures(1, &gs->gl_ground_uv);
   glDeleteBuffers(1, &gs->gl_vbo);
   free(gs);
 }
@@ -609,6 +614,12 @@ static void GlslShader_SetShaderVars(GlslShader *gs, RenderCtx *ctx, int pass) {
   if (p->unif.MirrorDx >= 0)
     // e l'onda di ogni riga, che il fondale ha gia' (HdWorld_WarpPost)
     glUniform1fv(p->unif.MirrorDx, 240, HdWorld_WarpRowDx());
+  if (p->unif.GroundUvOn >= 0)
+    // vista 3D: il punto del terreno mostrato da ogni pixel (le ombre delle
+    // nuvole restano ferme sul mondo quando la telecamera gira)
+    glUniform1f(p->unif.GroundUvOn, gs->ground_uv_on ? 1.0f : 0.0f);
+  if (p->unif.GroundUv >= 0)
+    RenderCtx_SetTexture(ctx, p->unif.GroundUv, gs->gl_ground_uv);
   RenderCtx_SetTexCoords(ctx, p->unif.LUTTexCoord, ctx->offset);
   RenderCtx_SetTexCoords(ctx, p->unif.VertexCoord, 0);
   RenderCtx_SetGlslTextureUniform(ctx, &p->unif.Orig, gs->pass[0].width, gs->pass[0].height, gs->pass[0].gl_texture);
@@ -641,6 +652,29 @@ void GlslShader_Render(GlslShader *gs, GlTextureWithSize *tex, int viewport_x, i
   gs->pass[0].gl_texture = tex->gl_texture;
   gs->pass[0].width = tex->width;
   gs->pass[0].height = tex->height;
+
+  // Vista 3D: punto del terreno per pixel, come texture RG float (sempre
+  // valida, 1x1 quando la vista 3D e' spenta)
+  {
+    int gw = 0, gh = 0;
+    const float *guv = Hd3d_ShaderGroundUv(&gw, &gh);
+    gs->ground_uv_on = guv && gw == tex->width && gh == tex->height;
+    if (!gs->gl_ground_uv) {
+      glGenTextures(1, &gs->gl_ground_uv);
+      glBindTexture(GL_TEXTURE_2D, gs->gl_ground_uv);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+      static const float kNone[2] = { -1.0e6f, -1.0e6f };
+      glTexImage2D(GL_TEXTURE_2D, 0, GL_RG32F, 1, 1, 0, GL_RG, GL_FLOAT, kNone);
+    }
+    if (gs->ground_uv_on) {
+      glBindTexture(GL_TEXTURE_2D, gs->gl_ground_uv);
+      glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+      glTexImage2D(GL_TEXTURE_2D, 0, GL_RG32F, gw, gh, 0, GL_RG, GL_FLOAT, guv);
+    }
+  }
 
   GLint previous_framebuffer;
   glGetIntegerv(GL_FRAMEBUFFER_BINDING, &previous_framebuffer);
