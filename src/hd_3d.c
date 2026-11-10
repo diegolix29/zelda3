@@ -1231,6 +1231,7 @@ static uint16 g_tile_obj[2][64 * 64];   // per layer (0 = BG2, 1 = BG1): room ob
 static uint16 g_snap[2][64 * 64];
 static int g_room_id = -1, g_room_pass;
 static bool g_room_building, g_room_dump_request;
+static bool g_og_loaded;         // hd3d_ow_tiles.txt read (the outdoor grid)
 
 // --- class of each tile number ---
 //
@@ -1304,7 +1305,10 @@ void Hd3d_ObjEnd(int code, int x, int y) {
           continue;
         uint8 a = attributes_for_tile[t & 0x3ff];
         st->tiles++;
-        st->solid += a != 0x00 && a != 0x08 && a != 0x09 && !(a >= 0x1c && a <= 0x2b) && a < 0x60;
+        // solid as the 3D view counts it (IsFootAttr), less holes and stairs:
+        // 0x27 (pots, columns, rails) is solid
+        st->solid += a != 0x00 && a != 0x08 && a != 0x09 && !(a >= 0x1c && a <= 0x20) && a != 0x22 &&
+                     !(a >= 0x28 && a <= 0x2b) && a < 0x60;
       }
     }
   }
@@ -1499,6 +1503,7 @@ void Hd3d_RequestRoomDump(void) {
   Hd3d_Log("room dump requested (key 8)");
   if (g_tiles_ready)
     LoadTileOverrides();
+  g_og_loaded = false;   // and hd3d_ow_tiles.txt
 }
 
 // Tallest class of the cell's two layers (or of layer `only`: 0 = BG2,
@@ -2895,6 +2900,195 @@ static void BuildForestHeights(void) {
   }
 }
 
+// --- the outdoor grid (overworld 3D, phase 0) ---
+//
+// A window of 128x128 cells (1024 pixels) around Link, anywhere outdoors: each
+// 8x8 cell's map16, its 8x8 tile word, collision and class. The current area
+// comes from the game's map, the areas around it from the continuous world
+// (HdWorld_WorldTile, with lifted bushes and burned trees); without the
+// continuous world, cells past the area are "none". Nothing stands yet: the
+// grid is what the next phases (trees, houses, ledges and cliffs) read, and
+// key 8 dumps it. Classes come from the collision and the tile's priority bit;
+// hd3d_ow_tiles.txt ("<map16 hex> <class>") overrides whole map16s.
+enum {
+  kOg_None, kOg_Floor, kOg_Solid, kOg_Canopy, kOg_Arch, kOg_Small, kOg_Rock, kOg_Grave, kOg_Sign, kOg_Post,
+  kOg_Water, kOg_Ledge, kOg_Slope, kOg_Stairs, kOg_Hole, kOg_Door, kOg_Grass, kOg_Dig, kOg_Other, kOg_Count,
+};
+static const char kOgLetter[kOg_Count + 1] = "-.WCAbrgsp~L/SODnd?";
+static const char *const kOgName[kOg_Count] = {
+  "none", "floor", "solid", "canopy", "arch", "small", "rock", "grave", "sign", "post",
+  "water", "ledge", "slope", "stairs", "hole", "door", "grass", "dig", "other",
+};
+static int g_og_x0 = -1 << 20, g_og_y0;        // world cell of the window's corner
+static uint16 g_og_m16[kGridMax * kGridMax];  // map16, 0xffff = none
+static uint8 g_og_attr[kGridMax * kGridMax];
+static uint8 g_og_cls[kGridMax * kGridMax];
+static uint8 g_og_override[0x2000];           // map16 -> class + 1, 0 = none
+static uint32 g_og_hash;
+
+static int OgClass(uint8 a, bool prio) {
+  if (a == 0x00) return prio ? kOg_Arch : kOg_Floor;
+  if (a >= 0x01 && a <= 0x03) return prio ? kOg_Canopy : kOg_Solid;
+  if (a == 0x08 || a == 0x09) return kOg_Water;
+  if ((a >= 0x10 && a <= 0x13) || (a >= 0x18 && a <= 0x1b)) return kOg_Slope;
+  if (a >= 0x1d && a <= 0x1f) return kOg_Stairs;
+  if (a == 0x20) return kOg_Hole;
+  if (a == 0x27) return kOg_Post;
+  if (a >= 0x28 && a <= 0x2f) return kOg_Ledge;
+  if (a == 0x40) return kOg_Grass;
+  if (a == 0x42) return kOg_Grave;
+  if (a == 0x43) return prio ? kOg_Canopy : kOg_Solid;
+  if (a == 0x46) return kOg_Sign;
+  if (a == 0x48 || a == 0x4a) return kOg_Dig;
+  if (a == 0x57) return kOg_Rock;
+  if (a >= 0x50 && a <= 0x56) return kOg_Small;
+  if (a >= 0x80 && a <= 0x8f) return kOg_Door;
+  return kOg_Other;
+}
+
+static void OgLoadOverrides(void) {
+  memset(g_og_override, 0, sizeof(g_og_override));
+  g_og_loaded = true, g_og_hash = 0;
+  FILE *f = fopen("hd3d_ow_tiles.txt", "r");
+  if (!f)
+    return;
+  char line[256], name[32];
+  unsigned m;
+  int n = 0, bad = 0;
+  while (fgets(line, sizeof(line), f)) {
+    char *hash = strchr(line, '#');
+    if (hash) *hash = 0;
+    if (sscanf(line, "%x %31s", &m, name) != 2)
+      continue;
+    int c = -1;
+    for (int k = 0; k < kOg_Count; k++)
+      if (!strcmp(name, kOgName[k])) c = k;
+    if (m >= 0x2000 || c < 0) {
+      bad++;
+      continue;
+    }
+    g_og_override[m] = (uint8)(c + 1), n++;
+  }
+  fclose(f);
+  Hd3d_Log("hd3d_ow_tiles.txt: %d map16 classes%s", n, bad ? " (some lines not understood)" : "");
+}
+
+// the map16 at world pixel (px, py): the current area's own map, else the
+// continuous world's; -1 = none
+static int OgMap16(int px, int py) {
+  int m = ForestMap16(px, py);
+  return m >= 0 ? m : HdWorld_WorldTile(px, py);
+}
+
+static void BuildOutdoorGrid(void) {
+  if (!g_og_loaded)
+    OgLoadOverrides();
+  // centred on Link, moved in steps of 64 pixels (8 cells)
+  int x0 = (((link_x_coord + 8) >> 3) - kGridMax / 2) & ~7, y0 = (((link_y_coord + 16) >> 3) - kGridMax / 2) & ~7;
+  uint32 hash = 2166136261u ^ (uint32)x0 ^ (uint32)y0 << 12 ^ (uint32)overworld_area_index << 24;
+  static uint16 m16[(kGridMax / 2) * (kGridMax / 2)];
+  for (int j = 0; j < kGridMax / 2; j++)
+    for (int i = 0; i < kGridMax / 2; i++) {
+      int m = OgMap16((x0 + i * 2) * 8, (y0 + j * 2) * 8);
+      m16[j * (kGridMax / 2) + i] = (uint16)m;
+      hash = (hash ^ (uint16)m) * 16777619u;
+    }
+  if (hash == g_og_hash)
+    return;
+  g_og_hash = hash, g_og_x0 = x0, g_og_y0 = y0;
+  const uint16 *map8 = GetMap16toMap8Table();
+  const uint8 *attrs = GetMap8toTileAttr();
+  for (int cy = 0; cy < kGridMax; cy++)
+    for (int cx = 0; cx < kGridMax; cx++) {
+      int c = cy * kGridMax + cx, m = m16[(cy >> 1) * (kGridMax / 2) + (cx >> 1)];
+      if (m == 0xffff || m >= 0x2000) {
+        g_og_m16[c] = 0xffff, g_og_attr[c] = 0, g_og_cls[c] = kOg_None;
+        continue;
+      }
+      uint16 w = map8[m * 4 + ((y0 + cy) & 1) * 2 + ((x0 + cx) & 1)];
+      uint8 a = attrs[w & 0x1ff];
+      g_og_m16[c] = (uint16)m, g_og_attr[c] = a;
+      g_og_cls[c] = (uint8)(g_og_override[m] ? g_og_override[m] - 1 : OgClass(a, (w >> 13 & 1) != 0));
+    }
+}
+
+// Key 8 outdoors (outside the forest): the cells around Link, then every map16
+// of the window that is not plain floor, with its four collisions, priority
+// bits and classes: the list to name trees, houses and cliffs from
+static void OutdoorDump(void) {
+  const uint16 *map8 = GetMap16toMap8Table();
+  const uint8 *attrs = GetMap8toTileAttr();
+  int counts[kOg_Count] = { 0 };
+  for (int i = 0; i < kGridMax * kGridMax; i++)
+    counts[g_og_cls[i]]++;
+  int lx = link_x_coord + 8, ly = link_y_coord + 16;
+  Hd3d_Log("=== outdoor dump: area 0x%02x (screen 0x%02x), module %d, Link at (%d, %d), window at cell (%d, %d), continuous world %s",
+           (uint8)overworld_area_index, BYTE(overworld_screen_index), main_module_index, lx, ly, g_og_x0, g_og_y0,
+           HdWorld_Active() ? "on" : "off");
+  char line[1024];
+  int n = snprintf(line, sizeof(line), "  cells:");
+  for (int k = 0; k < kOg_Count; k++)
+    if (counts[k]) n += snprintf(line + n, sizeof(line) - n, " %s(%c) %d", kOgName[k], kOgLetter[k], counts[k]);
+  Hd3d_Log("%s", line);
+  Hd3d_Log("  each cell: map16/8x8 tile, collision, class letter; [ ] = Link. Letters: - none . floor W solid C canopy A arch "
+           "b small r rock g grave s sign p post ~ water L ledge / slope S stairs O hole D door n grass d dig ? other");
+  for (int cy = (ly >> 3) - 8; cy <= (ly >> 3) + 8; cy++) {
+    n = snprintf(line, sizeof(line), "  y%4d:", cy);
+    for (int cx = (lx >> 3) - 8; cx <= (lx >> 3) + 8 && n < (int)sizeof(line) - 32; cx++) {
+      int gx = cx - g_og_x0, gy = cy - g_og_y0;
+      if (gx < 0 || gy < 0 || gx >= kGridMax || gy >= kGridMax || g_og_m16[gy * kGridMax + gx] == 0xffff) {
+        n += snprintf(line + n, sizeof(line) - n, "  ---------- ");
+        continue;
+      }
+      int c = gy * kGridMax + gx, m = g_og_m16[c];
+      uint16 w = map8[m * 4 + (cy & 1) * 2 + (cx & 1)];
+      bool me = cx == lx >> 3 && cy == ly >> 3;
+      n += snprintf(line + n, sizeof(line) - n, " %c%03x/%03x %02x %c%c", me ? '[' : ' ', m, w & 0x3ff, g_og_attr[c],
+                    kOgLetter[g_og_cls[c]], me ? ']' : ' ');
+    }
+    Hd3d_Log("%s", line);
+  }
+  // the map16s of the window, most used first
+  static uint16 uses[0x2000];
+  memset(uses, 0, sizeof(uses));
+  for (int cy = 0; cy < kGridMax; cy += 2)
+    for (int cx = 0; cx < kGridMax; cx += 2) {
+      int m = g_og_m16[cy * kGridMax + cx];
+      if (m != 0xffff && uses[m] < 0xffff) uses[m]++;
+    }
+  Hd3d_Log("  map16s in the window (not all floor), most used first: map16 xN, four 8x8 tiles as tile/collision (* = priority), classes");
+  for (int shown = 0; shown < 160; shown++) {
+    int best = -1;
+    for (int m = 0; m < 0x2000; m++) {
+      if (!uses[m])
+        continue;
+      bool plain = true;
+      for (int q = 0; q < 4; q++) {
+        uint16 w = map8[m * 4 + q];
+        plain &= OgClass(attrs[w & 0x1ff], (w >> 13 & 1) != 0) == kOg_Floor;
+      }
+      if (plain && !g_og_override[m]) {
+        uses[m] = 0;
+        continue;
+      }
+      if (best < 0 || uses[m] > uses[best]) best = m;
+    }
+    if (best < 0)
+      break;
+    n = snprintf(line, sizeof(line), "    %03x x%-4d", best, uses[best]);
+    char cl[5];
+    for (int q = 0; q < 4; q++) {
+      uint16 w = map8[best * 4 + q];
+      uint8 a = attrs[w & 0x1ff];
+      n += snprintf(line + n, sizeof(line) - n, " %03x/%02x%c", w & 0x3ff, a, w & 0x2000 ? '*' : ' ');
+      cl[q] = kOgLetter[g_og_override[best] ? g_og_override[best] - 1 : OgClass(a, (w >> 13 & 1) != 0)];
+    }
+    cl[4] = 0;
+    Hd3d_Log("%s  %s%s", line, cl, g_og_override[best] ? " (hd3d_ow_tiles.txt)" : "");
+    uses[best] = 0;
+  }
+}
+
 // ground color at frame coordinates (u, v): the PPU frame inside the SNES
 // screen, past it the room tiles
 static bool SampleSurface(const Ground *gr, float u, float v, uint32 *out) {
@@ -3934,6 +4128,20 @@ static int DrawSprites(uint32 *out, int pitch_px, const Cam *cm, Ppu *ppu) {
   // sort far to near, remembering each group's id in g_group_map
   for (int i = 0; i < n; i++) {
     Group *g = &groups[i];
+    // its own OAM entries (overlap fill below). Link and the follower walk
+    // over each other: their box is their entries' whole drawing, not only
+    // the pixels the other one left them in 2D
+    if (!g->far) {
+      g->n_ents = 0;
+      for (int e = 0; e < 128 && g->n_ents < (int)(sizeof(g->ents) / sizeof(g->ents[0])); e++)
+        if (evis[e] && GroupKey(e) == g->key)
+          g->ents[g->n_ents++] = (uint16)e;
+      for (int e = 0; (g->key == 0 || g->key == kKey_Follower) && e < g->n_ents; e++) {
+        int k = g->ents[e];
+        g->x0 = IntMax(IntMin(g->x0, efx[k]), 0), g->x1 = IntMin(IntMax(g->x1, efx[k] + esz[k] - 1), w - 1);
+        g->y0 = IntMax(IntMin(g->y0, efy[k]), 0), g->y1 = IntMin(IntMax(g->y1, efy[k] + esz[k] - 1), h - 1);
+      }
+    }
     GroupAnchor(g, ppu);
     // furniture: its box from its OAM entries (pixels Link covers in the 2D
     // frame are still there), standing at the front, the drawing's bottom
@@ -4000,6 +4208,12 @@ static int DrawSprites(uint32 *out, int pitch_px, const Cam *cm, Ppu *ppu) {
       DrawSolidSprite(out, pitch_px, cm, ppu, g, efx, efy, esz, ecf);
       continue;
     }
+    // Where another sprite covers this one in 2D (Zelda walking right behind
+    // Link: the PPU keeps only the lower OAM index), the side buffer has the
+    // other one's pixels; in 3D they stand apart, so this one had a hole of
+    // the other's shape, and the game swaps their OAM order as they move
+    // (Tagalong_Draw): the holes flickered. Those pixels come from this
+    // group's own OAM entries instead
     // behind a wall: the wall's pixels are nearer than the feet
     float zlimit = depth - 4.0f;
     float inv = 1.0f / sc;
@@ -4020,9 +4234,21 @@ static int DrawSprites(uint32 *out, int pitch_px, const Cam *cm, Ppu *ppu) {
         const uint32 *src = g_side + vy * w;
         for (int x = dx0; x < dx1; x++) {
           int vx = (int)floorf(ax + (x + 0.5f - sx) * inv);
-          if (vx >= g->x0 && vx <= g->x1 && gm[vx] == id &&
-              !(g_depth_valid && g_depth[y * w + x] < zlimit))
+          if (vx < g->x0 || vx > g->x1 || (g_depth_valid && g_depth[y * w + x] < zlimit))
+            continue;
+          if (gm[vx] == id) {
             dst[x] = src[vx], g_uv[y * w + x] = PackUv(vx, vy), g_kind[y * w + x] = kKind_Sprite;
+          } else if (gm[vx]) {
+            for (int e = 0; e < g->n_ents; e++) {
+              int i = g->ents[e], lx = vx - efx[i], ly = vy - efy[i];
+              uint32 c;
+              if ((unsigned)lx < (unsigned)esz[i] && (unsigned)ly < (unsigned)esz[i] &&
+                  OamPixel(ppu, ecf[i], lx, ly, esz[i], &c)) {
+                dst[x] = c, g_uv[y * w + x] = PackUv(vx, vy), g_kind[y * w + x] = kKind_Sprite;
+                break;
+              }
+            }
+          }
         }
       } else {
         for (int x = dx0; x < dx1; x++) {
@@ -4090,6 +4316,14 @@ void Hd3d_EndFrame(uint8 *pixels, int pitch, int width, int height) {
   Sky_Setup(&sk, outdoors, width);
   uint32 *out = (uint32 *)pixels;
   bool forest = g_view3d_walls && ForestHeightsOn();
+  // the outdoor grid (phase 0: classes and the key 8 dump, nothing stands yet)
+  if (outdoors && !forest && g_view3d_walls) {
+    BuildOutdoorGrid();
+    if (g_room_dump_request) {
+      g_room_dump_request = false;
+      OutdoorDump();
+    }
+  }
   bool walls = forest || (g_view3d_walls && player_is_indoors);
   if (walls) {
     if (forest)
