@@ -335,6 +335,43 @@ float cloud_shadow(vec2 world, float t)
     return acc;
 }
 
+// --- Vista 3D: punto del terreno sotto il pixel -------------------------------
+// xy = punto nel fotogramma 2D, z = 1 se e' terreno (0 = cielo), w = quanti
+// pixel di mondo copre un pixel del fotogramma (1 vicino, molto di piu' in
+// lontananza). Fra quattro punti vicini dello stesso terreno si interpola,
+// cosi' trama e nuvole non vanno a scalini; sui bordi (muri, sprite) no.
+float ground_ok(vec2 g)
+{
+    return step(-1.0e5, g.x);
+}
+
+vec4 ground_at(vec2 uv, vec2 sz)
+{
+    vec2 gn = COMPAT_TEXTURE(GroundUv, uv).rg;
+    if (ground_ok(gn) < 0.5)
+        return vec4(0.0);
+    vec2 p = uv * sz - 0.5;
+    vec2 i = floor(p);
+    vec2 f = p - i;
+    vec2 base = (i + 0.5) / sz;
+    vec2 tx = vec2(1.0 / sz.x, 0.0);
+    vec2 ty = vec2(0.0, 1.0 / sz.y);
+    vec2 g00 = COMPAT_TEXTURE(GroundUv, base).rg;
+    vec2 g10 = COMPAT_TEXTURE(GroundUv, base + tx).rg;
+    vec2 g01 = COMPAT_TEXTURE(GroundUv, base + ty).rg;
+    vec2 g11 = COMPAT_TEXTURE(GroundUv, base + tx + ty).rg;
+    float ok = ground_ok(g00) * ground_ok(g10) * ground_ok(g01) * ground_ok(g11);
+    if (ok < 0.5)
+        return vec4(gn, 1.0, 1.0);
+    float dx = length(g10 - g00), dy = length(g01 - g00);
+    float foot = min(dx, dy);
+    // un salto grande fra vicini = un bordo (muro, sprite), non la prospettiva
+    if (max(max(dx, dy), length(g11 - g00)) > max(6.0, foot * 3.0))
+        return vec4(gn, 1.0, foot);
+    vec2 g = mix(mix(g00, g10, f.x), mix(g01, g11, f.x), f.y);
+    return vec4(g, 1.0, max(dx, dy));
+}
+
 void main()
 {
     vec2 uv = vTexCoord;
@@ -343,6 +380,19 @@ void main()
     vec2 world = px + ScrollOffset;     // pixel SNES nel mondo
     // specchio: pennellate e nuvole ondeggiano con il fondale
     world.x += MirrorDx[int(clamp(px.y, 0.0, 239.0))];
+    // Vista 3D: lo schermo inclinato o girato non coincide con il mondo.
+    // Pennellate e nuvole si posano sul punto del terreno mostrato dal pixel
+    // (ferme quando la telecamera gira); niente sul cielo. In lontananza le
+    // pennellate diventano piu' piccole di un pixel e sfarfallerebbero:
+    // svaniscono.
+    float on_ground = 1.0;
+    float brush_fade = 1.0;
+    if (GroundUvOn > 0.5) {
+        vec4 g = ground_at(uv, src);
+        on_ground = g.z;
+        world = g.xy + ScrollOffset;
+        brush_fade = 1.0 - smoothstep(1.5, 3.5, g.w);
+    }
 
     vec2 prot = protect_mask(uv, src);
     float sprite = prot.x * FSA_KEEP_SPRITES;
@@ -366,20 +416,12 @@ void main()
 
     // --- Ombre di nuvole (solo all'aperto) -------------------------------
     float t = float(FrameCount) / 60.0;
-    vec2 cloud_world = world;
-    float cloud_on = step(0.5, Sunny);
-    if (GroundUvOn > 0.5) {
-        // vista 3D: il punto del terreno sotto il pixel, fermo quando la
-        // telecamera gira; niente ombre sul cielo
-        vec2 g = COMPAT_TEXTURE(GroundUv, uv).rg;
-        cloud_on *= step(-1.0e5, g.x);
-        cloud_world = g + ScrollOffset;
-    }
-    float cloud = cloud_on > 0.5 ? cloud_shadow(cloud_world, t) : 0.0;
+    float cloud_on = step(0.5, Sunny) * on_ground;
+    float cloud = cloud_on > 0.5 ? cloud_shadow(world, t) : 0.0;
     color *= 1.0 - FSA_CLOUDS * cloud * (1.0 - hud);
 
     // --- Pennellate di Four Swords -------------------------------------------
-    float marks = brush_marks(world) * (1.0 - water_mask(uv, src));
+    float marks = brush_marks(world) * brush_fade * on_ground * (1.0 - water_mask(uv, src));
     // Piu' forti sui toni medi, quasi assenti sui neri e sui bianchi
     float tone = smoothstep(0.03, 0.16, luma) * (1.0 - smoothstep(0.80, 1.00, luma));
     color *= 1.0 - FSA_HATCH * 0.17 * marks * tone * scene;
