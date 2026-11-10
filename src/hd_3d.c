@@ -2471,10 +2471,10 @@ enum { kSmallTreeR = 16, kSmallTreeRim = 14, kSmallTreeDome = 12, kSmallTreeTrun
 // centre lies from this map16's top left corner, in pixels; false = not one
 static bool SmallTreeCentre(int m, int *cx, int *cy) {
   switch (m) {
-  case 0x08c: case 0x0ba: *cx = 16, *cy = 16; return true;
-  case 0x08d: case 0x0bb: *cx = 0, *cy = 16; return true;
-  case 0x096: case 0x020: *cx = 16, *cy = 0; return true;
-  case 0x097: case 0x021: *cx = 0, *cy = 0; return true;
+  case 0x08c: case 0x0ba: case 0x3c3: *cx = 16, *cy = 16; return true;   // 3c3-3c8: Kakariko's round pink trees
+  case 0x08d: case 0x0bb: case 0x3c4: *cx = 0, *cy = 16; return true;
+  case 0x096: case 0x020: case 0x3c7: *cx = 16, *cy = 0; return true;
+  case 0x097: case 0x021: case 0x3c8: *cx = 0, *cy = 0; return true;
   }
   return false;
 }
@@ -2665,10 +2665,12 @@ static void BuildForestShapes(const uint8 *mass_h) {
     memset(near_tree, 0, sizeof(near_tree));
     for (int cy = 0; cy < kGridMax; cy++)
       for (int cx = 0; cx < kGridMax; cx++) {
-        if (g_ow_cls[cy * kGridMax + cx] == kOw_Floor)
+        int kc = g_ow_cls[cy * kGridMax + cx];
+        if (kc == kOw_Floor)
           continue;
-        for (int dy = -2; dy <= 2; dy++)
-          for (int dx = -2; dx <= 2; dx++) {
+        int r = kc == kOw_Small ? 0 : 2;   // a bush keeps its own cell only
+        for (int dy = -r; dy <= r; dy++)
+          for (int dx = -r; dx <= r; dx++) {
             int nx = cx + dx, ny = cy + dy;
             if ((unsigned)nx < kGridMax && (unsigned)ny < kGridMax)
               near_tree[ny * kGridMax + nx] = 1;
@@ -2926,6 +2928,12 @@ static void BuildForestHeights(void) {
         if (m >= 0) {
           uint16 w = map8[m * 4 + (wcy & 1) * 2 + (wcx & 1)];
           k = ForestClass(attrs[w & 0x1ff], (w >> 13 & 1) != 0);
+          // outside the forests: house roofs (solid, priority, tiles from
+          // 0c0) stand like crowns, which the user liked; but walkable
+          // priority tiles from 100 are no crown's edge: Kakariko's
+          // weathervane (10d-12f, 1de) stood up as a tree
+          if (g_ow_trees_only && k == kOw_Arch && (w & 0x3ff) >= 0x100)
+            k = kOw_Floor;
           uint8 a = attrs[w & 0x1ff];
           floor_open[GridCell(wcx, wcy)] = a == 0x00 || a == 0x48;
         }
@@ -2949,9 +2957,11 @@ static void BuildForestHeights(void) {
                 keep[ny * kGridMax + nx] = 1;
             }
         }
+      int tx, ty;
       for (int i = 0; i < kGridMax * kGridMax; i++)
-        if (g_ow_cls[i] == kOw_Trunk && !keep[i])
-          g_ow_cls[i] = kOw_Floor;
+        if (g_ow_cls[i] == kOw_Trunk && !keep[i] &&
+            !SmallTreeCentre(ForestMap16((g_gx0 + (i & (kGridMax - 1))) * 8, (g_gy0 + (i >> 7)) * 8), &tx, &ty))
+          g_ow_cls[i] = kOw_Floor;   // (small trees are their own trunk)
     }
     // a gap one cell wide between solid cells is too narrow for Link: part of
     // the tree around it (the middle of a small tree's drawing)
