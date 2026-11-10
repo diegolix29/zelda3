@@ -1119,6 +1119,7 @@ static uint8 g_lower[64 * 64];   // 1 = BG2 has a hole there: the cell shows BG1
 static uint8 g_upper[64 * 64];   // 1 = on the upper floor
 static uint8 g_hbot[kGridMax * kGridMax];    // bridges: height of the deck's underside (open below), 0 = solid to the floor
 static bool g_two_levels;
+static bool g_holes_room;        // two layers: the upper floor on BG2, the lower seen through its holes
 static bool g_raised;            // some floor is above 0 (two levels or a chest platform)
 enum { kPlatformH = 8 };         // chest platforms (the throne room's dais) above their floor
 static int g_level_h, g_hmax = kWallMax;
@@ -1163,14 +1164,17 @@ static int ObjectClass(int code) {
       return kCls_Ceiling;
     if ((id >= 0x01 && id <= 0x20) || id == 0x53 || id == 0xb6 || id == 0xb7 || id == 0x36 || id == 0x37 ||
         id == 0x3a || id == 0x3b || id == 0x3e || id == 0x4b || id == 0x51 || id == 0x52 || id == 0x55 ||
-        id == 0x56 || id == 0x61 || id == 0x62 || id == 0x90 || id == 0x91 || (id >= 0x64 && id <= 0x68) ||
+        id == 0x5b || id == 0x5c ||   // cannon holes, drawn as 0x51 / 0x52
+        id == 0x56 || id == 0x61 || id == 0x62 || id == 0x90 || id == 0x91 || (id >= 0x63 && id <= 0x68) ||
         id == 0x73 || id == 0x74 || id == 0x76 || id == 0x77 || id == 0x78 || id == 0x7b ||
         (id >= 0x7f && id <= 0x86) || id == 0xcd || id == 0xce)
       return kCls_Wall;
     if (id == 0x22 || id == 0x2f || id == 0x30 || id == 0x5f || id == 0x69 || id == 0x6c || id == 0x6d)
       return kCls_Rail;
-    if (id == 0x88 || id == 0x8a)
-      return kCls_Block;   // large / long vertical rails: long low barriers
+    if (id == 0x88 || id == 0x8a || id == 0x5d)
+      return kCls_Block;   // large / long vertical rails, large horizontal rail: long low barriers
+    if (id == 0x5e)
+      return kCls_Block;   // "Block [L-R]": it was unclassified, so its solid tiles lay flat
     if (id == 0x3c)
       return kCls_Chair;   // double chair
     if (id == 0xdd)
@@ -1183,8 +1187,8 @@ static int ObjectClass(int code) {
       return kCls_Small;
     return kCls_Floor;
   case kHd3d_ObjSubtype2:
-    if ((id >= 0x04 && id <= 0x1b) || id == 0x2a || id == 0x3c)
-      return kCls_Wall;
+    if (id <= 0x1b || id == 0x2a || id == 0x3c)
+      return kCls_Wall;   // 0x00-0x03 (outer corners, high) were left out
     if (id == 0x1d || id == 0x21 || id == 0x26)
       return kCls_Tall;
     if (id == 0x22 || id == 0x28 || id == 0x23 || id == 0x3e)
@@ -1249,6 +1253,12 @@ static uint8 g_tile_override[kNumTileNums];   // class + 1, 0 = none
 static uint8 g_tile_full[kNumTileNums];       // 1 = stands up whole, never cut by the floor mask
 static uint32 (*g_votes)[kCls_Count];         // filled while seeding, kept for the room dump
 static bool g_seeding, g_tiles_ready;
+// seeding: per object id, how often it is used and how many of the tiles it
+// drew are solid for the game (hd3d_objects_seed.txt: finds the ids whose
+// class is wrong)
+enum { kNumObjCodes = 0x402 };
+typedef struct ObjStat { uint32 uses, tiles, solid; } ObjStat;
+static ObjStat *g_obj_stats;
 
 void Hd3d_RoomBuildBegin(int room) {
   g_room_building = true;
@@ -1284,6 +1294,43 @@ void Hd3d_ObjEnd(int code, int x, int y) {
       g_tile_obj[1][i] = (uint16)(idx + 1), tiles++;
   }
   o->tiles = (uint16)tiles;
+  if (g_seeding && g_obj_stats && (unsigned)code < kNumObjCodes) {
+    ObjStat *st = &g_obj_stats[(code & 0xf00) == kHd3d_ObjDoor ? kHd3d_ObjDoor : code];
+    st->uses++;
+    for (int i = 0; i < 64 * 64; i++) {
+      for (int l = 0; l < 2; l++) {
+        uint16 t = (l ? dung_bg1 : dung_bg2)[i];
+        if (t == g_snap[l][i])
+          continue;
+        uint8 a = attributes_for_tile[t & 0x3ff];
+        st->tiles++;
+        st->solid += a != 0x00 && a != 0x08 && a != 0x09 && !(a >= 0x1c && a <= 0x2b) && a < 0x60;
+      }
+    }
+  }
+}
+
+static void WriteObjectSeed(void) {
+  FILE *f = fopen("hd3d_objects_seed.txt", "w");
+  if (!f)
+    return;
+  fprintf(f, "# Every room object id used by the game: its class in the 3D view (ObjectClass in\n"
+             "# hd_3d.c), uses, tiles drawn, and how many of those are solid for the game.\n"
+             "# CHECK = flat class but mostly solid tiles (it probably should stand), or a\n"
+             "# standing class with no solid tile at all (it probably should be flat).\n");
+  for (int code = 0; code < kNumObjCodes; code++) {
+    const ObjStat *st = &g_obj_stats[code];
+    if (!st->uses)
+      continue;
+    int cls = ObjectClass(code), pct = st->tiles ? (int)(st->solid * 100 / st->tiles) : 0;
+    const char *kind = (code & 0xf00) == kHd3d_ObjSubtype1 ? "T1" : (code & 0xf00) == kHd3d_ObjSubtype2 ? "T2" :
+                       (code & 0xf00) == kHd3d_ObjSubtype3 ? "T3" : (code & 0xf00) == kHd3d_ObjDoor ? "door" :
+                       code == kHd3d_ObjPushBlock ? "pushblock" : "torch";
+    bool check = (cls == kCls_Floor && pct >= 50) || (cls != kCls_Floor && cls != kCls_Ceiling && pct == 0);
+    fprintf(f, "%-9s 0x%02x %-9s uses %4u tiles %6u solid %3d%%%s\n", kind, code & 0xff, kClsName[cls], st->uses, st->tiles,
+            pct, check ? "  CHECK" : "");
+  }
+  fclose(f);
 }
 
 static void VoteRoomTiles(void) {
@@ -1382,6 +1429,7 @@ static void SeedTileClasses(void) {
   RoomObj *objs = malloc(sizeof(g_room_objs));
   uint16 *tile_obj = malloc(sizeof(g_tile_obj));
   g_votes = calloc(kNumTileNums, sizeof(*g_votes));
+  g_obj_stats = calloc(kNumObjCodes, sizeof(*g_obj_stats));
   if (!ram || !objs || !tile_obj || !g_votes) {
     free(ram), free(objs), free(tile_obj), free(g_votes), g_votes = NULL;
     return;
@@ -1420,6 +1468,8 @@ static void SeedTileClasses(void) {
     unsure += top * 5 < total * 4;
   }
   WriteTileSeed();
+  if (g_obj_stats)
+    WriteObjectSeed(), free(g_obj_stats), g_obj_stats = NULL;
   free(ram), free(objs), free(tile_obj);   // the votes stay, for the room dump
   double ms = (SDL_GetPerformanceCounter() - t0) * 1000.0 / SDL_GetPerformanceFrequency();
   Hd3d_Log("tile classes seeded from %d rooms in %.0f ms: %d tile numbers, %d unsure (hd3d_tiles_seed.txt)",
@@ -2354,6 +2404,7 @@ static void BuildHeightMap(void) {
         g_hbot[i] = (uint8)(g_level_h - 8);
     }
   }
+  g_holes_room = holes;
   g_hmax = 0;
   for (int i = 0; i < 64 * 64; i++) {
     int f = floor_h[i];
@@ -2560,6 +2611,26 @@ static void BuildForestShapes(const uint8 *mass_h) {
             g_fin[(cy * 8 + y) * 1024 + cx * 8 + x] = 1;
     }
   }
+  // Walkable cells that stand nearly whole (the dark strip painted at a
+  // hedge's foot, the dark fill of a doorway in a tree): Link walks there, so
+  // they are flat. They stood as low blocks he sank into, and bits of the
+  // strip came out as crown: the thin pillars and floating pieces
+  int flattened = 0;
+  for (int cy = 0; cy < kGridMax; cy++) {
+    for (int cx = 0; cx < kGridMax; cx++) {
+      if (g_ow_cls[cy * kGridMax + cx] != kOw_Floor)
+        continue;
+      int standing = 0;
+      for (int y = 0; y < 8; y++)
+        for (int x = 0; x < 8; x++)
+          standing += g_fin[(cy * 8 + y) * 1024 + cx * 8 + x] != 0;
+      if (standing < 48)
+        continue;
+      flattened++;
+      for (int y = 0; y < 8; y++)
+        memset(&g_fin[(cy * 8 + y) * 1024 + cx * 8], 0, 8);
+    }
+  }
   // the regions inside the outlines
   memset(g_fcrown, 0, sizeof(g_fcrown));
   memset(mask, 0, sizeof(mask));
@@ -2569,12 +2640,15 @@ static void BuildForestShapes(const uint8 *mass_h) {
     if (g_fin[i0] != 1 || mask[i0])
       continue;
     int n = 0, leaf = 0, walk = 0;
-    bool beside = false;
+    bool beside = false, against = false;
     mask[i0] = 1, g_fqueue[qn++] = i0;
     while (qn) {
       uint32 i = g_fqueue[--qn];
       int x = i & 1023, y = i >> 10;
       n++, leaf += ForestLeafCell(x, y), walk += g_ow_cls[(y >> 3) * kGridMax + (x >> 3)] == kOw_Floor;
+      // a side lobe lies against its crown: within 3 pixels of a priority cell
+      against = against || (x >= 3 && ForestLeafCell(x - 3, y)) || (x <= 1020 && ForestLeafCell(x + 3, y)) ||
+                (y >= 3 && ForestLeafCell(x, y - 3)) || (y <= 1020 && ForestLeafCell(x, y + 3));
       for (int k = -6; k <= 6 && !beside; k++) {
         int bx = (x >> 3) + k;
         beside = bx >= 0 && bx < kGridMax && g_ow_cls[(y >> 3) * kGridMax + bx] == kOw_Canopy;
@@ -2588,7 +2662,7 @@ static void BuildForestShapes(const uint8 *mass_h) {
           mask[m] = 1, g_fqueue[qn++] = m;
       }
     }
-    if (!(n < kForestHedgeRegion && (leaf || (beside && walk * 2 >= n))) && !(leaf * 2 >= n))
+    if (!(n < kForestHedgeRegion && (leaf || (beside && against && walk * 2 >= n))) && !(leaf * 2 >= n))
       continue;
     // again, to mark it (the queue holds no list of the region)
     crowns += n;
@@ -2606,8 +2680,16 @@ static void BuildForestShapes(const uint8 *mass_h) {
       }
     }
   }
+  // Solid priority cells are always crown (or a log's wall): a big crown's
+  // region runs into the hedge around it through gaps in the outlines, and the
+  // whole crown came out hedge height with only its rim cells raised
+  for (int i = 0; i < 1024 * 1024; i++)
+    if (g_fin[i] == 1 && !g_fcrown[i] && g_ow_cls[(i >> 13) * kGridMax + ((i & 1023) >> 3)] == kOw_Canopy)
+      g_fcrown[i] = 1, crowns++;
   // outlines go with the crown they touch; a crown's inner outlines stay
-  // marked 2, so the distance dips there (its clumps of leaves)
+  // marked 2, so the distance dips there (its clumps of leaves). The dark
+  // fills inside a crown are the outline color too: in a priority cell they
+  // are the crown's, not a hole with an overhang around it
   for (int y = 0; y < 1024; y++) {
     for (int x = 0; x < 1024; x++) {
       int i = y * 1024 + x;
@@ -2619,7 +2701,7 @@ static void BuildForestShapes(const uint8 *mass_h) {
         int nx = x + kDx[dir], ny = y + kDy[dir];
         touches = nx >= 0 && nx <= 1023 && ny >= 0 && ny <= 1023 && g_fcrown[ny * 1024 + nx] == 1;
       }
-      mask[i] = touches ? 2 : 0;
+      mask[i] = touches || ForestLeafCell(x, y) ? 2 : 0;
     }
   }
   ForestDistance(crown_dist, mask);
@@ -2695,8 +2777,9 @@ static void BuildForestShapes(const uint8 *mass_h) {
       }
     }
   }
-  Hd3d_Log("forest shapes built: area 0x%02x, %d raised cells, tallest %d, %d clean floor cells, %d fill cells, standing pixels %d, crowns %d",
-           (uint8)overworld_area_index, g_ow_cells, g_hmax, seeds, sealed, kept, crowns);
+  Hd3d_Log("forest shapes built: area 0x%02x, %d raised cells, tallest %d, %d clean floor cells, %d fill cells, standing pixels %d, crowns %d, "
+           "%d walkable cells flattened",
+           (uint8)overworld_area_index, g_ow_cells, g_hmax, seeds, sealed, kept, crowns, flattened);
 }
 
 static bool ForestHeightsOn(void) {
@@ -2750,7 +2833,7 @@ static void ForestDump(void) {
 
 static void BuildForestHeights(void) {
   g_gmask = kGridMax - 1, g_gshift = 7, g_grid_out = true;
-  g_raised = false;
+  g_raised = false, g_holes_room = false;
   g_gx0 = overworld_offset_base_x, g_gy0 = overworld_offset_base_y >> 3;
   // the tiles change when a bush is lifted or a tree burns
   uint32 hash = 2166136261u ^ g_gx0 ^ (uint32)g_gy0 << 8 ^ (uint32)overworld_area_index << 16;
@@ -3330,7 +3413,28 @@ static float FloorUnder(float u, float v, bool lower) {
     return 0.0f;
   int wx = g_org_x + (int)floorf(u), wy = g_org_y + (int)floorf(v);
   int c = GridCell(wx >> 3, wy >> 3);
-  return g_hbot[c] && lower ? 0.0f : g_hfloor[c];
+  // on the lower level: under a bridge's deck, and under any of the upper
+  // floor of a two-layer room (the 2D game hides him under BG2 there; he
+  // stood on top of it, floating above the floor he walks on)
+  if (lower && (g_hbot[c] || (g_holes_room && !g_lower[c & (64 * 64 - 1)])))
+    return 0.0f;
+  return g_hfloor[c];
+}
+
+// The follower (Zelda, the old man, the chest...): its OAM entries, position
+// and level, told by Tagalong_Draw each game frame. Its pieces have no owner,
+// so it stood on its drawing's bottom, always on the upper level, and was
+// taken for a held-up item (put on Link's feet) when above his head
+enum { kKey_Follower = 17 };
+static int g_fol_first, g_fol_n, g_fol_x, g_fol_y;
+static bool g_fol_lower, g_fol_live;
+
+void Hd3d_Follower(int oam_first, int n, int x, int y, bool lower) {
+  g_fol_first = oam_first, g_fol_n = n, g_fol_x = x, g_fol_y = y, g_fol_lower = lower, g_fol_live = true;
+}
+
+static inline bool IsFollowerOam(int i) {
+  return g_fol_live && i >= g_fol_first && i < g_fol_first + g_fol_n;
 }
 
 // whether a sprite group is on the lower level: Link by his layer, enemies
@@ -3339,7 +3443,10 @@ static bool GroupLower(int key) {
   if (key == 0) return link_is_on_lower_level != 0;
   if (key >= 1 && key <= 16) return sprite_floor[key - 1] != 0;
   if (key >= 160 && key < 176) return sprite_floor[key - 160] != 0;
-  return false;
+  if (key == kKey_Follower) return g_fol_lower;
+  // loose pieces (his sword beam, bombs, arrows, the boomerang, items): the
+  // game does not say whose they are; nearly all are Link's, so his level
+  return link_is_on_lower_level != 0;
 }
 
 typedef struct Group {
@@ -3383,10 +3490,10 @@ static void OamGroups(const bool *vis, const int *fx, const int *fy, const int *
   for (int i = 0; i < 128; i++)
     parent[i] = i;
   for (int i = 0; i < 128; i++) {
-    if (!vis[i] || g_link_oam_mask[i] || g_sprite_oam_owner[i] < 16)
+    if (!vis[i] || g_link_oam_mask[i] || g_sprite_oam_owner[i] < 16 || IsFollowerOam(i))
       continue;
     for (int j = i + 1; j < 128; j++) {
-      if (!vis[j] || g_link_oam_mask[j] || g_sprite_oam_owner[j] < 16)
+      if (!vis[j] || g_link_oam_mask[j] || g_sprite_oam_owner[j] < 16 || IsFollowerOam(j))
         continue;
       // rectangles overlap or touch (1 pixel gap allowed)
       if (fx[i] <= fx[j] + sz[j] && fx[j] <= fx[i] + sz[i] &&
@@ -3402,6 +3509,8 @@ static void OamGroups(const bool *vis, const int *fx, const int *fy, const int *
       g_key_of[i] = 0;                               // Link (body, shield, sword, shadow)
     else if (g_sprite_oam_owner[i] < 16)
       g_key_of[i] = 1 + g_sprite_oam_owner[i];       // an enemy / NPC slot
+    else if (IsFollowerOam(i))
+      g_key_of[i] = kKey_Follower;
     else
       g_key_of[i] = 32 + UfFind(parent, i);          // touching unowned pieces
   }
@@ -3425,6 +3534,9 @@ static void GroupAnchor(Group *g, Ppu *ppu) {
   int lift = 0;
   if (key == 0) {
     wx = link_x_coord + 8, wy = link_y_coord + 24;
+  } else if (key == kKey_Follower) {
+    // placed like Link (its positions are his, a few steps back)
+    wx = g_fol_x + 8, wy = g_fol_y + 24;
   } else if (key >= 32 && key < 160) {
     // loose pieces (the item from a chest, held up): on Link while he
     // receives an item or carries something, when above his head
@@ -3990,6 +4102,7 @@ void Hd3d_EndFrame(uint8 *pixels, int pitch, int width, int height) {
   }
   g_depth_valid = walls;
   int groups = DrawSprites(out, pitch_px, &cm, g_zenv.ppu);
+  g_fol_live = false;   // until Tagalong_Draw draws it again
   // the HD light and forest fog ran on the 2D frame: the ground past it and
   // the sprites (drawn from the side buffer) get them now, at the 2D point
   // they show

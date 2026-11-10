@@ -1,3 +1,4 @@
+#include "hd_3d.h"
 #include "tagalong.h"
 #include "sprite_main.h"
 #include "sprite.h"
@@ -642,6 +643,7 @@ void Follower_AnimateMovement_preserved(uint8 ain, uint16 xin, uint16 yin) {  //
   oam_cur_ptr = 0x800 + spr_offs * 4;
 
   OamEnt *oam = GetOamCurPtr();
+  OamEnt *oam_first = oam;
   uint16 scrolly = yin - BG2VOFS_copy2;
   uint16 scrollx = xin - BG2HOFS_copy2;
 
@@ -689,6 +691,9 @@ skip_first_sprites:
                   ((sprf->flags & 0xf) << 4) | pal << 1 | (oam_priority_value >> 8), 2);
     BYTE(dma_var7) = sprf->dma7;
   }
+  // 3D view: which entries are the follower, where it stands and on which level
+  Hd3d_Follower((int)(oam_first - (OamEnt *)&g_ram[0x800]), (int)(oam - oam_first) + 1, xin, yin,
+                ((oam_priority_value >> 8) & 0x30) == 0x10);
 }
 
 bool Follower_CheckForTrigger(const TagalongMessageInfo *info) {  // 89ac26
